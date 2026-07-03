@@ -1,0 +1,202 @@
+# =============================================================================
+# Domain: Selling
+# Entity: SalesOrder + SalesOrderItem
+# Description: Confirmed customer demand. Created directly or converted from an
+# accepted Quotation. Owns intent only — it does NOT post to the GL (delivery
+# posts COGS in inventory; the sales invoice posts revenue). quotation_id is an
+# intra-module link; customer/item/company/branch are logical FKs.
+# =============================================================================
+
+models:
+  - name: SalesOrder
+    collection: sales_orders
+    description: "Confirmed customer demand (intent; no GL post)"
+
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique sales-order identifier"
+
+      order_number:
+        type: string
+        attributes: ["@required", "@max(40)"]
+        description: "Human reference (e.g. SO-2026-00042)"
+
+      quotation_id:
+        type: uuid?
+        attributes: ["@foreign_key(Quotation.id)"]
+        description: "Source quotation (intra-module link; null for direct orders)"
+
+      company_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Books owner # logical FK to organization.Company.id"
+
+      branch_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Issuing branch # logical FK to organization.Branch.id"
+
+      customer_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Customer # logical FK to party.Party.id"
+
+      status:
+        type: SalesOrderStatus
+        attributes: ["@default(draft)"]
+        description: "Lifecycle status"
+
+      order_date:
+        type: date
+        attributes: ["@required"]
+        description: "Date the order is placed"
+
+      delivery_date:
+        type: date?
+        description: "Requested/expected delivery date"
+
+      currency:
+        type: string
+        attributes: ["@default(\"IDR\")", "@max(3)"]
+        description: "ISO currency code"
+
+      subtotal:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Sum of line amounts before tax"
+
+      tax_rate:
+        type: decimal
+        attributes: ["@default(0)", "@precision(9,4)", "@non_negative"]
+        description: "Supplied PPN rate % (see ADR-002; real tax from backbone-tax)"
+
+      tax_amount:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Tax on subtotal"
+
+      total:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Grand total (subtotal + tax_amount)"
+
+      notes:
+        type: string?
+        attributes: ["@max(1000)"]
+        description: "Free-text terms/notes"
+
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata (created_at, updated_at, deleted_at, created_by, updated_by, deleted_by)"
+
+    relations:
+      items:
+        type: SalesOrderItem[]
+        attributes: ["@one_to_many"]
+        description: "Line items"
+        inverse: order
+
+    indexes:
+      - type: unique
+        fields: [order_number]
+        where: "deleted_at IS NULL"
+      - type: index
+        fields: [company_id, customer_id, status]
+      - type: index
+        fields: [order_date]
+
+  - name: SalesOrderItem
+    collection: sales_order_items
+    description: "One line of a sales order"
+
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique line identifier"
+
+      order_id:
+        type: uuid
+        attributes: ["@required", "@foreign_key(SalesOrder.id)"]
+        description: "Owning sales order"
+
+      item_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Catalog item # logical FK to catalog.Item.id"
+
+      description:
+        type: string?
+        attributes: ["@max(300)"]
+        description: "Line description snapshot"
+
+      quantity:
+        type: decimal
+        attributes: ["@required", "@precision(18,4)", "@non_negative"]
+        description: "Quantity ordered"
+
+      unit_price:
+        type: decimal
+        attributes: ["@required", "@precision(18,2)", "@non_negative"]
+        description: "Price per unit"
+
+      line_discount:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Absolute discount on the line"
+
+      line_amount:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "quantity * unit_price - line_discount (computed by write path)"
+
+      billed_qty:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,4)", "@non_negative"]
+        description: "Cumulative quantity invoiced against this line (advanced when a sales invoice posts)"
+
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata"
+
+    relations:
+      order:
+        type: SalesOrder
+        attributes: ["@one", "@foreign_key(order_id)"]
+        description: "Owning sales order"
+        inverse: items
+
+    indexes:
+      - type: index
+        fields: [order_id]
+
+# =============================================================================
+# Enums
+# =============================================================================
+
+enums:
+  # The brief's 7-state model (ADR-003). Billing transitions (to_bill → completed) are ACTIVE now;
+  # delivery transitions (to_deliver / to_deliver_and_bill) are reserved for when backbone-inventory
+  # lands (Delivery Note advances delivered_qty). draft/cancelled/closed are lifecycle bookends.
+  - name: SalesOrderStatus
+    description: "Sales-order lifecycle (delivery + billing watermarks encoded as states)"
+    variants:
+      - name: draft
+        description: "Being prepared"
+        default: true
+      - name: to_deliver
+        description: "Confirmed; awaiting delivery only (fully billed) — inventory-gated"
+      - name: to_bill
+        description: "Confirmed; awaiting billing only (no delivery tracking yet, or fully delivered)"
+      - name: to_deliver_and_bill
+        description: "Confirmed; awaiting both delivery and billing — inventory-gated"
+      - name: completed
+        description: "Fully delivered and fully billed"
+      - name: closed
+        description: "Manually closed (no further delivery/billing expected)"
+      - name: cancelled
+        description: "Voided"

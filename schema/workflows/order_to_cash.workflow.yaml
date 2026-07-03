@@ -1,0 +1,72 @@
+# Order-to-Cash saga (selling) — the Quote→Order→Invoice→Post pipeline.
+# Implemented by SellingWriteService (hand-authored) and proven by tests/order_to_cash.rs (OTC-1).
+# Each write step runs in one DB transaction; the GL post is idempotent + reconciled from the ack.
+
+name: OrderToCash
+description: |
+  A customer accepts a quotation; it converts to a sales order; the order is confirmed and billed;
+  the invoice's revenue posts to the GL and the order's billed watermarks advance to completion.
+
+version: 2
+
+trigger:
+  event: QuotationAccepted
+  extract:
+    quotation_id: "event.quotation_id"
+
+config:
+  timeout: 30s
+  persistence: true
+
+context:
+  quotation_id: null
+  order_id: null
+  invoice_id: null
+
+steps:
+  - name: convert_to_order
+    type: action
+    action: convert_quotation_to_order
+    entity: SalesOrder
+    on_success:
+      set: { order_id: "{{ result.id }}" }
+      next: confirm_order
+    on_failure: { next: rejected }
+
+  - name: confirm_order
+    type: action
+    action: confirm_sales_order          # -> to_bill, emits SalesOrderConfirmed
+    on_success: { next: raise_invoice }
+    on_failure: { next: rejected }
+
+  - name: raise_invoice
+    type: action
+    action: create_invoice_from_order    # copies lines, links sales_order_item_id
+    entity: SalesInvoice
+    on_success:
+      set: { invoice_id: "{{ result.id }}" }
+      next: post_revenue
+    on_failure: { next: rejected }
+
+  - name: post_revenue
+    type: action
+    action: post_sales_invoice           # emit AccountingPost -> reconcile -> advance billed_qty
+    idempotent: true
+    on_success: { next: done }
+    on_failure: { next: post_failed }    # invoice posting_state=failed, GL stable code surfaced
+
+  # Terminals
+  - name: done
+    type: terminal
+    status: completed
+    reason: "SalesInvoicePosted; order completed when fully billed"
+
+  - name: post_failed
+    type: terminal
+    status: failed
+    reason: "GL rejected the post (e.g. non_postable_account); invoice left failed, no journal"
+
+  - name: rejected
+    type: terminal
+    status: failed
+    reason: "validation failed (empty/negative/missing-account/duplicate/not-accepted)"

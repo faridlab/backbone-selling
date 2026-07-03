@@ -1,0 +1,255 @@
+# =============================================================================
+# Domain: Selling
+# Entity: SalesInvoice + SalesInvoiceItem
+# Description: The billable document that RECOGNISES REVENUE. On submit, the
+# validated write path emits a balanced revenue AccountingPost into
+# backbone-accounting via the GL-posting contract (Dr A/R · Cr Revenue · Cr PPN
+# Output) — as a serialized envelope mapped through an ACL, never a Cargo edge.
+#   posting_state/journal_id/accounting_post_id are reconciled from the
+#   AccountingPostPosted event (eventually consistent).
+# Account references (receivable/revenue/tax-output) are LOGICAL FKs to
+# accounting.Account — resolved at the producer, no DB constraint into accounting.
+# =============================================================================
+
+models:
+  - name: SalesInvoice
+    collection: sales_invoices
+    description: "Revenue-recognising billable document; emits a revenue AccountingPost on submit"
+
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique invoice identifier"
+
+      invoice_number:
+        type: string
+        attributes: ["@required", "@max(40)"]
+        description: "Human reference (e.g. INV-2026-00042); the post's source_reference"
+
+      sales_order_id:
+        type: uuid?
+        attributes: ["@foreign_key(SalesOrder.id)"]
+        description: "Source sales order (intra-module link; null for direct invoices)"
+
+      company_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Books owner # logical FK to organization.Company.id"
+
+      branch_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Issuing branch # logical FK to organization.Branch.id"
+
+      customer_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Customer # logical FK to party.Party.id (the A/R subledger party)"
+
+      status:
+        type: SalesInvoiceStatus
+        attributes: ["@default(draft)"]
+        description: "Document lifecycle status"
+
+      invoice_date:
+        type: date
+        attributes: ["@required"]
+        description: "Invoice / posting date"
+
+      due_date:
+        type: date?
+        description: "Payment due date"
+
+      currency:
+        type: string
+        attributes: ["@default(\"IDR\")", "@max(3)"]
+        description: "ISO currency code"
+
+      subtotal:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Sum of line amounts before tax (the revenue credit)"
+
+      tax_rate:
+        type: decimal
+        attributes: ["@default(0)", "@precision(9,4)", "@non_negative"]
+        description: "Supplied PPN rate % (see ADR-002; real tax from backbone-tax)"
+
+      tax_amount:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Tax on subtotal (the PPN Output credit)"
+
+      total:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Grand total (the A/R debit) = subtotal + tax_amount"
+
+      outstanding_amount:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Unpaid balance (starts = total on post; reduced by payments)"
+
+      # ---- GL-posting account refs (logical FKs to accounting.Account) ----
+      receivable_account_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "A/R control account (debit_to) # logical FK to accounting.Account.id"
+
+      tax_output_account_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "PPN Output account # logical FK to accounting.Account.id (required iff tax_amount>0)"
+
+      # ---- GL reconciliation state (set from AccountingPostPosted event) ----
+      posting_state:
+        type: GlPostingState
+        attributes: ["@default(pending)"]
+        description: "GL reconciliation state (pending until the post is confirmed)"
+
+      journal_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Resulting journal # logical FK to accounting.Journal.id (set when posted)"
+
+      accounting_post_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "The AccountingPost record # logical FK to accounting.AccountingPost.id"
+
+      posted_at:
+        type: datetime?
+        description: "When the GL post was confirmed"
+
+      notes:
+        type: string?
+        attributes: ["@max(1000)"]
+        description: "Free-text terms/notes"
+
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata (created_at, updated_at, deleted_at, created_by, updated_by, deleted_by)"
+
+    relations:
+      items:
+        type: SalesInvoiceItem[]
+        attributes: ["@one_to_many"]
+        description: "Line items"
+        inverse: invoice
+
+    indexes:
+      - type: unique
+        fields: [invoice_number]
+        where: "deleted_at IS NULL"
+      - type: index
+        fields: [company_id, customer_id, status]
+      - type: index
+        fields: [posting_state]
+      - type: index
+        fields: [invoice_date]
+
+  - name: SalesInvoiceItem
+    collection: sales_invoice_items
+    description: "One revenue line of a sales invoice"
+
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique line identifier"
+
+      invoice_id:
+        type: uuid
+        attributes: ["@required", "@foreign_key(SalesInvoice.id)"]
+        description: "Owning invoice"
+
+      item_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Catalog item # logical FK to catalog.Item.id"
+
+      sales_order_item_id:
+        type: uuid?
+        attributes: ["@foreign_key(SalesOrderItem.id)"]
+        description: "Source SO line (intra-module link; set when invoiced from an order) — advances its billed_qty"
+
+      revenue_account_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Income account for this line # logical FK to accounting.Account.id"
+
+      description:
+        type: string?
+        attributes: ["@max(300)"]
+        description: "Line description snapshot"
+
+      quantity:
+        type: decimal
+        attributes: ["@required", "@precision(18,4)", "@non_negative"]
+        description: "Quantity billed"
+
+      unit_price:
+        type: decimal
+        attributes: ["@required", "@precision(18,2)", "@non_negative"]
+        description: "Price per unit"
+
+      line_discount:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "Absolute discount on the line"
+
+      line_amount:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
+        description: "quantity * unit_price - line_discount (computed by write path)"
+
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata"
+
+    relations:
+      invoice:
+        type: SalesInvoice
+        attributes: ["@one", "@foreign_key(invoice_id)"]
+        description: "Owning invoice"
+        inverse: items
+
+    indexes:
+      - type: index
+        fields: [invoice_id]
+      - type: index
+        fields: [revenue_account_id]
+
+# =============================================================================
+# Enums
+# =============================================================================
+
+enums:
+  - name: SalesInvoiceStatus
+    description: "Sales-invoice document lifecycle"
+    variants:
+      - name: draft
+        description: "Being prepared; not yet posted"
+        default: true
+      - name: submitted
+        description: "Submitted; revenue posted to the GL"
+      - name: partially_paid
+        description: "Some payment received"
+      - name: paid
+        description: "Fully settled"
+      - name: cancelled
+        description: "Voided (reversed in the GL)"
+
+  - name: GlPostingState
+    description: "GL-posting reconciliation state for the revenue post"
+    variants:
+      - name: pending
+        description: "Not yet posted to the GL"
+        default: true
+      - name: posted
+        description: "Confirmed posted (AccountingPostPosted received)"
+      - name: failed
+        description: "Rejected by accounting (AccountingPostFailed received)"

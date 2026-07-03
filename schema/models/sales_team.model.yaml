@@ -1,0 +1,91 @@
+# =============================================================================
+# Domain: Selling
+# Entity: SalesTeam + SalesPersonAllocation
+# Description: Commission attribution. A SalesTeam is a named grouping; a
+# SalesPersonAllocation splits credit for a Sales Order across sales people by
+# percentage. sales_person_id is a logical FK to sapiens.User; order_id is an
+# intra-module FK. (Brief "Keep": SalesTeam / SalesPersonAllocation.)
+# =============================================================================
+
+models:
+  - name: SalesTeam
+    collection: sales_teams
+    description: "A named grouping of sales people for attribution/reporting"
+
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique sales-team identifier"
+
+      company_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Owning company # logical FK to organization.Company.id"
+
+      name:
+        type: string
+        attributes: ["@required", "@max(120)"]
+        description: "Team name"
+
+      description:
+        type: string?
+        attributes: ["@max(300)"]
+        description: "Optional description"
+
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata"
+
+    indexes:
+      - type: unique
+        fields: [company_id, name]
+        where: "deleted_at IS NULL"
+
+  - name: SalesPersonAllocation
+    collection: sales_person_allocations
+    description: "Commission split: a sales person's percentage credit for a sales order"
+
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique allocation identifier"
+
+      order_id:
+        type: uuid
+        attributes: ["@required", "@foreign_key(SalesOrder.id)"]
+        description: "Owning sales order"
+
+      sales_person_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Sales person # logical FK to sapiens.User.id"
+
+      sales_team_id:
+        type: uuid?
+        attributes: ["@foreign_key(SalesTeam.id)"]
+        description: "Team this allocation belongs to (optional)"
+
+      allocated_pct:
+        type: decimal
+        attributes: ["@required", "@precision(5,2)", "@non_negative"]
+        description: "Percentage of the order credited to this sales person (Σ per order must be <= 100)"
+
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata"
+
+    relations:
+      order:
+        type: SalesOrder
+        attributes: ["@one", "@foreign_key(order_id)"]
+        description: "Owning sales order"
+
+    indexes:
+      - type: index
+        fields: [order_id]
+      - type: index
+        fields: [sales_person_id]

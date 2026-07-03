@@ -1,0 +1,102 @@
+# =============================================================================
+# selling Hooks — lifecycle + write-path rules (declarative spec of behavior that
+# lives in src/application/service/selling_write_service.rs and is proven in tests/).
+# =============================================================================
+
+module: selling
+version: 2
+
+# -----------------------------------------------------------------------------
+# State machines
+# -----------------------------------------------------------------------------
+state_machines:
+  - entity: Quotation
+    field: status
+    initial: draft
+    states: [draft, sent, accepted, ordered, rejected, expired, cancelled]
+    transitions:
+      - { from: draft,    to: sent,      on: send }
+      - { from: draft,    to: accepted,  on: accept }
+      - { from: sent,     to: accepted,  on: accept }
+      - { from: accepted, to: ordered,   on: convert_to_order }
+      - { from: draft,    to: cancelled, on: cancel }
+
+  # ADR-003: billing band active now; delivery band (to_deliver*) inventory-gated.
+  - entity: SalesOrder
+    field: status
+    initial: draft
+    states: [draft, to_deliver, to_bill, to_deliver_and_bill, completed, closed, cancelled]
+    transitions:
+      - { from: draft,   to: to_bill,   on: confirm }
+      - { from: to_bill, to: completed, on: fully_billed }
+      - { from: to_bill, to: closed,    on: close }
+      - { from: draft,   to: cancelled, on: cancel }
+
+  - entity: SalesInvoice
+    field: status
+    initial: draft
+    states: [draft, submitted, partially_paid, paid, cancelled]
+    transitions:
+      - { from: draft, to: submitted, on: post }
+
+# -----------------------------------------------------------------------------
+# Write-path rules — each maps to a stable error_code + a golden/probe case.
+# -----------------------------------------------------------------------------
+rules:
+  - id: R1
+    name: non_empty_document
+    when: create
+    assert: "count(lines) >= 1"
+    error_code: empty_document
+  - id: R2
+    name: non_negative_line
+    when: create
+    assert: "line.qty >= 0 AND line.price >= 0 AND line.discount >= 0 AND line.net >= 0"
+    error_code: negative_quantity
+  - id: R3
+    name: revenue_account_present
+    when: create
+    assert: "every invoice line has revenue_account_id"
+    error_code: missing_revenue_account
+  - id: R4
+    name: tax_account_present
+    when: create
+    assert: "tax_amount > 0 => tax_output_account_id present"
+    error_code: tax_account_missing
+  - id: R5
+    name: unique_document_number
+    when: create
+    assert: "document number is unique"
+    error_code: duplicate_number
+  - id: R6
+    name: idr_only_post
+    when: posting
+    assert: "invoice.currency == 'IDR'"
+    error_code: unsupported_currency
+  - id: R7
+    name: balanced_post
+    when: posting
+    assert: "sum(lines.debit) == sum(lines.credit) == total"
+    error_code: unbalanced_post
+  - id: R8
+    name: accepted_to_convert
+    when: convert
+    assert: "quotation.status == 'accepted'"
+    error_code: quotation_not_accepted
+
+# -----------------------------------------------------------------------------
+# Domain events (emitted by SellingWriteService via SellingEventSink).
+# -----------------------------------------------------------------------------
+events:
+  QuotationAccepted:
+    when: "a quotation is accepted"
+    payload: [quotation_id, company_id, customer_id]
+  SalesOrderConfirmed:
+    when: "a sales order is confirmed"
+    payload: [order_id, company_id, customer_id, grand_total, currency]
+  SalesInvoiceIssued:
+    when: "a sales invoice is created"
+    payload: [invoice_id, sales_order_id, company_id, customer_id, total]
+  SalesInvoicePosted:
+    when: "a sales invoice's revenue is posted to the GL"
+    payload: [invoice_id, company_id, journal_id, post_id, total]
