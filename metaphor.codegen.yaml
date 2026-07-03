@@ -1,0 +1,39 @@
+# Codegen policy for selling.
+#
+# `user_owned` globs are hand-written files that live inside generator-owned trees but are
+# NOT schema-derived. `metaphor schema generate [--force]` skips them wholesale (never reads,
+# merges, or deletes them). Everything else in src/ is regenerated from schema/models.
+#
+# Re-exports/declarations that must sit alongside generated code live inside
+# `// <<< CUSTOM ... // END CUSTOM` markers (service/mod.rs, presentation/http/mod.rs, lib.rs)
+# and are preserved by the marker mechanism, not listed here.
+#
+# Add your hand-authored services, handlers, tests, and docs below as you write them.
+
+user_owned:
+  # Domain events (public extension surface) + outbound GL-posting port + validated write path
+  # + the reference consumer extension (extension-contract §5).
+  - "src/application/service/selling_events.rs"
+  - "src/application/service/selling_gl.rs"
+  - "src/application/service/selling_write_service.rs"
+  - "src/application/service/consumer_credit_rule_custom.rs"
+  - "src/presentation/http/guarded_routes.rs"
+
+  # Behavior tests (the golden oracle) + route probes + seam + extension-contract round-trip + BDD.
+  - "tests/selling_golden_cases.rs"
+  - "tests/gl_posting_seam.rs"
+  - "tests/integrity_probes.rs"
+  - "tests/extension_contract.rs"
+  - "tests/order_to_cash.rs"
+  - "tests/features/**"
+
+  # Per-entity CRUD integration harness. Frozen as user_owned so hand cleanups persist across regen.
+  # Tradeoff: a newly-added entity will NOT auto-generate its integration test here — add it by hand.
+  - "tests/integration_tests.rs"
+  - "tests/integration/**"
+
+  # Hand-authored DB constraint (IDR-only sales invoices) — regen must not remove it.
+  - "migrations/20260426220020_sales_invoice_idr_only_check.*"
+
+  # Hand-authored module documentation.
+  - "docs/**"

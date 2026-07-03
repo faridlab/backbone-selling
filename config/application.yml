@@ -1,0 +1,86 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+  grpc_port: 50051
+database:
+  url: postgresql://root:password@localhost:5432/skeletondb
+  max_connections: 10
+  min_connections: 5
+  connect_timeout: 30
+  idle_timeout: 600
+logging:
+  level: info
+  format: json
+  file: logs/selling.log
+module:
+  name: selling
+  enabled: true
+features:
+  soft_delete: true
+  state_machines: false
+  workflows: true
+entities:
+  quotation:
+    collection: quotations
+    enabled: true
+    cache_ttl: 300
+    pagination:
+      default_limit: 20
+      max_limit: 100
+  quotation_item:
+    collection: quotation_items
+    enabled: true
+    cache_ttl: 300
+    pagination:
+      default_limit: 20
+      max_limit: 100
+  sales_invoice:
+    collection: sales_invoices
+    enabled: true
+    cache_ttl: 300
+    pagination:
+      default_limit: 20
+      max_limit: 100
+  sales_invoice_item:
+    collection: sales_invoice_items
+    enabled: true
+    cache_ttl: 300
+    pagination:
+      default_limit: 20
+      max_limit: 100
+  sales_order:
+    collection: sales_orders
+    enabled: true
+    cache_ttl: 300
+    pagination:
+      default_limit: 20
+      max_limit: 100
+  sales_order_item:
+    collection: sales_order_items
+    enabled: true
+    cache_ttl: 300
+    pagination:
+      default_limit: 20
+      max_limit: 100
+  sales_team:
+    collection: sales_teams
+    enabled: true
+    cache_ttl: 300
+    pagination:
+      default_limit: 20
+      max_limit: 100
+  sales_person_allocation:
+    collection: sales_person_allocations
+    enabled: true
+    cache_ttl: 300
+    pagination:
+      default_limit: 20
+      max_limit: 100
+tracing:
+  enabled: true
+  exporter: otlp
+  endpoint: http://localhost:4317
+metrics:
+  enabled: true
+  endpoint: /metrics
+  port: 9090
