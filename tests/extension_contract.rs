@@ -76,5 +76,5 @@ async fn selling_works_without_any_consumer() {
     w.confirm_sales_order(order).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order).fetch_one(&pool).await.unwrap();
-    assert_eq!(st, "to_bill");
+    assert_eq!(st, "to_deliver_and_bill");
 }

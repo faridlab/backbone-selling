@@ -50,6 +50,26 @@ pub struct SalesInvoicePosted {
     pub total: Decimal,
 }
 
+/// One line of a delivery request (what selling asks inventory to ship).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeliveryRequestLine {
+    pub item_id: Uuid,
+    pub quantity: Decimal,
+}
+
+/// The cross-module request selling emits when a confirmed order is ready to ship. Serialized (the
+/// wire contract) — a fulfillment/composition layer maps it into inventory's own `DeliveryRequested`
+/// (adding the warehouse + GL accounts inventory owns), so selling stays ignorant of inventory's
+/// internals. Zero shared Rust type, zero Cargo edge.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeliveryRequestEnvelope {
+    pub order_id: Uuid,
+    pub company_id: Uuid,
+    pub customer_id: Uuid,
+    pub currency: String,
+    pub lines: Vec<DeliveryRequestLine>,
+}
+
 /// The selling domain-event union (discriminated) published on the module event bus.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
@@ -58,6 +78,7 @@ pub enum SellingEvent {
     SalesOrderConfirmed(SalesOrderConfirmed),
     SalesInvoiceIssued(SalesInvoiceIssued),
     SalesInvoicePosted(SalesInvoicePosted),
+    DeliveryRequested(DeliveryRequestEnvelope),
 }
 
 /// Exported reference DTO for a sales order — the shape a consumer holds (per the brief), richer

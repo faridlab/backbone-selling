@@ -86,7 +86,8 @@ async fn quote_to_order_to_invoice_to_posted() {
         .bind(inv).fetch_one(&pool).await.unwrap();
     assert_eq!(linked_lines, 1);
 
-    // 6) Post → billed_qty advances to the full ordered qty and the order completes.
+    // 6) Post → billed_qty advances; order is billed but NOT yet delivered → to_deliver (ADR-003;
+    //    the delivery seam advances delivered_qty and reaches completed — proven in delivery_seam.rs).
     w.post_sales_invoice(inv, &StubGlSink).await.unwrap();
     let billed: Decimal = sqlx::query_scalar(
         "SELECT billed_qty FROM selling.sales_order_items WHERE order_id=$1")
@@ -94,7 +95,19 @@ async fn quote_to_order_to_invoice_to_posted() {
     assert_eq!(billed, d("10.0000"), "billed_qty advanced by the invoiced qty");
     let ostatus: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(oid).fetch_one(&pool).await.unwrap();
-    assert_eq!(ostatus, "completed", "fully billed order → completed");
+    assert_eq!(ostatus, "to_deliver", "fully billed but undelivered → to_deliver");
+
+    // Deliver the full qty → order completes (both watermarks satisfied).
+    w.mark_delivered(oid, &[(item_of(&pool, oid).await, d("10"))]).await.unwrap();
+    let ostatus2: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
+        .bind(oid).fetch_one(&pool).await.unwrap();
+    assert_eq!(ostatus2, "completed", "billed + delivered → completed");
+}
+
+// helper: the item_id of an order's (single) line
+async fn item_of(pool: &PgPool, order_id: Uuid) -> Uuid {
+    sqlx::query_scalar("SELECT item_id FROM selling.sales_order_items WHERE order_id=$1 LIMIT 1")
+        .bind(order_id).fetch_one(pool).await.unwrap()
 }
 
 // OTC-2: converting a NON-accepted quotation is rejected (quotation_not_accepted).

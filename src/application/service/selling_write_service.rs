@@ -18,8 +18,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::selling_events::{
-    QuotationAccepted, SalesInvoiceIssued, SalesInvoicePosted, SalesOrderConfirmed, SalesOrderRef,
-    SellingEvent, SellingEventSink, LoggingSink,
+    DeliveryRequestEnvelope, DeliveryRequestLine, QuotationAccepted, SalesInvoiceIssued,
+    SalesInvoicePosted, SalesOrderConfirmed, SalesOrderRef, SellingEvent, SellingEventSink, LoggingSink,
 };
 use super::selling_gl::{AccountingPostEnvelope, GlPostLine, GlPostSink};
 
@@ -298,11 +298,12 @@ impl SellingWriteService {
         Ok(id)
     }
 
-    /// Confirm a draft order → `to_bill` (no delivery tracking until inventory lands; a fully
-    /// delivered-and-billed order later reaches `completed`). Emits `SalesOrderConfirmed`.
+    /// Confirm a draft order → `to_deliver_and_bill` (awaiting both delivery and billing now that
+    /// inventory is live; ADR-003). Reaches `completed` only when fully billed AND fully delivered.
+    /// Emits `SalesOrderConfirmed`.
     pub async fn confirm_sales_order(&self, order_id: Uuid) -> Result<(), SellingError> {
         let row = sqlx::query(
-            r#"UPDATE selling.sales_orders SET status='to_bill'::sales_order_status
+            r#"UPDATE selling.sales_orders SET status='to_deliver_and_bill'::sales_order_status
                WHERE id=$1 AND status='draft'::sales_order_status AND (metadata->>'deleted_at') IS NULL
                RETURNING company_id, customer_id, total, currency"#,
         )
@@ -724,10 +725,8 @@ impl SellingWriteService {
     }
 
     /// For each invoice line linked to a sales-order line, add the invoiced quantity to that SO
-    /// line's `billed_qty`; then, if every line of the order is fully billed, advance the order to
-    /// `completed`. No-op for a direct invoice (no `sales_order_item_id`).
+    /// line's `billed_qty`; then recompute the order status. No-op for a direct invoice.
     async fn advance_billing_watermarks(&self, invoice_id: Uuid) -> Result<(), SellingError> {
-        // Bump billed_qty on the linked SO lines.
         sqlx::query(
             r#"UPDATE selling.sales_order_items soi
                SET billed_qty = soi.billed_qty + ii.qty
@@ -740,26 +739,93 @@ impl SellingWriteService {
         )
         .bind(invoice_id).execute(&self.db_pool).await?;
 
-        // Find the source order (if any) and close it out when fully billed.
         let order_id: Option<Uuid> = sqlx::query_scalar(
             "SELECT sales_order_id FROM selling.sales_invoices WHERE id=$1",
         )
         .bind(invoice_id).fetch_one(&self.db_pool).await?;
         if let Some(oid) = order_id {
-            let fully_billed: bool = sqlx::query_scalar(
-                r#"SELECT bool_and(billed_qty >= quantity) FROM selling.sales_order_items
-                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
-            )
-            .bind(oid).fetch_one(&self.db_pool).await?;
-            if fully_billed {
-                // to_bill → completed (delivery not tracked yet; inventory will gate to_deliver*).
-                sqlx::query(
-                    r#"UPDATE selling.sales_orders SET status='completed'::sales_order_status
-                       WHERE id=$1 AND status='to_bill'::sales_order_status"#,
-                )
-                .bind(oid).execute(&self.db_pool).await?;
-            }
+            self.recompute_order_status(oid).await?;
         }
+        Ok(())
+    }
+
+    /// Recompute an order's status from its two watermarks (ADR-003): `completed` iff every line is
+    /// fully billed AND fully delivered; else `to_deliver` (billed, awaiting delivery) / `to_bill`
+    /// (delivered, awaiting billing) / `to_deliver_and_bill` (awaiting both). Never touches a
+    /// draft/closed/cancelled order.
+    async fn recompute_order_status(&self, order_id: Uuid) -> Result<(), SellingError> {
+        let row = sqlx::query(
+            r#"SELECT bool_and(billed_qty >= quantity) AS billed_all,
+                      bool_and(delivered_qty >= quantity) AS delivered_all
+               FROM selling.sales_order_items
+               WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+        )
+        .bind(order_id).fetch_one(&self.db_pool).await?;
+        let billed_all: Option<bool> = row.get("billed_all");
+        let delivered_all: Option<bool> = row.get("delivered_all");
+        let next = match (billed_all.unwrap_or(false), delivered_all.unwrap_or(false)) {
+            (true, true) => "completed",
+            (true, false) => "to_deliver",
+            (false, true) => "to_bill",
+            (false, false) => "to_deliver_and_bill",
+        };
+        // Only advance an in-flight (confirmed) order; leave draft/closed/cancelled alone.
+        sqlx::query(
+            r#"UPDATE selling.sales_orders SET status=$2::sales_order_status
+               WHERE id=$1 AND status = ANY(ARRAY['to_deliver','to_bill','to_deliver_and_bill']::sales_order_status[])"#,
+        )
+        .bind(order_id).bind(next).execute(&self.db_pool).await?;
+        Ok(())
+    }
+
+    // ---- Delivery seam (selling <-> inventory) ------------------------------
+
+    /// Build the cross-module delivery request for a confirmed order (the envelope selling emits;
+    /// a fulfillment/composition layer maps it into inventory's `DeliveryRequested`). Emits the
+    /// `DeliveryRequested` domain event. Guard: the order must be confirmed (not draft/cancelled).
+    pub async fn build_delivery_request(&self, order_id: Uuid) -> Result<DeliveryRequestEnvelope, SellingError> {
+        let hdr = sqlx::query(
+            r#"SELECT company_id, customer_id, currency, status::text AS st
+               FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+        )
+        .bind(order_id).fetch_optional(&self.db_pool).await?
+        .ok_or(SellingError::OrderNotFound(order_id))?;
+        if hdr.get::<String, _>("st") == "draft" {
+            return Err(SellingError::NotDraft(order_id.to_string())); // reuse: "not in a confirmable/deliverable state"
+        }
+        let rows = sqlx::query(
+            r#"SELECT item_id, (quantity - delivered_qty) AS remaining
+               FROM selling.sales_order_items
+               WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL AND (quantity - delivered_qty) > 0"#,
+        )
+        .bind(order_id).fetch_all(&self.db_pool).await?;
+        let lines: Vec<DeliveryRequestLine> = rows.iter().map(|r| DeliveryRequestLine {
+            item_id: r.get("item_id"),
+            quantity: r.get("remaining"),
+        }).collect();
+        let env = DeliveryRequestEnvelope {
+            order_id,
+            company_id: hdr.get("company_id"),
+            customer_id: hdr.get("customer_id"),
+            currency: hdr.get("currency"),
+            lines,
+        };
+        self.sink.publish(SellingEvent::DeliveryRequested(env.clone()));
+        Ok(env)
+    }
+
+    /// Record a delivery against an order (the inbound handler for inventory's `StockDelivered`):
+    /// advance `delivered_qty` per item and recompute the order status. Matches by `item_id`.
+    pub async fn mark_delivered(&self, order_id: Uuid, deliveries: &[(Uuid, Decimal)]) -> Result<(), SellingError> {
+        for (item_id, qty) in deliveries {
+            sqlx::query(
+                r#"UPDATE selling.sales_order_items
+                   SET delivered_qty = delivered_qty + $3
+                   WHERE order_id=$1 AND item_id=$2 AND (metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(order_id).bind(item_id).bind(qty).execute(&self.db_pool).await?;
+        }
+        self.recompute_order_status(order_id).await?;
         Ok(())
     }
 }
