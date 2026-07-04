@@ -45,11 +45,18 @@ rejection surfaces the ledger's stable code and sets `posting_state=failed` (no 
 may convert to an order (`quotation_not_accepted`). Conversion copies header + lines and links
 `quotation_id`.
 
-**BR-10 (order lifecycle — ADR-003).** `draft → to_bill` on confirm; `→ completed` once every line is
-fully billed (`billed_qty ≥ quantity`). Delivery states (`to_deliver*`) are inventory-gated.
+**BR-10 (order lifecycle — ADR-003, amended ADR-004).** `draft → to_deliver_and_bill` on confirm; the
+order recomputes to `to_deliver` (billed, awaiting delivery) / `to_bill` (delivered, awaiting billing)
+/ `completed` from its two watermarks. `completed` requires every line **fully billed AND fully
+delivered** (`billed_qty ≥ quantity` and `delivered_qty ≥ quantity`).
 
-**BR-11 (billing watermarks).** Posting an invoice raised from an order advances each source order
-line's `billed_qty` by the invoiced quantity; the order completes when fully billed.
+**BR-11 (billing & delivery watermarks).** Posting an invoice raised from an order advances each source
+line's `billed_qty`; a recorded delivery (`mark_delivered`, driven by inventory's `StockDelivered`)
+advances `delivered_qty`. The order completes only when both watermarks reach every line's quantity.
+
+**BR-13 (delivery seam — ADR-004).** A confirmed order emits a `DeliveryRequestEnvelope` an ACL maps
+into inventory's `DeliveryRequested`; inventory delivers (COGS posts) and reports `StockDelivered`,
+routed back to `mark_delivered`. Selling holds no normal Cargo dependency on inventory.
 
 **BR-12 (commission allocation).** Σ `allocated_pct` per order across sales-person allocations must be
 ≤ 100 (attribution, not enforced against payout here).
@@ -57,9 +64,11 @@ line's `billed_qty` by the invoiced quantity; the order completes when fully bil
 ## 3. Events (business-visible)
 
 `QuotationAccepted`, `SalesOrderConfirmed` (carries grand_total/currency for consumer credit checks),
-`SalesInvoiceIssued`, `SalesInvoicePosted`. Consumers subscribe; selling never calls back.
+`SalesInvoiceIssued`, `SalesInvoicePosted`, `DeliveryRequested`. Consumers subscribe; selling never
+calls back.
 
 ## 4. Deferred (with reason)
 
-Delivery/COGS (needs inventory), credit-limit enforcement (Tier 3 / consumer), product bundles,
-installation notes, multi-currency, real multi-rate tax (backbone-tax), reversal-on-cancel.
+COGS posting (inventory's, via the delivery seam), credit-limit enforcement (Tier 3 / consumer),
+product bundles, installation notes, multi-currency, real multi-rate tax (backbone-tax),
+reversal-on-cancel.

@@ -42,7 +42,7 @@ Everything else is generated. Know this map before you edit:
 | `src/application/service/selling_events.rs` | `SellingEvent`, `SellingEventSink` (the extension surface) |
 | `src/application/service/consumer_credit_rule_custom.rs` | The reference consumer (extension-contract §5) |
 | `src/presentation/http/guarded_routes.rs` | `create_guarded_selling_routes` |
-| `tests/{selling_golden_cases,gl_posting_seam,integrity_probes,extension_contract,order_to_cash}.rs`, `tests/features/**` | The behavior oracle |
+| `tests/{selling_golden_cases,gl_posting_seam,integrity_probes,extension_contract,order_to_cash,delivery_seam}.rs`, `tests/features/**` | The behavior oracle |
 | `migrations/…020_sales_invoice_idr_only_check.*` | The IDR-only CHECK constraint |
 | `docs/**` | This handbook |
 

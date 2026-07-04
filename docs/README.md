@@ -29,7 +29,7 @@ follow the path.
 6. [Developer Guide](handbook/06-developer-guide.md) — *App developer.* Install → quickstart → a quotation-to-posted-invoice tutorial → recipes (the `GlPostSink`, order-to-cash, events) → config → troubleshooting.
 7. [Contributing](handbook/07-contributing.md) — *Contributor.* Dev setup, commit/PR conventions, the golden oracle, boundary-integrity review checklist.
 8. [Glossary](handbook/08-glossary.md) — *All.* One term, one meaning — selling domain first, framework mechanism second.
-9. [Architecture Decision Records](handbook/adr/) — *Maintainer.* Framework ADRs (0001–0003) + selling-domain ADRs (boundary, GL seam, order status).
+9. [Architecture Decision Records](handbook/adr/) — *Maintainer.* Framework ADRs (0001–0003) + selling-domain ADRs (boundary, GL seam, order status, delivery seam).
 
 ## Related, already-written docs
 
@@ -37,7 +37,7 @@ This handbook is the *narrative*. Reference sets live alongside it — link out,
 
 - **[Schema DSL reference](schema/README.md)** — the exact YAML grammar: [types](schema/TYPES.md), [model rules](schema/RULE_FORMAT_MODELS.md), [generation targets](schema/GENERATION.md), [error codes](schema/ERROR_CODES.md), [examples](schema/EXAMPLES.md). The *Reference* corner of Diátaxis; the handbook explains the *why*.
 - **[Business flows](business-flows/README.md)** — one doc per flow (actors, preconditions, rules, postconditions), plus the [golden-case numeric oracle](business-flows/golden-cases.md), each linked to its executable BDD/test.
-- **Selling-domain ADRs** — [boundary](adr/ADR-001-selling-boundary.md) · [GL seam](adr/ADR-002-gl-posting-seam.md) · [order status](adr/ADR-003-order-status-model.md).
+- **Selling-domain ADRs** — [boundary](adr/ADR-001-selling-boundary.md) · [GL seam](adr/ADR-002-gl-posting-seam.md) · [order status](adr/ADR-003-order-status-model.md) · [delivery seam](adr/ADR-004-delivery-seam.md).
 
 ## Conventions this handbook follows
 

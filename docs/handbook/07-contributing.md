@@ -85,6 +85,8 @@ Selling's tests are the authored-first oracle, not an afterthought. They live in
 - `tests/gl_posting_seam.rs` — selling → the **real** accounting ledger (`SEAM-*`), including the
   concurrent-double-post-yields-one-journal proof.
 - `tests/order_to_cash.rs` — the quotation→order→invoice conversion (`OTC-*`).
+- `tests/delivery_seam.rs` + `scripts/delivery_seam_roundtrip.sh` — the selling↔inventory↔accounting
+  round-trip (`DSEAM-*`) and the two-module regen round-trip (ADR-004).
 - `tests/extension_contract.rs` + `scripts/regen_roundtrip.sh` — the consumer + regen round-trip
   (`EXT-*`).
 - `tests/features/**` — BDD features (`user_owned`).

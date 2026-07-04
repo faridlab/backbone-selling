@@ -14,7 +14,7 @@ Tax uses a single supplied `tax_rate` (real multi-rate tax is `backbone-tax`; se
 | **SGC-4** | invoice: subtotal 100.05 @ 11% | tax `11.01` (11.0055 half-up), total `111.06`; envelope still balances exactly. |
 | **SGC-5** | line qty 2 × 100,000, discount 25,000 | subtotal `175,000`. |
 | **SGC-6** | empty doc / discount>line / no revenue acct / tax w/o PPN acct / dup number | `empty_document` / `negative_quantity` / `missing_revenue_account` / `tax_account_missing` / `duplicate_number`. |
-| **SGC-7** | quotation (10 × 100,000 @ 11%) → order → confirm | quotation total `1,110,000`; order → `to_bill` (ADR-003); re-confirm → `not_draft`. |
+| **SGC-7** | quotation (10 × 100,000 @ 11%) → order → confirm | quotation total `1,110,000`; order → `to_deliver_and_bill` (ADR-003 amended by ADR-004); re-confirm → `not_draft`. |
 
 ## Guarded route surface (`tests/integrity_probes.rs`)
 
@@ -38,15 +38,22 @@ Tax uses a single supplied `tax_rate` (real multi-rate tax is `backbone-tax`; se
 
 | Case | Input | Expected |
 |------|-------|----------|
-| **OTC-1** | Quotation (10×100,000 @11%) → accept → convert → confirm → invoice-from-order → post | quotation→`ordered`; order→`to_bill`; invoice links order (subtotal 1,000,000, tax 110,000); post advances `billed_qty`=10 and order→`completed`. |
+| **OTC-1** | Quotation (10×100,000 @11%) → accept → convert → confirm → invoice-from-order → post → mark_delivered | order→`to_deliver_and_bill` on confirm; post advances `billed_qty`=10 → `to_deliver`; `mark_delivered(10)` → `completed` (billed AND delivered). |
 | **OTC-2** | convert a non-accepted quotation | `422 quotation_not_accepted`. |
+
+## Delivery seam — selling ↔ inventory ↔ accounting (`tests/delivery_seam.rs` + `scripts/delivery_seam_roundtrip.sh`)
+
+| Case | Input | Expected |
+|------|-------|----------|
+| **DSEAM-1** | inventory receives 10@100; selling confirms an SO for 10@150,000 (PPN 11%); emits `DeliveryRequested` → inventory delivers → `StockDelivered` → `mark_delivered` → bill+post | COGS journal `Dr COGS 1,000 · Cr Inventory 1,000`; revenue journal `Dr A/R 1,665,000 · Cr Revenue 1,500,000 · Cr PPN 165,000`; order→`completed`; 3 journals; Bin drained to 0. Zero normal Cargo edge. |
+| **§5 round-trip** | regen BOTH selling + inventory, re-run | all seam ACL/consumer files byte-identical; DSEAM-1 still green — the consumer rule survives regen of both modules. |
 
 ## Extension contract §5 (`tests/extension_contract.rs` + `scripts/regen_roundtrip.sh`)
 
 | Case | Input | Expected |
 |------|-------|----------|
 | **EXT-1** | consumer `CreditWatchConsumer` (limit 5,000,000) subscribes to `SalesOrderConfirmed`; confirm a 1M then a 9M order | under-limit → no breach; over-limit → 1 breach recorded. Selling emits; the consumer decides. |
-| **EXT-2** | confirm an order with no consumer wired | still confirms (`to_bill`) — the event surface is additive. |
+| **EXT-2** | confirm an order with no consumer wired | still confirms (`to_deliver_and_bill`) — the event surface is additive. |
 | **regen round-trip** | `metaphor schema schema generate --force` then re-run | all 10 user-owned files byte-identical; consumer rule + seam still green — the consumer's rule **survives regen** (§5 clause 2). |
 
 ## Conventions

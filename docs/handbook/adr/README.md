@@ -22,4 +22,5 @@ it is.
 |-----|----------|--------|
 | [ADR-001](../../adr/ADR-001-selling-boundary.md) | Selling owns order-to-cash intent + revenue recognition; it is a GL producer, never the ledger; holds no masters | Accepted (Applied 2026-07-03) |
 | [ADR-002](../../adr/ADR-002-gl-posting-seam.md) | The GL-posting seam: a serialized `AccountingPostEnvelope` + `GlPostSink` ACL; idempotent, balanced, IDR-only | Accepted (Applied 2026-07-03) |
-| [ADR-003](../../adr/ADR-003-order-status-model.md) | 7-state sales-order model; billing band live, delivery band inventory-gated | Accepted (Applied 2026-07-03) |
+| [ADR-003](../../adr/ADR-003-order-status-model.md) | 7-state sales-order model; both billing and delivery bands live (amended 2026-07-04) | Accepted (Applied 2026-07-03) |
+| [ADR-004](../../adr/ADR-004-delivery-seam.md) | The selling↔inventory delivery seam: a serialized `DeliveryRequestEnvelope` mapped by an ACL; order-to-cash + fulfillment proven end-to-end, zero normal Cargo edge | Accepted (Applied 2026-07-04) |

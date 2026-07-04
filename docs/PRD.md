@@ -20,11 +20,15 @@ GL-posting extension contract** for the whole suite.
 - Expose a **stable extension surface** (domain events + `*_custom.rs` + `user_owned` files) so a
   consumer extends behavior (credit rules, fulfillment, notifications) without forking or breaking on
   regen.
-- Track **billing watermarks** (`billed_qty`) and drive the order lifecycle to `completed`.
+- Track **billing and delivery watermarks** (`billed_qty`, `delivered_qty`) and drive the order
+  lifecycle to `completed` (fully billed **and** fully delivered).
+- Request fulfillment across the **selling↔inventory delivery seam** — emit a `DeliveryRequestEnvelope`
+  and record `StockDelivered` via `mark_delivered`, with zero normal Cargo edge on inventory (ADR-004).
 
 ## 3. Non-goals (this phase)
 
-- Physical fulfillment / delivery / COGS posting → `backbone-inventory` (not yet built).
+- Physical stock movement and COGS posting → `backbone-inventory` (selling only requests delivery and
+  records its result; the SLE/Bin and the COGS journal are inventory's — ADR-004).
 - Multi-currency revenue posting → guarded IDR-only until an FX contract exists (ADR-002).
 - Multi-rate / effective-dated tax computation → `backbone-tax` (selling takes a supplied rate).
 - Credit-limit enforcement, product bundles, installation notes → Tier 3 / consumer-side.
@@ -47,6 +51,7 @@ GL-posting extension contract** for the whole suite.
 ## 6. Scope summary
 
 Owned: Quotation, SalesOrder(+items), SalesInvoice(+items), SalesTeam/SalesPersonAllocation.
-Emitted events: `QuotationAccepted`, `SalesOrderConfirmed`, `SalesInvoiceIssued`, `SalesInvoicePosted`.
-Logical FKs (no DB constraint): customer→party, item→catalog, company/branch→organization,
-GL accounts→accounting. Deferred: delivery/COGS, bundles, credit-limit, multi-currency, real tax.
+Emitted events: `QuotationAccepted`, `SalesOrderConfirmed`, `SalesInvoiceIssued`, `SalesInvoicePosted`,
+`DeliveryRequested`. Logical FKs (no DB constraint): customer→party, item→catalog,
+company/branch→organization, GL accounts→accounting. Deferred: COGS posting (inventory's), bundles,
+credit-limit, multi-currency, real tax.

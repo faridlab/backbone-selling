@@ -22,13 +22,16 @@ All cross-module ids are logical FKs (`@exclude_from_foreign_key_check`): `custo
   - `create_quotation` / `create_sales_order` / `create_sales_invoice` (server-side money; one tx)
   - `accept_quotation` → emits `QuotationAccepted`
   - `convert_quotation_to_order` (Quote→Order: copy + link; quotation → `ordered`)
-  - `confirm_sales_order` → `to_bill`, emits `SalesOrderConfirmed`
+  - `confirm_sales_order` → `to_deliver_and_bill`, emits `SalesOrderConfirmed`
   - `create_invoice_from_order` (Order→Bill: copy lines, link `sales_order_item_id`), emits `SalesInvoiceIssued`
   - `build_revenue_post` (pure, balanced envelope) + `post_sales_invoice(sink)` (emit → reconcile →
-    advance `billed_qty` → `SalesInvoicePosted`); idempotent
+    advance `billed_qty` → `recompute_order_status` → `SalesInvoicePosted`); idempotent
+  - `build_delivery_request` → `DeliveryRequestEnvelope`, emits `DeliveryRequested`; `mark_delivered`
+    (inbound from inventory's `StockDelivered`) advances `delivered_qty` → `recompute_order_status` (ADR-004)
   - `sales_order_ref` (exported `SalesOrderRef` DTO)
 - `selling_gl` — outbound GL port: `AccountingPostEnvelope`, `GlPostLine`, `GlPostSink`, ack/reject.
-- `selling_events` — domain events + `SellingEventSink` + exported `SalesOrderRef`/`QuotationRef`.
+- `selling_events` — domain events + `SellingEventSink` + `DeliveryRequestEnvelope`/`DeliveryRequestLine`
+  + exported `SalesOrderRef`/`QuotationRef`.
 - `consumer_credit_rule_custom` — reference consumer extension (extension-contract §5).
 
 ## 3. HTTP surface (presentation/http/guarded_routes.rs)
@@ -41,8 +44,8 @@ All cross-module ids are logical FKs (`@exclude_from_foreign_key_check`): `custo
 ## 4. State machines
 
 - **Quotation:** `draft → sent → accepted → ordered` (+ rejected/expired/cancelled).
-- **SalesOrder (ADR-003):** `draft → to_bill → completed`; `closed`/`cancelled`; `to_deliver`/
-  `to_deliver_and_bill` inventory-gated.
+- **SalesOrder (ADR-003, amended ADR-004):** `draft → to_deliver_and_bill` on confirm, recomputing to
+  `to_deliver` / `to_bill` / `completed` from the two watermarks (all states live); `closed`/`cancelled`.
 - **SalesInvoice:** `draft → submitted → (partially_paid) → paid`; `cancelled`. `posting_state`
   (pending → posted | failed) is an independent GL-reconciliation axis.
 
@@ -51,10 +54,13 @@ All cross-module ids are logical FKs (`@exclude_from_foreign_key_check`): `custo
 - **Outbound GL (proven):** `post_sales_invoice` → `GlPostSink` → accounting `PostingService`
   (envelope → PostingRequest ACL). Idempotent on invoice id; concurrency-safe. See ADR-002,
   `tests/gl_posting_seam.rs`.
-- **Outbound events:** `SellingEventSink` publishes the 4 domain events; consumers subscribe via
+- **Outbound events:** `SellingEventSink` publishes the 5 domain events; consumers subscribe via
   `*_custom.rs` (extension-contract §5; regen-proven by `scripts/regen_roundtrip.sh`).
-- **Inbound (future):** `ItemCreated/Updated` + `PartyCreated/Updated` → local projections;
-  `DeliveryNoteSubmitted` (inventory) → `delivered_qty` — when inventory lands.
+- **Delivery seam (proven):** `build_delivery_request` emits a `DeliveryRequestEnvelope` an ACL maps
+  into inventory's `DeliveryRequested`; inventory's `StockDelivered` routes back to `mark_delivered` →
+  `delivered_qty`. Zero normal Cargo edge on inventory. See ADR-004, `tests/delivery_seam.rs`,
+  `scripts/delivery_seam_roundtrip.sh`.
+- **Inbound (future):** `ItemCreated/Updated` + `PartyCreated/Updated` → local projections.
 
 ## 6. Test oracle
 

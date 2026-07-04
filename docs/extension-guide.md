@@ -14,9 +14,13 @@
 | `SalesOrderConfirmed` | an order is confirmed | order_id, company_id, customer_id, grand_total, currency |
 | `SalesInvoiceIssued` | an invoice is created | invoice_id, sales_order_id?, company_id, customer_id, total |
 | `SalesInvoicePosted` | revenue posts to the GL | invoice_id, company_id, journal_id, post_id, total |
+| `DeliveryRequested` | a confirmed order is ready to ship | `DeliveryRequestEnvelope` — order_id, company_id, customer_id, currency, lines[] |
 
 **B. Exported DTOs** — `SalesOrderRef`, `QuotationRef` (`{id, customer_id, company_id, grand_total,
-currency}`); build via `SellingWriteService::sales_order_ref`.
+currency}`); build via `SellingWriteService::sales_order_ref`. Plus the delivery-seam wire types
+`DeliveryRequestEnvelope` / `DeliveryRequestLine` (the request an ACL maps into inventory's
+`DeliveryRequested`; inbound `StockDelivered` routes to `SellingWriteService::mark_delivered`) — see
+ADR-004.
 
 **C. The outbound GL port** — `selling_gl::{AccountingPostEnvelope, GlPostLine, GlPostSink, GlPostAck,
 GlPostRejected}`. A composing service implements `GlPostSink` (map envelope → your ledger) to receive
@@ -58,6 +62,7 @@ semantic domain events above.
 
 ## Deferred surfaces (not yet stable)
 
-Inbound projection sync (`ItemCreated`/`PartyCreated` → local read-models), delivery events
-(`DeliveryRequested`, `delivered_qty`), and multi-currency — all land with `backbone-inventory` / an
-FX contract. Design against the domain events above; these will be additive.
+Inbound projection sync (`ItemCreated`/`PartyCreated` → local read-models) and multi-currency land
+with future modules / an FX contract. (The delivery seam — `DeliveryRequested` / `delivered_qty` —
+is now stable and lives in section A; see ADR-004.) Design against the domain events above; these
+will be additive.

@@ -119,10 +119,13 @@ not oversights.
 
 - **It is not a service.** Selling is a **library crate** — `[lib]` only, no `main.rs`. A
   `backend-service` composes it, hands it a Postgres pool and a `GlPostSink`, and mounts its router.
-- **It does not own delivery or COGS.** The physical goods move and the cost-of-goods-sold post
-  belong to `backbone-inventory`. Selling's `SalesOrderStatus` reserves the `to_deliver` /
-  `to_deliver_and_bill` states for when inventory lands, but no code reaches them today — a *declared*
-  dark band, not a silent gap ([ADR-003](../adr/ADR-003-order-status-model.md)).
+- **It does not own the physical move or COGS.** The stock movement and the cost-of-goods-sold post
+  belong to `backbone-inventory`. Selling only *requests* delivery and *records* its result: it emits
+  a `DeliveryRequestEnvelope`, and an inbound `mark_delivered` advances the `delivered_qty` watermark
+  when inventory reports a `StockDelivered` — zero normal Cargo edge on inventory. As of 2026-07-04
+  the full seam is live and proven end-to-end (`to_deliver` / `to_deliver_and_bill` are reached now,
+  and `completed` requires fully billed **and** fully delivered), so the once-dark delivery band is
+  now exercised ([ADR-003](../adr/ADR-003-order-status-model.md), [ADR-004](../adr/ADR-004-delivery-seam.md)).
 - **It does not compute real tax.** The invoice carries a single supplied `tax_rate` and computes one
   PPN amount. Multi-rate, effective-dated, inclusive tax is `backbone-tax`'s job; wiring it in is
   future work over the same envelope pattern.

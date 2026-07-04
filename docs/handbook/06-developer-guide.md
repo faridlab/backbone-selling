@@ -152,9 +152,12 @@ Selling never names an accounting type; only your sink does. See
 ### How do I run the full order-to-cash conversion?
 
 Drive `SellingWriteService`: `accept_quotation` → `convert_quotation_to_order` (fails
-`quotation_not_accepted` if the quotation isn't accepted) → `confirm_sales_order` (order → `to_bill`)
-→ `create_invoice_from_order` → `post_sales_invoice` (advances each SO line's `billed_qty`; order →
-`completed` when fully billed). This is [`OTC-1`](../business-flows/golden-cases.md).
+`quotation_not_accepted` if the quotation isn't accepted) → `confirm_sales_order` (order →
+`to_deliver_and_bill`) → `create_invoice_from_order` → `post_sales_invoice` (advances each SO line's
+`billed_qty`). The order reaches `completed` only when it is fully billed **and** fully delivered
+(`mark_delivered` advances `delivered_qty` via the inventory seam — see [ADR-004](../adr/ADR-004-delivery-seam.md)).
+This is [`OTC-1`](../business-flows/golden-cases.md); the cross-module round-trip is
+[`DSEAM-1`](../business-flows/golden-cases.md).
 
 ### How do I react to a confirmed order (e.g. credit-limit watch)?
 

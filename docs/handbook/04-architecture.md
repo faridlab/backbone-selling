@@ -164,7 +164,7 @@ sequenceDiagram
             PS-->>K: journal_id, post_id
             K-->>W: GlPostAck
             W->>DB: UPDATE posting_state=posted, status=submitted,<br/>journal_id, accounting_post_id, posted_at, outstanding=total
-            W->>W: advance_billing_watermarks(invoice_id) → order to_bill/completed
+            W->>W: advance_billing_watermarks(invoice_id) → recompute_order_status (to_deliver/completed)
             W->>E: publish SalesInvoicePosted
             W-->>Caller: PostOutcome { journal_id, post_id }
         else rejected
@@ -189,10 +189,14 @@ sequenceDiagram
 
 `Quotation → SalesOrder → SalesInvoice` is driven by the same service:
 `accept_quotation` → `convert_quotation_to_order` (refuses a non-accepted quotation with
-`quotation_not_accepted`) → `confirm_sales_order` (sets the order `to_bill`) →
-`create_invoice_from_order` → `post_sales_invoice` (advances each `SalesOrderItem.billed_qty` and
-closes the order to `completed` when fully billed). The numeric oracle for this is
-[`OTC-1`](../business-flows/golden-cases.md) in [`tests/order_to_cash.rs`](../../tests/order_to_cash.rs).
+`quotation_not_accepted`) → `confirm_sales_order` (sets the order `to_deliver_and_bill`) →
+`create_invoice_from_order` → `post_sales_invoice` (advances each `SalesOrderItem.billed_qty`) and,
+in parallel, delivery through the inventory seam (`build_delivery_request` → `mark_delivered` advances
+`delivered_qty` — [ADR-004](../adr/ADR-004-delivery-seam.md)). `recompute_order_status` moves the order
+to `completed` only when every line is fully billed **and** fully delivered. The numeric oracle is
+[`OTC-1`](../business-flows/golden-cases.md) in [`tests/order_to_cash.rs`](../../tests/order_to_cash.rs);
+the cross-module round-trip is [`DSEAM-1`](../business-flows/golden-cases.md) in
+[`tests/delivery_seam.rs`](../../tests/delivery_seam.rs).
 
 ## Where persistence & lifecycle semantics come from
 
@@ -219,7 +223,8 @@ Framework decisions (why the machine works this way):
 Selling domain decisions (why *this* module is shaped this way):
 - [ADR-001](../adr/ADR-001-selling-boundary.md) — three documents; selling is a GL producer, holds no masters.
 - [ADR-002](../adr/ADR-002-gl-posting-seam.md) — the envelope + `GlPostSink` ACL; idempotent, IDR-only.
-- [ADR-003](../adr/ADR-003-order-status-model.md) — the 7-state order model; billing live, delivery dark.
+- [ADR-003](../adr/ADR-003-order-status-model.md) — the 7-state order model; both billing and delivery bands now live.
+- [ADR-004](../adr/ADR-004-delivery-seam.md) — the selling↔inventory delivery seam; a serialized `DeliveryRequestEnvelope` mapped by an ACL, proven end-to-end.
 
 ---
 

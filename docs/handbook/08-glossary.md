@@ -16,8 +16,14 @@ contract. `build_revenue_post` refuses to produce an unbalanced or non-IDR envel
 
 ### Billed watermark (`billed_qty`)
 The cumulative quantity invoiced against a `SalesOrderItem`. Advanced by `advance_billing_watermarks`
-when a sales invoice posts; when every line's `billed_qty >= quantity`, the order moves to
-`completed`. The "billing band" of the order-status model.
+when a sales invoice posts. The "billing band" of the order-status model; combined with the delivered
+watermark, `recompute_order_status` moves the order to `completed` only when every line is fully
+billed **and** fully delivered.
+
+### Delivered watermark (`delivered_qty`)
+The cumulative quantity delivered against a `SalesOrderItem`. Advanced by `mark_delivered` — the
+inbound half of the selling↔inventory delivery seam, driven by inventory's `StockDelivered`
+([ADR-004](../adr/ADR-004-delivery-seam.md)). The "delivery band" of the order-status model.
 
 ### `build_revenue_post`
 The deterministic builder that turns a submitted invoice into a balanced envelope:
@@ -83,8 +89,9 @@ cancelled. Carries `receivable_account_id`, `tax_output_account_id`, and per-lin
 ### SalesOrder
 Confirmed customer demand (`schema/models/sales_order.model.yaml`); owns intent, no GL post.
 `SalesOrderStatus` is 7-state ([ADR-003](../adr/ADR-003-order-status-model.md)): `draft`, `to_bill`,
-`completed`, `closed`, `cancelled` are **live**; `to_deliver`, `to_deliver_and_bill` are
-**inventory-gated** (declared but dark until `backbone-inventory` lands).
+`to_deliver`, `to_deliver_and_bill`, `completed`, `closed`, `cancelled` — **all live** since the
+delivery seam landed ([ADR-004](../adr/ADR-004-delivery-seam.md)). `confirm_sales_order` →
+`to_deliver_and_bill`; the order then recomputes from its two watermarks toward `completed`.
 
 ### `SalesTeam` / `SalesPersonAllocation`
 Commission attribution. A `SalesTeam` is a named grouping; a `SalesPersonAllocation` splits credit for

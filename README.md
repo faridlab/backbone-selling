@@ -45,13 +45,13 @@ src/
 │       ├── *_service.rs                    ← 8 type aliases over GenericCrudService   (generated)
 │       ├── selling_write_service.rs  ★     ← validated writes, totals, order-to-cash, posting
 │       ├── selling_gl.rs             ★     ← AccountingPostEnvelope, GlPostSink, build_revenue_post
-│       └── selling_events.rs         ★     ← SellingEvent + SellingEventSink (extension surface)
+│       └── selling_events.rs         ★     ← SellingEvent + SellingEventSink + DeliveryRequestEnvelope (extension surface)
 ├── infrastructure/persistence/  ← 8 repository newtypes over GenericCrudRepository    (generated)
 └── presentation/http/
     ├── *_handler.rs                        ← generated CRUD handlers                  (generated)
     └── guarded_routes.rs           ★       ← create_guarded_selling_routes (RECOMMENDED mount)
 tests/                          ★ selling_golden_cases · gl_posting_seam · integrity_probes ·
-                                  order_to_cash · extension_contract   (the golden oracle)
+                                  order_to_cash · extension_contract · delivery_seam   (the golden oracle)
 docs/                           ← the handbook + ADRs + business flows
 ```
 
@@ -105,4 +105,5 @@ needed). Pin them to a tag/rev for a reproducible release build. See
 
 - [ADR-001](docs/adr/ADR-001-selling-boundary.md) — three documents; GL producer, holds no masters.
 - [ADR-002](docs/adr/ADR-002-gl-posting-seam.md) — the envelope + `GlPostSink` ACL; idempotent, IDR-only.
-- [ADR-003](docs/adr/ADR-003-order-status-model.md) — the 7-state order model; billing live, delivery dark.
+- [ADR-003](docs/adr/ADR-003-order-status-model.md) — the 7-state order model; both billing and delivery bands now live.
+- [ADR-004](docs/adr/ADR-004-delivery-seam.md) — the selling↔inventory delivery seam; a serialized `DeliveryRequestEnvelope` mapped by an ACL, proven end-to-end (order-to-cash + fulfillment).
