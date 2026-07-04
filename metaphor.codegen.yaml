@@ -25,6 +25,7 @@ user_owned:
   - "tests/integrity_probes.rs"
   - "tests/extension_contract.rs"
   - "tests/order_to_cash.rs"
+  - "tests/delivery_seam.rs"
   - "tests/features/**"
 
   # Per-entity CRUD integration harness. Frozen as user_owned so hand cleanups persist across regen.

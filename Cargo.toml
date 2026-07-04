@@ -1,6 +1,6 @@
 [package]
 name = "backbone-selling"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Selling: Quotation -> Sales Order -> Sales Invoice; emits revenue AccountingPost to backbone-accounting (order-to-cash intent + GL seam)"
 
@@ -89,3 +89,4 @@ rand = "0.8"
 # is a dev-dependency ONLY — the shipped selling library has ZERO horizontal edges to accounting
 # (verify: `cargo tree -e normal -i backbone-accounting` is empty). See docs/adr/ADR-002.
 backbone-accounting = { path = "../backbone-accounting" }
+backbone-inventory = { path = "../backbone-inventory" }
