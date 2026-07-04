@@ -51,6 +51,8 @@ pub struct CreateSalesOrderItemDto {
     pub line_amount: Decimal,
     #[serde(alias = "billed_qty")]
     pub billed_qty: Decimal,
+    #[serde(alias = "delivered_qty")]
+    pub delivered_qty: Decimal,
 }
 
 // =============================================================================
@@ -84,6 +86,8 @@ pub struct UpdateSalesOrderItemDto {
     pub line_amount: Decimal,
     #[serde(alias = "billed_qty")]
     pub billed_qty: Decimal,
+    #[serde(alias = "delivered_qty")]
+    pub delivered_qty: Decimal,
 }
 
 // =============================================================================
@@ -118,12 +122,14 @@ pub struct PatchSalesOrderItemDto {
     pub line_amount: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "billed_qty")]
     pub billed_qty: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "delivered_qty")]
+    pub delivered_qty: Option<Decimal>,
 }
 
 impl PatchSalesOrderItemDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.order_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.billed_qty.is_some()
+        self.order_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some()
     }
 }
 
@@ -151,6 +157,7 @@ pub struct SalesOrderItemResponseDto {
     pub line_discount: Decimal,
     pub line_amount: Decimal,
     pub billed_qty: Decimal,
+    pub delivered_qty: Decimal,
     pub metadata: AuditMetadata,
 }
 
@@ -230,6 +237,7 @@ impl From<SalesOrderItem> for SalesOrderItemResponseDto {
             line_discount: entity.line_discount,
             line_amount: entity.line_amount,
             billed_qty: entity.billed_qty,
+            delivered_qty: entity.delivered_qty,
             metadata: entity.metadata,
         }
     }
@@ -260,6 +268,7 @@ impl From<CreateSalesOrderItemDto> for SalesOrderItem {
             line_discount: dto.line_discount,
             line_amount: dto.line_amount,
             billed_qty: dto.billed_qty,
+            delivered_qty: dto.delivered_qty,
             metadata: AuditMetadata::default(),
         }
     }
@@ -277,6 +286,7 @@ impl From<&SalesOrderItem> for SalesOrderItemResponseDto {
             line_discount: entity.line_discount.clone(),
             line_amount: entity.line_amount.clone(),
             billed_qty: entity.billed_qty.clone(),
+            delivered_qty: entity.delivered_qty.clone(),
             metadata: entity.metadata.clone(),
         }
     }
@@ -298,6 +308,7 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderItemDto> for SalesOrderItem {
         self.line_discount = dto.line_discount;
         self.line_amount = dto.line_amount;
         self.billed_qty = dto.billed_qty;
+        self.delivered_qty = dto.delivered_qty;
         Ok(self)
     }
 }

@@ -57,6 +57,7 @@ pub struct SalesOrderItem {
     pub line_discount: Decimal,
     pub line_amount: Decimal,
     pub billed_qty: Decimal,
+    pub delivered_qty: Decimal,
     #[serde(default)]
     #[sqlx(json)]
     pub metadata: AuditMetadata,
@@ -69,7 +70,7 @@ impl SalesOrderItem {
     }
 
     /// Create a new SalesOrderItem with required fields
-    pub fn new(order_id: Uuid, item_id: Uuid, quantity: Decimal, unit_price: Decimal, line_discount: Decimal, line_amount: Decimal, billed_qty: Decimal) -> Self {
+    pub fn new(order_id: Uuid, item_id: Uuid, quantity: Decimal, unit_price: Decimal, line_discount: Decimal, line_amount: Decimal, billed_qty: Decimal, delivered_qty: Decimal) -> Self {
         Self {
             id: Uuid::new_v4(),
             order_id,
@@ -80,6 +81,7 @@ impl SalesOrderItem {
             line_discount,
             line_amount,
             billed_qty,
+            delivered_qty,
             metadata: AuditMetadata::default(),
         }
     }
@@ -177,6 +179,9 @@ impl SalesOrderItem {
                 "billed_qty" => {
                     if let Ok(v) = serde_json::from_value(value) { self.billed_qty = v; }
                 }
+                "delivered_qty" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.delivered_qty = v; }
+                }
                 _ => {} // ignore unknown fields
             }
         }
@@ -257,6 +262,7 @@ pub struct SalesOrderItemBuilder {
     line_discount: Option<Decimal>,
     line_amount: Option<Decimal>,
     billed_qty: Option<Decimal>,
+    delivered_qty: Option<Decimal>,
 }
 
 impl SalesOrderItemBuilder {
@@ -308,6 +314,12 @@ impl SalesOrderItemBuilder {
         self
     }
 
+    /// Set the delivered_qty field (default: `Decimal::from(0)`)
+    pub fn delivered_qty(mut self, value: Decimal) -> Self {
+        self.delivered_qty = Some(value);
+        self
+    }
+
     /// Build the SalesOrderItem entity
     ///
     /// Returns Err if any required field without a default is missing.
@@ -327,6 +339,7 @@ impl SalesOrderItemBuilder {
             line_discount: self.line_discount.unwrap_or(Decimal::from(0)),
             line_amount: self.line_amount.unwrap_or(Decimal::from(0)),
             billed_qty: self.billed_qty.unwrap_or(Decimal::from(0)),
+            delivered_qty: self.delivered_qty.unwrap_or(Decimal::from(0)),
             metadata: AuditMetadata::default(),
         })
     }

@@ -389,6 +389,7 @@ pub struct SalesOrderItemDto {
     pub line_discount: Decimal,
     pub line_amount: Decimal,
     pub billed_qty: Decimal,
+    pub delivered_qty: Decimal,
     pub metadata: serde_json::Value,
 }
 

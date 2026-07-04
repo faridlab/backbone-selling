@@ -4133,6 +4133,7 @@ components:
         - line_discount
         - line_amount
         - billed_qty
+        - delivered_qty
         - metadata
       properties:
         id:
@@ -4157,6 +4158,8 @@ components:
         line_amount:
           type: string
         billed_qty:
+          type: string
+        delivered_qty:
           type: string
         metadata:
           type: object
@@ -4184,6 +4187,7 @@ components:
         - line_discount
         - line_amount
         - billed_qty
+        - delivered_qty
         - metadata
       properties:
         order_id:
@@ -4205,6 +4209,8 @@ components:
         line_amount:
           type: string
         billed_qty:
+          type: string
+        delivered_qty:
           type: string
         metadata:
           type: object
@@ -4219,6 +4225,7 @@ components:
         - line_discount
         - line_amount
         - billed_qty
+        - delivered_qty
         - metadata
       properties:
         order_id:
@@ -4240,6 +4247,8 @@ components:
         line_amount:
           type: string
         billed_qty:
+          type: string
+        delivered_qty:
           type: string
         metadata:
           type: object
@@ -4266,6 +4275,8 @@ components:
         line_amount:
           type: string
         billed_qty:
+          type: string
+        delivered_qty:
           type: string
         metadata:
           type: object
