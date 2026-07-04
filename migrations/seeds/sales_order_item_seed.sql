@@ -14,6 +14,7 @@
 --     line_discount,
 --     line_amount,
 --     billed_qty,
+--     delivered_qty,
 --     metadata
 -- ) VALUES
 -- (

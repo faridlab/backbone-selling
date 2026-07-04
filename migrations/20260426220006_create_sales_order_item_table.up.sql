@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS selling.sales_order_items (
     line_discount NUMERIC NOT NULL DEFAULT 0,
     line_amount NUMERIC NOT NULL DEFAULT 0,
     billed_qty NUMERIC NOT NULL DEFAULT 0,
+    delivered_qty NUMERIC NOT NULL DEFAULT 0,
     metadata JSONB NOT NULL DEFAULT '{"created_at":null,"updated_at":null,"deleted_at":null,"created_by":null,"updated_by":null,"deleted_by":null}'::jsonb,
     PRIMARY KEY (id)
 );

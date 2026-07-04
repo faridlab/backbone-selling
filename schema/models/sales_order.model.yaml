@@ -158,6 +158,11 @@ models:
         attributes: ["@default(0)", "@precision(18,4)", "@non_negative"]
         description: "Cumulative quantity invoiced against this line (advanced when a sales invoice posts)"
 
+      delivered_qty:
+        type: decimal
+        attributes: ["@default(0)", "@precision(18,4)", "@non_negative"]
+        description: "Cumulative quantity delivered (advanced on inventory's StockDelivered event)"
+
       metadata:
         type: Metadata
         attributes: ["@audit_metadata"]
