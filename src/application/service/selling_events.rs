@@ -70,6 +70,29 @@ pub struct DeliveryRequestEnvelope {
     pub lines: Vec<DeliveryRequestLine>,
 }
 
+/// One line of an invoice request (what selling asks billing to invoice) — carries the price so
+/// billing can compute the net revenue without a call back into selling.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InvoiceRequestLine {
+    pub item_id: Uuid,
+    pub quantity: Decimal,
+    pub unit_price: Decimal,
+}
+
+/// The cross-module request selling emits when a confirmed order is ready to bill (the order-to-cash
+/// mirror of `DeliveryRequestEnvelope`). Serialized (the wire contract) — a composition layer maps it
+/// into billing's own `NewSalesInvoice` (adding the A/R + revenue accounts billing/accounting own), so
+/// selling stays ignorant of billing's internals and posts no revenue itself. Zero Cargo edge. This
+/// retires selling's simulated `create_invoice_from_order` in the composed flow.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InvoiceRequestEnvelope {
+    pub order_id: Uuid,
+    pub company_id: Uuid,
+    pub customer_id: Uuid,
+    pub currency: String,
+    pub lines: Vec<InvoiceRequestLine>,
+}
+
 /// The selling domain-event union (discriminated) published on the module event bus.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
@@ -79,6 +102,7 @@ pub enum SellingEvent {
     SalesInvoiceIssued(SalesInvoiceIssued),
     SalesInvoicePosted(SalesInvoicePosted),
     DeliveryRequested(DeliveryRequestEnvelope),
+    OrderInvoiced(InvoiceRequestEnvelope),
 }
 
 /// Exported reference DTO for a sales order — the shape a consumer holds (per the brief), richer

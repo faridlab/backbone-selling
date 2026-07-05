@@ -35,8 +35,9 @@ pub use sales_order_service::SalesOrderService;
 pub use sales_order_item_service::SalesOrderItemService;
 // <<< CUSTOM
 pub use selling_events::{
-    DeliveryRequestEnvelope, DeliveryRequestLine, QuotationAccepted, SalesInvoiceIssued,
-    SalesInvoicePosted, SalesOrderConfirmed, SellingEvent, SellingEventSink,
+    DeliveryRequestEnvelope, DeliveryRequestLine, InvoiceRequestEnvelope, InvoiceRequestLine,
+    QuotationAccepted, SalesInvoiceIssued, SalesInvoicePosted, SalesOrderConfirmed, SellingEvent,
+    SellingEventSink,
 };
 pub use selling_gl::{
     AccountingPostEnvelope, GlPostAck, GlPostLine, GlPostRejected, GlPostSink,

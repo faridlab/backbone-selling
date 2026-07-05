@@ -18,8 +18,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::selling_events::{
-    DeliveryRequestEnvelope, DeliveryRequestLine, QuotationAccepted, SalesInvoiceIssued,
-    SalesInvoicePosted, SalesOrderConfirmed, SalesOrderRef, SellingEvent, SellingEventSink, LoggingSink,
+    DeliveryRequestEnvelope, DeliveryRequestLine, InvoiceRequestEnvelope, InvoiceRequestLine,
+    QuotationAccepted, SalesInvoiceIssued, SalesInvoicePosted, SalesOrderConfirmed, SalesOrderRef,
+    SellingEvent, SellingEventSink, LoggingSink,
 };
 use super::selling_gl::{AccountingPostEnvelope, GlPostLine, GlPostSink};
 
@@ -115,6 +116,7 @@ pub enum SellingError {
     QuotationNotAccepted(Uuid),
     OrderNotFound(Uuid),
     NotDraft(String),
+    OverBilled,
     GlRejected { code: String, message: String },
     Db(sqlx::Error),
 }
@@ -134,6 +136,7 @@ impl SellingError {
             SellingError::QuotationNotAccepted(_) => "quotation_not_accepted".into(),
             SellingError::OrderNotFound(_) => "order_not_found".into(),
             SellingError::NotDraft(_) => "not_draft".into(),
+            SellingError::OverBilled => "over_billed".into(),
             // Surface the GL's own stable code so callers see one contract vocabulary.
             SellingError::GlRejected { code, .. } => code.clone(),
             SellingError::Db(_) => "internal_error".into(),
@@ -826,6 +829,86 @@ impl SellingWriteService {
             .bind(order_id).bind(item_id).bind(qty).execute(&self.db_pool).await?;
         }
         self.recompute_order_status(order_id).await?;
+        Ok(())
+    }
+
+    /// Build the invoice request for a confirmed order (the order-to-cash mirror of
+    /// `build_delivery_request`): asks billing to invoice only the **un-invoiced remainder**
+    /// (`quantity − billed_qty`) per line, carrying the unit price. A composition layer maps the
+    /// emitted `OrderInvoiced` envelope into billing's `NewSalesInvoice` (adding the A/R + revenue
+    /// accounts) and posts the real revenue journal — so selling no longer owns invoicing or posts
+    /// revenue itself (retiring `create_invoice_from_order` in the composed flow).
+    pub async fn build_invoice_request(&self, order_id: Uuid) -> Result<InvoiceRequestEnvelope, SellingError> {
+        let hdr = sqlx::query(
+            r#"SELECT company_id, customer_id, currency, status::text AS st
+               FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+        )
+        .bind(order_id).fetch_optional(&self.db_pool).await?
+        .ok_or(SellingError::OrderNotFound(order_id))?;
+        if hdr.get::<String, _>("st") == "draft" {
+            return Err(SellingError::NotDraft(order_id.to_string()));
+        }
+        let rows = sqlx::query(
+            r#"SELECT item_id, (quantity - billed_qty) AS remaining, unit_price
+               FROM selling.sales_order_items
+               WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL AND (quantity - billed_qty) > 0"#,
+        )
+        .bind(order_id).fetch_all(&self.db_pool).await?;
+        let lines: Vec<InvoiceRequestLine> = rows.iter().map(|r| InvoiceRequestLine {
+            item_id: r.get("item_id"),
+            quantity: r.get("remaining"),
+            unit_price: r.get("unit_price"),
+        }).collect();
+        let env = InvoiceRequestEnvelope {
+            order_id,
+            company_id: hdr.get("company_id"),
+            customer_id: hdr.get("customer_id"),
+            currency: hdr.get("currency"),
+            lines,
+        };
+        self.sink.publish(SellingEvent::OrderInvoiced(env.clone()));
+        Ok(env)
+    }
+
+    /// Record that an order was invoiced (the inbound handler for billing's `SalesInvoicePosted`):
+    /// advance `billed_qty` per item and recompute the order status. The order-to-cash mirror of
+    /// buying's `mark_billed` (council 2026-07-05): **bounded** — it routes through a capacity-checked,
+    /// `FOR UPDATE`-serialized allocation capped at each line's `quantity`, and **rejects** an over-bill
+    /// (`OverBilled`). Without this, a racy/repeat `build_invoice_request` (billed_qty advances only at
+    /// post time) or a directly-raised invoice could push `billed_qty` past `quantity` — booking revenue
+    /// beyond the order while `recompute_order_status` (`billed_qty ≥ quantity`) silently masks it as
+    /// `completed`. Serializing the *writer* (not just the upstream remainder) is what closes the race.
+    /// Aggregate-by-item, fill in line order — correct even for duplicate-item orders.
+    pub async fn mark_invoiced(&self, order_id: Uuid, billed: &[(Uuid, Decimal)]) -> Result<(), SellingError> {
+        let mut tx = self.db_pool.begin().await?;
+        for (item_id, qty) in billed {
+            Self::allocate_billed(&mut tx, order_id, *item_id, *qty).await?;
+        }
+        tx.commit().await?;
+        self.recompute_order_status(order_id).await?;
+        Ok(())
+    }
+
+    /// Fill `billed_qty` up to `quantity` across an item's order lines (`FOR UPDATE`, fill-in-order);
+    /// reject when the requested qty exceeds total remaining capacity (`quantity − billed_qty`).
+    async fn allocate_billed(tx: &mut sqlx::PgConnection, order_id: Uuid, item_id: Uuid, mut qty: Decimal) -> Result<(), SellingError> {
+        let lines = sqlx::query(
+            r#"SELECT id, (quantity - billed_qty) AS capacity FROM selling.sales_order_items
+               WHERE order_id=$1 AND item_id=$2 AND (metadata->>'deleted_at') IS NULL ORDER BY id FOR UPDATE"#,
+        ).bind(order_id).bind(item_id).fetch_all(&mut *tx).await?;
+        let total_cap: Decimal = lines.iter().map(|r| r.get::<Decimal, _>("capacity")).sum();
+        if qty > total_cap {
+            return Err(SellingError::OverBilled);
+        }
+        for line in &lines {
+            if qty <= Decimal::ZERO { break; }
+            let cap: Decimal = line.get("capacity");
+            if cap <= Decimal::ZERO { continue; }
+            let take = if qty < cap { qty } else { cap };
+            sqlx::query("UPDATE selling.sales_order_items SET billed_qty = billed_qty + $2 WHERE id=$1")
+                .bind(line.get::<Uuid, _>("id")).bind(take).execute(&mut *tx).await?;
+            qty -= take;
+        }
         Ok(())
     }
 }

@@ -90,3 +90,6 @@ rand = "0.8"
 # (verify: `cargo tree -e normal -i backbone-accounting` is empty). See docs/adr/ADR-002.
 backbone-accounting = { path = "../backbone-accounting" }
 backbone-inventory = { path = "../backbone-inventory" }
+# The OrderInvoiced seam test drives the REAL backbone-billing (invoice request -> Sales Invoice ->
+# revenue post -> SalesInvoicePosted -> mark_invoiced). Dev-dependency ONLY — zero normal edge.
+backbone-billing = { path = "../backbone-billing" }
