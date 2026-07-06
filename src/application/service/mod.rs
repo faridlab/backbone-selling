@@ -17,6 +17,7 @@ pub mod sales_order_item_service;
 // Hand-authored (user-owned): domain events, the outbound GL-posting port, the validated write path.
 pub mod selling_events;
 pub mod selling_gl;
+pub mod selling_cart_pricing;
 pub mod selling_write_service;
 // Reference consumer extension (extension-contract §5, second half) — a downstream rule on events.
 pub mod consumer_credit_rule_custom;
@@ -42,9 +43,13 @@ pub use selling_events::{
 pub use selling_gl::{
     AccountingPostEnvelope, GlPostAck, GlPostLine, GlPostRejected, GlPostSink,
 };
+pub use selling_cart_pricing::{
+    CartPriceLine, CartPriceRequest, CartPricingError, CartPricingPort, PricedCart, PricedCartLine,
+    PricedRewardLine,
+};
 pub use selling_write_service::{
-    NewLine, NewQuotation, NewSalesInvoice, NewSalesOrder, PostOutcome, SellingError,
-    SellingWriteService,
+    CartOrderLine, NewCartSalesOrder, NewLine, NewQuotation, NewSalesInvoice, NewSalesOrder,
+    PostOutcome, SellingError, SellingWriteService,
 };
 // END CUSTOM
 pub use sales_team_service::SalesTeamService;

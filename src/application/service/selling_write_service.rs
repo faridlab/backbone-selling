@@ -23,6 +23,7 @@ use super::selling_events::{
     SellingEvent, SellingEventSink, LoggingSink,
 };
 use super::selling_gl::{AccountingPostEnvelope, GlPostLine, GlPostSink};
+use super::selling_cart_pricing::{CartPriceLine, CartPriceRequest, CartPricingPort};
 
 /// Round to 2 decimal places, half away from zero (IDR money convention).
 fn money(v: Decimal) -> Decimal {
@@ -69,6 +70,36 @@ pub struct NewSalesOrder {
     pub tax_rate: Decimal,
     pub notes: Option<String>,
     pub lines: Vec<NewLine>,
+}
+
+/// One order line to be priced by the cart pricer — carries list price + the dimensions promo matches
+/// rules/bundles on (item group, brand), which a plain `NewLine` does not.
+#[derive(Debug, Clone)]
+pub struct CartOrderLine {
+    pub item_id: Uuid,
+    pub item_group_id: Option<Uuid>,
+    pub brand_id: Option<Uuid>,
+    pub revenue_account_id: Option<Uuid>,
+    pub description: Option<String>,
+    pub list_price: Decimal,
+    pub quantity: Decimal,
+}
+
+/// A Sales Order priced through the promo cart seam (`create_sales_order_priced`).
+#[derive(Debug, Clone)]
+pub struct NewCartSalesOrder {
+    pub order_number: String,
+    pub company_id: Uuid,
+    pub branch_id: Option<Uuid>,
+    pub customer_id: Uuid,
+    pub customer_group_id: Option<Uuid>,
+    pub coupon_code: Option<String>,
+    pub order_date: chrono::NaiveDate,
+    pub delivery_date: Option<chrono::NaiveDate>,
+    pub currency: Option<String>,
+    pub tax_rate: Decimal,
+    pub notes: Option<String>,
+    pub lines: Vec<CartOrderLine>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +149,7 @@ pub enum SellingError {
     NotDraft(String),
     OverBilled,
     GlRejected { code: String, message: String },
+    PricingRejected { code: String, message: String },
     Db(sqlx::Error),
 }
 
@@ -139,6 +171,7 @@ impl SellingError {
             SellingError::OverBilled => "over_billed".into(),
             // Surface the GL's own stable code so callers see one contract vocabulary.
             SellingError::GlRejected { code, .. } => code.clone(),
+            SellingError::PricingRejected { code, .. } => code.clone(),
             SellingError::Db(_) => "internal_error".into(),
         }
     }
@@ -299,6 +332,95 @@ impl SellingWriteService {
         }
         tx.commit().await?;
         Ok(id)
+    }
+
+    /// Create a Sales Order whose prices are resolved by promo's CART pricer (the cart seam, ADR-002).
+    /// Selling passes the whole basket (list prices + item dimensions + optional coupon) to the
+    /// `CartPricingPort`; promo returns per-line nets that already fold in line rules, order-total
+    /// discounts, and bundles. Selling maps each net back to a `unit_price`/`line_discount` pair so the
+    /// order's own `price_document` reproduces the cart total exactly. Zero normal Cargo edge to promo.
+    pub async fn create_sales_order_priced(
+        &self,
+        o: NewCartSalesOrder,
+        pricing: &dyn CartPricingPort,
+    ) -> Result<Uuid, SellingError> {
+        if o.lines.is_empty() {
+            return Err(SellingError::EmptyDocument);
+        }
+        // Build the pricing request, keeping a parallel line_ref → input-index map.
+        let refs: Vec<Uuid> = o.lines.iter().map(|_| Uuid::new_v4()).collect();
+        let req = CartPriceRequest {
+            company_id: o.company_id,
+            customer_id: Some(o.customer_id),
+            customer_group_id: o.customer_group_id,
+            coupon_code: o.coupon_code.clone(),
+            lines: o
+                .lines
+                .iter()
+                .zip(&refs)
+                .map(|(l, r)| CartPriceLine {
+                    line_ref: *r,
+                    item_id: l.item_id,
+                    item_group_id: l.item_group_id,
+                    brand_id: l.brand_id,
+                    list_price: l.list_price,
+                    quantity: l.quantity,
+                })
+                .collect(),
+        };
+        let priced = pricing
+            .price_cart(&req)
+            .await
+            .map_err(|e| SellingError::PricingRejected { code: e.code, message: e.message })?;
+
+        // Map each priced net back to (unit_price, line_discount) so line_amount == net_line_total.
+        let mut lines = Vec::with_capacity(o.lines.len());
+        for (l, r) in o.lines.iter().zip(&refs) {
+            let pl = priced
+                .lines
+                .iter()
+                .find(|p| p.line_ref == *r)
+                .ok_or_else(|| SellingError::PricingRejected {
+                    code: "pricing_line_missing".into(),
+                    message: "pricer omitted a line".into(),
+                })?;
+            let gross = money(pl.unit_price * l.quantity);
+            let line_discount = (gross - pl.net_line_total).max(Decimal::ZERO);
+            lines.push(NewLine {
+                item_id: l.item_id,
+                revenue_account_id: l.revenue_account_id,
+                description: l.description.clone(),
+                quantity: l.quantity,
+                unit_price: pl.unit_price,
+                line_discount,
+            });
+        }
+        // Buy-X-get-Y: append the free goods as zero-priced lines (they don't change the subtotal).
+        for rl in &priced.reward_lines {
+            lines.push(NewLine {
+                item_id: rl.item_id,
+                revenue_account_id: None,
+                description: Some("promo reward (free)".into()),
+                quantity: rl.quantity,
+                unit_price: Decimal::ZERO,
+                line_discount: Decimal::ZERO,
+            });
+        }
+
+        self.create_sales_order(NewSalesOrder {
+            order_number: o.order_number,
+            quotation_id: None,
+            company_id: o.company_id,
+            branch_id: o.branch_id,
+            customer_id: o.customer_id,
+            order_date: o.order_date,
+            delivery_date: o.delivery_date,
+            currency: o.currency,
+            tax_rate: o.tax_rate,
+            notes: o.notes,
+            lines,
+        })
+        .await
     }
 
     /// Confirm a draft order → `to_deliver_and_bill` (awaiting both delivery and billing now that
