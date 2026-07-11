@@ -12,13 +12,21 @@ use std::sync::Arc;
 // Import handlers
 use crate::presentation::http::{
     create_quotation_routes,
+    create_quotation_read_routes,
     create_quotation_item_routes,
+    create_quotation_item_read_routes,
     create_sales_invoice_routes,
+    create_sales_invoice_read_routes,
     create_sales_invoice_item_routes,
+    create_sales_invoice_item_read_routes,
     create_sales_order_routes,
+    create_sales_order_read_routes,
     create_sales_order_item_routes,
+    create_sales_order_item_read_routes,
     create_sales_team_routes,
-    create_sales_person_allocation_routes
+    create_sales_team_read_routes,
+    create_sales_person_allocation_routes,
+    create_sales_person_allocation_read_routes
 };
 
 // Import AppState for stateful routes
@@ -50,6 +58,23 @@ pub fn create_stateless_routes(module: &crate::SellingModule) -> Router<()> {
         .merge(create_sales_order_item_routes(module.sales_order_item_service.clone()))
         .merge(create_sales_team_routes(module.sales_team_service.clone()))
         .merge(create_sales_person_allocation_routes(module.sales_person_allocation_service.clone()))
+}
+
+/// Read-only routes for the Selling module — every entity mounted READ-ONLY (the guarded base).
+///
+/// The generic `create_stateless_routes` exposes full mutable CRUD with no domain
+/// validation; this exposes only reads, so generic mutation can't bypass a write
+/// service's invariants. Extend it: `create_readonly_selling_routes(m).merge(my_validated_writes)`.
+pub fn create_readonly_selling_routes(module: &crate::SellingModule) -> Router<()> {
+    Router::new()
+        .merge(create_quotation_read_routes(module.quotation_service.clone()))
+        .merge(create_quotation_item_read_routes(module.quotation_item_service.clone()))
+        .merge(create_sales_invoice_read_routes(module.sales_invoice_service.clone()))
+        .merge(create_sales_invoice_item_read_routes(module.sales_invoice_item_service.clone()))
+        .merge(create_sales_order_read_routes(module.sales_order_service.clone()))
+        .merge(create_sales_order_item_read_routes(module.sales_order_item_service.clone()))
+        .merge(create_sales_team_read_routes(module.sales_team_service.clone()))
+        .merge(create_sales_person_allocation_read_routes(module.sales_person_allocation_service.clone()))
 }
 
 /// Get all routes (stateless) for the Selling module.
