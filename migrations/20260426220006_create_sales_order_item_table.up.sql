@@ -8,12 +8,12 @@ CREATE TABLE IF NOT EXISTS selling.sales_order_items (
     order_id UUID NOT NULL,
     item_id UUID NOT NULL,
     description TEXT,
-    quantity NUMERIC NOT NULL,
-    unit_price NUMERIC NOT NULL,
-    line_discount NUMERIC NOT NULL DEFAULT 0,
-    line_amount NUMERIC NOT NULL DEFAULT 0,
-    billed_qty NUMERIC NOT NULL DEFAULT 0,
-    delivered_qty NUMERIC NOT NULL DEFAULT 0,
+    quantity NUMERIC(18, 4) NOT NULL CHECK (quantity >= 0),
+    unit_price NUMERIC(18, 2) NOT NULL CHECK (unit_price >= 0),
+    line_discount NUMERIC(18, 2) NOT NULL DEFAULT 0 CHECK (line_discount >= 0),
+    line_amount NUMERIC(18, 2) NOT NULL DEFAULT 0 CHECK (line_amount >= 0),
+    billed_qty NUMERIC(18, 4) NOT NULL DEFAULT 0 CHECK (billed_qty >= 0),
+    delivered_qty NUMERIC(18, 4) NOT NULL DEFAULT 0 CHECK (delivered_qty >= 0),
     metadata JSONB NOT NULL DEFAULT '{"created_at":null,"updated_at":null,"deleted_at":null,"created_by":null,"updated_by":null,"deleted_by":null}'::jsonb,
     PRIMARY KEY (id)
 );

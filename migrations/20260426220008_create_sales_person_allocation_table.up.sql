@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS selling.sales_person_allocations (
     order_id UUID NOT NULL,
     sales_person_id UUID NOT NULL,
     sales_team_id UUID,
-    allocated_pct NUMERIC NOT NULL,
+    allocated_pct NUMERIC(5, 2) NOT NULL CHECK (allocated_pct >= 0),
     metadata JSONB NOT NULL DEFAULT '{"created_at":null,"updated_at":null,"deleted_at":null,"created_by":null,"updated_by":null,"deleted_by":null}'::jsonb,
     PRIMARY KEY (id)
 );
