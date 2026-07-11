@@ -151,6 +151,7 @@ pub enum SellingError {
     GlRejected { code: String, message: String },
     PricingRejected { code: String, message: String },
     Db(sqlx::Error),
+    Outbox(String),
 }
 
 impl SellingError {
@@ -173,6 +174,7 @@ impl SellingError {
             SellingError::GlRejected { code, .. } => code.clone(),
             SellingError::PricingRejected { code, .. } => code.clone(),
             SellingError::Db(_) => "internal_error".into(),
+            SellingError::Outbox(_) => "outbox_error".into(),
         }
     }
     pub fn http_status(&self) -> u16 {
@@ -180,7 +182,7 @@ impl SellingError {
             SellingError::InvoiceNotFound(_)
             | SellingError::QuotationNotFound(_)
             | SellingError::OrderNotFound(_) => 404,
-            SellingError::Db(_) => 500,
+            SellingError::Db(_) | SellingError::Outbox(_) => 500,
             _ => 422,
         }
     }
@@ -935,7 +937,21 @@ impl SellingWriteService {
             currency: hdr.get("currency"),
             lines,
         };
-        self.sink.publish(SellingEvent::DeliveryRequested(env.clone()));
+        // Durably stage the cross-module event before the in-proc publish (outbox rollout plan, P1):
+        // inventory SUBSCRIBES to DeliveryRequested to move stock + post COGS, so a crash between here and
+        // the in-proc publish must not drop it. Staged in its own tx → the relay drains selling.outbox_events;
+        // the in-proc publish stays as the fast path.
+        let event = SellingEvent::DeliveryRequested(env.clone());
+        let record = backbone_outbox::OutboxRecord::new(
+            "DeliveryRequested", "SalesOrder", order_id.to_string(),
+            serde_json::to_value(&event).map_err(|e| SellingError::Outbox(e.to_string()))?,
+            chrono::Utc::now(),
+        );
+        let mut tx = self.db_pool.begin().await?;
+        backbone_outbox::outbox::stage(&mut *tx, "selling", &record)
+            .await.map_err(|e| SellingError::Outbox(format!("stage: {e}")))?;
+        tx.commit().await?;
+        self.sink.publish(event);
         Ok(env)
     }
 

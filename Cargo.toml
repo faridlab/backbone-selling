@@ -8,6 +8,7 @@ description = "Selling: Quotation -> Sales Order -> Sales Invoice; emits revenue
 path = "src/lib.rs"
 
 [dependencies]
+backbone-outbox = { path = "../backbone-framework/backbone-outbox" }
 # -----------------------------------------------------------------------------
 # Backbone Framework crates
 #

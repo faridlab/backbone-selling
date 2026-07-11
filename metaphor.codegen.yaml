@@ -26,6 +26,7 @@ user_owned:
   - "tests/extension_contract.rs"
   - "tests/order_to_cash.rs"
   - "tests/delivery_seam.rs"
+  - "tests/delivery_outbox_durability.rs"
   - "tests/invoice_seam.rs"
   - "tests/features/**"
 
