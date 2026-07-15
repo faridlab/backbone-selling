@@ -150,7 +150,7 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
         lines: vec![NewLine { item_id: item, revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(oid).await.unwrap();
+    selling.confirm_sales_order(oid, company).await.unwrap();
     assert_eq!(order_status(&pool, oid).await, "to_deliver_and_bill");
 
     // 3) selling emits a delivery request; ACL maps it into inventory's DeliveryRequested.

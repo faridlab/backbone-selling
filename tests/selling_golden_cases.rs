@@ -231,11 +231,11 @@ async fn quotation_order_confirm_flow() {
         lines: vec![line(rev, "10", "100000", "0")],
     }).await.unwrap();
 
-    w.confirm_sales_order(oid).await.unwrap();
+    w.confirm_sales_order(oid, company).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(oid).fetch_one(&pool).await.unwrap();
     assert_eq!(st, "to_deliver_and_bill"); // ADR-003: confirmed order awaits both delivery and billing (inventory live)
 
     // confirming again (not draft) is rejected.
-    assert!(matches!(w.confirm_sales_order(oid).await.unwrap_err(), SellingError::NotDraft(_)));
+    assert!(matches!(w.confirm_sales_order(oid, company).await.unwrap_err(), SellingError::NotDraft(_)));
 }

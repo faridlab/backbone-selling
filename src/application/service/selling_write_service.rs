@@ -428,13 +428,23 @@ impl SellingWriteService {
     /// Confirm a draft order → `to_deliver_and_bill` (awaiting both delivery and billing now that
     /// inventory is live; ADR-003). Reaches `completed` only when fully billed AND fully delivered.
     /// Emits `SalesOrderConfirmed`.
-    pub async fn confirm_sales_order(&self, order_id: Uuid) -> Result<(), SellingError> {
+    /// Confirm a draft sales order (draft → to_deliver_and_bill); emits `SalesOrderConfirmed`.
+    ///
+    /// `company_id` scopes the lookup, so a principal of company A cannot confirm company B's order
+    /// by knowing its id — proving *who* the caller is is not enough, the row must be theirs. A
+    /// mismatched tenant is indistinguishable from a missing order (`NotDraft`), so this does not
+    /// leak whether the id exists.
+    pub async fn confirm_sales_order(
+        &self,
+        order_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<(), SellingError> {
         let row = sqlx::query(
             r#"UPDATE selling.sales_orders SET status='to_deliver_and_bill'::sales_order_status
-               WHERE id=$1 AND status='draft'::sales_order_status AND (metadata->>'deleted_at') IS NULL
+               WHERE id=$1 AND company_id=$2 AND status='draft'::sales_order_status AND (metadata->>'deleted_at') IS NULL
                RETURNING company_id, customer_id, total, currency"#,
         )
-        .bind(order_id).fetch_optional(&self.db_pool).await?;
+        .bind(order_id).bind(company_id).fetch_optional(&self.db_pool).await?;
         let row = row.ok_or_else(|| SellingError::NotDraft(order_id.to_string()))?;
         self.sink.publish(SellingEvent::SalesOrderConfirmed(SalesOrderConfirmed {
             order_id,
@@ -448,14 +458,21 @@ impl SellingWriteService {
 
     /// Accept a quotation (draft/sent → accepted); emits `QuotationAccepted`. Only an accepted
     /// quotation may be converted to a sales order.
-    pub async fn accept_quotation(&self, quotation_id: Uuid) -> Result<(), SellingError> {
+    ///
+    /// `company_id` scopes the lookup for the same reason as [`Self::confirm_sales_order`]: the
+    /// caller's tenant must own the row, not merely be authenticated.
+    pub async fn accept_quotation(
+        &self,
+        quotation_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<(), SellingError> {
         let row = sqlx::query(
             r#"UPDATE selling.quotations SET status='accepted'::quotation_status
-               WHERE id=$1 AND status = ANY(ARRAY['draft','sent']::quotation_status[])
+               WHERE id=$1 AND company_id=$2 AND status = ANY(ARRAY['draft','sent']::quotation_status[])
                  AND (metadata->>'deleted_at') IS NULL
                RETURNING company_id, customer_id"#,
         )
-        .bind(quotation_id).fetch_optional(&self.db_pool).await?;
+        .bind(quotation_id).bind(company_id).fetch_optional(&self.db_pool).await?;
         let row = row.ok_or_else(|| SellingError::NotDraft(quotation_id.to_string()))?;
         self.sink.publish(SellingEvent::QuotationAccepted(QuotationAccepted {
             quotation_id,

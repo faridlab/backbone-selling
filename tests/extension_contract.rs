@@ -52,12 +52,12 @@ async fn consumer_rule_rides_domain_event() {
 
     // Under the limit → confirmed, no breach recorded.
     let ok_order = make_order(&w, company, customer, "1000000").await;
-    w.confirm_sales_order(ok_order).await.unwrap();
+    w.confirm_sales_order(ok_order, company).await.unwrap();
     assert_eq!(breaches.lock().unwrap().len(), 0, "under-limit order does not breach");
 
     // Over the limit → confirmed, consumer records a breach (its own concept, not selling's).
     let big_order = make_order(&w, company, customer, "9000000").await;
-    w.confirm_sales_order(big_order).await.unwrap();
+    w.confirm_sales_order(big_order, company).await.unwrap();
     let recorded = breaches.lock().unwrap();
     assert_eq!(recorded.len(), 1, "over-limit order breaches");
     assert_eq!(recorded[0].order_id, big_order);
@@ -73,7 +73,7 @@ async fn selling_works_without_any_consumer() {
     let (company, customer) = (Uuid::new_v4(), Uuid::new_v4());
     let w = SellingWriteService::new(pool.clone()); // default LoggingSink, no consumer
     let order = make_order(&w, company, customer, "9000000").await;
-    w.confirm_sales_order(order).await.unwrap();
+    w.confirm_sales_order(order, company).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order).fetch_one(&pool).await.unwrap();
     assert_eq!(st, "to_deliver_and_bill");

@@ -98,7 +98,7 @@ async fn confirmed_order(selling: &SellingWriteService, company: Uuid, lines: Ve
         order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
         order_date: day(), delivery_date: None, currency: None, tax_rate: Decimal::ZERO, notes: None, lines,
     }).await.unwrap();
-    selling.confirm_sales_order(order).await.unwrap();
+    selling.confirm_sales_order(order, company).await.unwrap();
     order
 }
 async fn billed_total(pool: &PgPool, order: Uuid) -> Decimal {
@@ -162,7 +162,7 @@ async fn order_invoiced_across_three_modules() {
         order_date: day(), delivery_date: None, currency: None, tax_rate: Decimal::ZERO, notes: None,
         lines: vec![NewLine { item_id: item, revenue_account_id: None, description: None, quantity: d("10"), unit_price: d("100000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(order).await.unwrap();
+    selling.confirm_sales_order(order, company).await.unwrap();
 
     // 2) selling emits the invoice request (un-invoiced remainder = 10).
     let req: InvoiceRequestEnvelope = selling.build_invoice_request(order).await.unwrap();

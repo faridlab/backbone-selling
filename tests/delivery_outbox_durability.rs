@@ -32,7 +32,7 @@ async fn dod1_delivery_request_is_durably_staged() {
         lines: vec![NewLine { item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(oid).await.unwrap();
+    selling.confirm_sales_order(oid, company).await.unwrap();
 
     selling.build_delivery_request(oid).await.unwrap();
 

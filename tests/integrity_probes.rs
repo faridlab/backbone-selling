@@ -200,6 +200,45 @@ async fn guarded_write_rejects_token_without_company_id() {
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a token with no tenant must not write");
 }
 
+// IGT-4: authentication is not ownership. A principal of company A must not be able to confirm
+// company B's order by knowing its id — that would fire B's downstream billing and GL posting from
+// A's token. The tenant scopes the row lookup, so a foreign order is indistinguishable from a
+// missing one (404-shaped `not_draft`), which also avoids leaking whether the id exists.
+#[tokio::test]
+async fn a_principal_cannot_confirm_another_tenants_order() {
+    let pool = pool().await;
+    let m = module(&pool).await;
+    let victim_company = uuid::Uuid::new_v4();
+    let attacker_company = uuid::Uuid::new_v4();
+
+    // The victim's order, created legitimately under the victim's own token.
+    let number = uq("SO");
+    let body = format!(
+        r#"{{"orderNumber":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
+             "lines":[{{"itemId":"{}","revenueAccountId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
+        number, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
+    );
+    let (status, created) = req_as(app(&pool, &m), victim_company, "POST", "/sales-orders", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "victim order should be created: {created}");
+    let order_id: Uuid = serde_json::from_str::<serde_json::Value>(&created)
+        .unwrap()["id"].as_str().unwrap().parse().unwrap();
+
+    // The attacker authenticates as their own tenant and aims at the victim's order id.
+    let (status, _) = req_as(
+        app(&pool, &m), attacker_company, "POST", "/sales-orders/confirm",
+        Some(format!(r#"{{"orderId":"{order_id}"}}"#)),
+    ).await;
+    assert_ne!(status, StatusCode::OK, "a foreign tenant must not confirm this order");
+
+    // And the order is untouched — still draft, not advanced into the billing flow.
+    let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .expect("order row");
+    assert_eq!(st, "draft", "the victim's order must remain draft after a foreign confirm attempt");
+}
+
 // IGT-3: a `companyId` smuggled in the body is ignored — the persisted tenant is the token's. This is
 // the regression that motivated the change: the body must not be able to name the tenant.
 #[tokio::test]

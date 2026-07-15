@@ -168,9 +168,12 @@ struct ConfirmOrderBody {
 }
 async fn confirm_sales_order(
     State(svc): State<Arc<SellingWriteService>>,
+    tenant: TenantContext,
     Json(b): Json<ConfirmOrderBody>,
 ) -> axum::response::Response {
-    match svc.confirm_sales_order(b.order_id).await {
+    // The tenant scopes the lookup: authentication alone would let a principal of company A confirm
+    // company B's order by id, firing B's downstream billing and GL posting.
+    match svc.confirm_sales_order(b.order_id, tenant.company_id).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.order_id })).into_response(),
         Err(e) => err_response(e),
     }

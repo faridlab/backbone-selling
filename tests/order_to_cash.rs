@@ -54,7 +54,7 @@ async fn quote_to_order_to_invoice_to_posted() {
     }).await.unwrap();
 
     // 2) Accept, then 3) convert to a sales order.
-    w.accept_quotation(qid).await.unwrap();
+    w.accept_quotation(qid, company).await.unwrap();
     let oid = w.convert_quotation_to_order(qid, uq("SO")).await.unwrap();
 
     // Linkage: order references the quotation; quotation is now `ordered`.
@@ -66,7 +66,7 @@ async fn quote_to_order_to_invoice_to_posted() {
     assert_eq!(qstatus, "ordered");
 
     // 4) Confirm the order → to_bill.
-    w.confirm_sales_order(oid).await.unwrap();
+    w.confirm_sales_order(oid, company).await.unwrap();
 
     // 5) Raise the invoice FROM the order (lines linked to their SO lines).
     let inv = w.create_invoice_from_order(oid, uq("INV"), day(2026, 7, 3), ar, rev, Some(ppn)).await.unwrap();
