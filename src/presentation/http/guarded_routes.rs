@@ -18,7 +18,7 @@ use axum::{
     extract::State, http::StatusCode, middleware::from_fn_with_state, response::IntoResponse,
     routing::post, Json, Router,
 };
-use backbone_auth::tenant::{tenant_auth, TenantContext, TenantVerifier};
+use backbone_auth::company::{company_auth, CompanyContext, CompanyVerifier};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -81,7 +81,7 @@ impl From<LineBody> for NewLine {
 struct CreateQuotationBody {
     quotation_number: String,
     // No `company_id` / `branch_id`: the tenant is derived from the signed token via
-    // `TenantContext`, never from the request body — a client must not be able to name the tenant
+    // `CompanyContext`, never from the request body — a client must not be able to name the tenant
     // it writes into.
     customer_id: Uuid,
     quotation_date: chrono::NaiveDate,
@@ -97,7 +97,7 @@ struct CreateQuotationBody {
 }
 async fn create_quotation(
     State(svc): State<Arc<SellingWriteService>>,
-    tenant: TenantContext,
+    tenant: CompanyContext,
     Json(b): Json<CreateQuotationBody>,
 ) -> axum::response::Response {
     let q = NewQuotation {
@@ -124,7 +124,7 @@ struct CreateSalesOrderBody {
     order_number: String,
     #[serde(default)]
     quotation_id: Option<Uuid>,
-    // Tenant comes from the signed token (`TenantContext`), not the body.
+    // Tenant comes from the signed token (`CompanyContext`), not the body.
     customer_id: Uuid,
     order_date: chrono::NaiveDate,
     #[serde(default)]
@@ -139,7 +139,7 @@ struct CreateSalesOrderBody {
 }
 async fn create_sales_order(
     State(svc): State<Arc<SellingWriteService>>,
-    tenant: TenantContext,
+    tenant: CompanyContext,
     Json(b): Json<CreateSalesOrderBody>,
 ) -> axum::response::Response {
     let o = NewSalesOrder {
@@ -168,7 +168,7 @@ struct ConfirmOrderBody {
 }
 async fn confirm_sales_order(
     State(svc): State<Arc<SellingWriteService>>,
-    tenant: TenantContext,
+    tenant: CompanyContext,
     Json(b): Json<ConfirmOrderBody>,
 ) -> axum::response::Response {
     // The tenant scopes the lookup: authentication alone would let a principal of company A confirm
@@ -185,7 +185,7 @@ struct CreateSalesInvoiceBody {
     invoice_number: String,
     #[serde(default)]
     sales_order_id: Option<Uuid>,
-    // Tenant comes from the signed token (`TenantContext`), not the body.
+    // Tenant comes from the signed token (`CompanyContext`), not the body.
     customer_id: Uuid,
     invoice_date: chrono::NaiveDate,
     #[serde(default)]
@@ -203,7 +203,7 @@ struct CreateSalesInvoiceBody {
 }
 async fn create_sales_invoice(
     State(svc): State<Arc<SellingWriteService>>,
-    tenant: TenantContext,
+    tenant: CompanyContext,
     Json(b): Json<CreateSalesInvoiceBody>,
 ) -> axum::response::Response {
     let inv = NewSalesInvoice {
@@ -227,32 +227,32 @@ async fn create_sales_invoice(
     }
 }
 
-fn create_selling_write_routes(svc: Arc<SellingWriteService>, verifier: TenantVerifier) -> Router {
+fn create_selling_write_routes(svc: Arc<SellingWriteService>, verifier: CompanyVerifier) -> Router {
     Router::new()
         .route("/quotations", post(create_quotation))
         .route("/sales-orders", post(create_sales_order))
         .route("/sales-orders/confirm", post(confirm_sales_order))
         .route("/sales-invoices", post(create_sales_invoice))
-        // Every write above is tenant-scoped: `tenant_auth` rejects a request whose token is absent,
+        // Every write above is tenant-scoped: `company_auth` rejects a request whose token is absent,
         // invalid, or carries no `company_id`, so a handler only ever runs with a proven tenant.
         //
         // `route_layer`, not `layer`: `layer` would also wrap this router's fallback, so once merged
         // every *unmatched* path (e.g. the generic CRUD paths this surface deliberately does not
         // mount) would answer 401 instead of 404 — leaking "auth required" for routes that do not
         // exist, and masking the CRUD-bypass probes.
-        .route_layer(from_fn_with_state(verifier, tenant_auth))
+        .route_layer(from_fn_with_state(verifier, company_auth))
         .with_state(svc)
 }
 
 /// Mount the selling module: read all documents + validated, tenant-scoped creates. Generic mutation
 /// is not mounted. **Prefer this over `SellingModule::all_crud_routes()` for any real deployment.**
 ///
-/// The composing service builds one [`TenantVerifier`] from its JWT secret and passes it here; the
+/// The composing service builds one [`CompanyVerifier`] from its JWT secret and passes it here; the
 /// write surface derives `company_id` from the token, so no tenant crosses the wire in a body.
 pub fn create_guarded_selling_routes(
     m: &SellingModule,
     pool: PgPool,
-    verifier: TenantVerifier,
+    verifier: CompanyVerifier,
 ) -> Router {
     let write = Arc::new(SellingWriteService::new(pool));
     Router::new()
