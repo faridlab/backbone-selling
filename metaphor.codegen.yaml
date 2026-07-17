@@ -16,6 +16,7 @@ user_owned:
   - "src/application/service/selling_events.rs"
   - "src/application/service/selling_gl.rs"
   - "src/application/service/selling_write_service.rs"
+  - "src/application/service/selling_cart_pricing.rs"
   - "src/application/service/consumer_credit_rule_custom.rs"
   - "src/presentation/http/guarded_routes.rs"
 
