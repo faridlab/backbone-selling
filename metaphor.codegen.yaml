@@ -20,6 +20,18 @@ user_owned:
   - "src/application/service/consumer_credit_rule_custom.rs"
   - "src/presentation/http/guarded_routes.rs"
 
+  # The six document repositories own the hand-written selling SQL that the write service
+  # orchestrates (the header+lines inserts, the guarded state transitions, the GL posting-state
+  # transitions, the fulfillment watermarks, the FOR UPDATE billing allocation). Declared here — not
+  # renamed with a `_custom` suffix — so the generator skips them wholesale; this declaration is what
+  # makes editing them legitimate.
+  - "src/infrastructure/persistence/quotation_repository.rs"
+  - "src/infrastructure/persistence/quotation_item_repository.rs"
+  - "src/infrastructure/persistence/sales_order_repository.rs"
+  - "src/infrastructure/persistence/sales_order_item_repository.rs"
+  - "src/infrastructure/persistence/sales_invoice_repository.rs"
+  - "src/infrastructure/persistence/sales_invoice_item_repository.rs"
+
   # Behavior tests (the golden oracle) + route probes + seam + extension-contract round-trip + BDD.
   - "tests/selling_golden_cases.rs"
   - "tests/gl_posting_seam.rs"

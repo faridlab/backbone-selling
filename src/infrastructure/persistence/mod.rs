@@ -36,4 +36,20 @@ pub use backbone_orm::repository::{
 
 // Re-export custom persistence types
 // <<< CUSTOM
+// The hand-written selling SQL's parameter/projection types. Their repositories are declared
+// `user_owned` in metaphor.codegen.yaml; these types mirror COLUMNS, not entities.
+pub use quotation_repository::{AcceptedQuotationRow, NewQuotationRow, QuotationConversionRow};
+pub use quotation_item_repository::{NewQuotationItemRow, QuotationLineRow};
+pub use sales_order_repository::{
+    ConfirmedOrderRow, InvoiceSourceOrderRow, NewSalesOrderRow, OrderFulfillmentHeaderRow,
+    SalesOrderRefRow,
+};
+pub use sales_order_item_repository::{
+    LineBillingCapacityRow, NewSalesOrderItemRow, OrderBillingRemainderRow,
+    OrderDeliveryRemainderRow, OrderLineForInvoiceRow, WatermarkRollupRow,
+};
+pub use sales_invoice_repository::{
+    InvoicePostSourceRow, InvoicePostingStateRow, NewSalesInvoiceRow,
+};
+pub use sales_invoice_item_repository::{InvoiceRevenueLineRow, NewSalesInvoiceItemRow};
 // END CUSTOM
