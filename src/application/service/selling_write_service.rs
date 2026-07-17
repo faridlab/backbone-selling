@@ -11,6 +11,7 @@
 //!
 //! Money: `NUMERIC` in the DB; `Decimal` here; half-up to 2dp so `Σ credit == debit` exactly.
 
+use backbone_orm::company_scope;
 use rust_decimal::{Decimal, RoundingStrategy};
 use sqlx::{PgPool, Row};
 use std::collections::BTreeMap;
@@ -274,7 +275,11 @@ impl SellingWriteService {
         let (priced, subtotal, tax_amount, total) = price_document(&q.lines, q.tax_rate)?;
         let id = Uuid::new_v4();
         let currency = q.currency.unwrap_or_else(|| "IDR".into());
+        // RLS scope (ADR-0008): the header+lines insert runs in ONE transaction whose connection is
+        // bound to this document's company, so every write is fenced by `app.company_id`. The explicit
+        // `company_id` binds below stay as defense-in-depth.
         let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_company_on(&mut tx, q.company_id).await?;
         let r = sqlx::query(
             r#"INSERT INTO selling.quotations
                 (id, quotation_number, company_id, branch_id, customer_id, status, quotation_date,
@@ -308,7 +313,9 @@ impl SellingWriteService {
         let (priced, subtotal, tax_amount, total) = price_document(&o.lines, o.tax_rate)?;
         let id = Uuid::new_v4();
         let currency = o.currency.unwrap_or_else(|| "IDR".into());
+        // RLS scope (ADR-0008): bind the order's company onto the header+lines transaction.
         let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_company_on(&mut tx, o.company_id).await?;
         let r = sqlx::query(
             r#"INSERT INTO selling.sales_orders
                 (id, order_number, quotation_id, company_id, branch_id, customer_id, status,
@@ -439,12 +446,18 @@ impl SellingWriteService {
         order_id: Uuid,
         company_id: Uuid,
     ) -> Result<(), SellingError> {
-        let row = sqlx::query(
+        // RLS scope (ADR-0008): company on the parameter — scope the guarded update so it runs with
+        // `app.company_id` set. The explicit `company_id=$2` filter stays as defense-in-depth.
+        let row_q = sqlx::query(
             r#"UPDATE selling.sales_orders SET status='to_deliver_and_bill'::sales_order_status
                WHERE id=$1 AND company_id=$2 AND status='draft'::sales_order_status AND (metadata->>'deleted_at') IS NULL
                RETURNING company_id, customer_id, total, currency"#,
         )
-        .bind(order_id).bind(company_id).fetch_optional(&self.db_pool).await?;
+        .bind(order_id).bind(company_id);
+        let row = company_scope::with_company_scope(
+            Some(company_id),
+            company_scope::fetch_optional_row_scoped(&self.db_pool, row_q),
+        ).await?;
         let row = row.ok_or_else(|| SellingError::NotDraft(order_id.to_string()))?;
         self.sink.publish(SellingEvent::SalesOrderConfirmed(SalesOrderConfirmed {
             order_id,
@@ -466,13 +479,18 @@ impl SellingWriteService {
         quotation_id: Uuid,
         company_id: Uuid,
     ) -> Result<(), SellingError> {
-        let row = sqlx::query(
+        // RLS scope (ADR-0008): company on the parameter — same shape as `confirm_sales_order`.
+        let row_q = sqlx::query(
             r#"UPDATE selling.quotations SET status='accepted'::quotation_status
                WHERE id=$1 AND company_id=$2 AND status = ANY(ARRAY['draft','sent']::quotation_status[])
                  AND (metadata->>'deleted_at') IS NULL
                RETURNING company_id, customer_id"#,
         )
-        .bind(quotation_id).bind(company_id).fetch_optional(&self.db_pool).await?;
+        .bind(quotation_id).bind(company_id);
+        let row = company_scope::with_company_scope(
+            Some(company_id),
+            company_scope::fetch_optional_row_scoped(&self.db_pool, row_q),
+        ).await?;
         let row = row.ok_or_else(|| SellingError::NotDraft(quotation_id.to_string()))?;
         self.sink.publish(SellingEvent::QuotationAccepted(QuotationAccepted {
             quotation_id,
@@ -489,20 +507,27 @@ impl SellingWriteService {
         quotation_id: Uuid,
         order_number: String,
     ) -> Result<Uuid, SellingError> {
-        let q = sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern: identified by the quotation id alone, with no company
+        // argument to scope from up front. These reads therefore ride the REQUEST-dedicated connection
+        // (established by `company_auth`), which carries the caller's `app.company_id` — RLS fences the
+        // lookup so another company's quotation simply isn't found. `create_sales_order` below binds the
+        // quotation's own company onto its transaction.
+        let q_q = sqlx::query(
             r#"SELECT company_id, branch_id, customer_id, currency, tax_rate, status::text AS st
                FROM selling.quotations WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(quotation_id).fetch_optional(&self.db_pool).await?
-        .ok_or(SellingError::QuotationNotFound(quotation_id))?;
+        .bind(quotation_id);
+        let q = company_scope::fetch_optional_row_scoped(&self.db_pool, q_q).await?
+            .ok_or(SellingError::QuotationNotFound(quotation_id))?;
         if q.get::<String, _>("st") != "accepted" {
             return Err(SellingError::QuotationNotAccepted(quotation_id));
         }
-        let lines = sqlx::query(
+        let lines_q = sqlx::query(
             r#"SELECT item_id, description, quantity, unit_price, line_discount
                FROM selling.quotation_items WHERE quotation_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(quotation_id).fetch_all(&self.db_pool).await?;
+        .bind(quotation_id);
+        let lines = company_scope::fetch_all_rows_scoped(&self.db_pool, lines_q).await?;
 
         let new_lines: Vec<NewLine> = lines.iter().map(|l| NewLine {
             item_id: l.get("item_id"),
@@ -527,21 +552,24 @@ impl SellingWriteService {
             lines: new_lines,
         }).await?;
 
-        sqlx::query(
+        let mark_q = sqlx::query(
             r#"UPDATE selling.quotations SET status='ordered'::quotation_status WHERE id=$1"#,
         )
-        .bind(quotation_id).execute(&self.db_pool).await?;
+        .bind(quotation_id);
+        company_scope::execute_scoped(&self.db_pool, mark_q).await?;
         Ok(order_id)
     }
 
     /// Load the exported `SalesOrderRef` (the brief's cross-module DTO) for one order.
     pub async fn sales_order_ref(&self, order_id: Uuid) -> Result<SalesOrderRef, SellingError> {
-        let row = sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern — see `convert_quotation_to_order`.
+        let row_q = sqlx::query(
             r#"SELECT customer_id, company_id, total, currency FROM selling.sales_orders
                WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(order_id).fetch_optional(&self.db_pool).await?
-        .ok_or(SellingError::OrderNotFound(order_id))?;
+        .bind(order_id);
+        let row = company_scope::fetch_optional_row_scoped(&self.db_pool, row_q).await?
+            .ok_or(SellingError::OrderNotFound(order_id))?;
         Ok(SalesOrderRef {
             id: order_id,
             customer_id: row.get("customer_id"),
@@ -565,7 +593,9 @@ impl SellingWriteService {
         }
         let id = Uuid::new_v4();
         let currency = inv.currency.unwrap_or_else(|| "IDR".into());
+        // RLS scope (ADR-0008): bind the invoice's company onto the header+lines transaction.
         let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_company_on(&mut tx, inv.company_id).await?;
         let r = sqlx::query(
             r#"INSERT INTO selling.sales_invoices
                 (id, invoice_number, sales_order_id, company_id, branch_id, customer_id, status,
@@ -617,17 +647,21 @@ impl SellingWriteService {
         default_revenue_account_id: Uuid,
         tax_output_account_id: Option<Uuid>,
     ) -> Result<Uuid, SellingError> {
-        let o = sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern: the order lookup rides the request-dedicated
+        // connection; having read the order we bind ITS company onto the invoice transaction below.
+        let o_q = sqlx::query(
             r#"SELECT company_id, branch_id, customer_id, currency, tax_rate
                FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(order_id).fetch_optional(&self.db_pool).await?
-        .ok_or(SellingError::OrderNotFound(order_id))?;
-        let items = sqlx::query(
+        .bind(order_id);
+        let o = company_scope::fetch_optional_row_scoped(&self.db_pool, o_q).await?
+            .ok_or(SellingError::OrderNotFound(order_id))?;
+        let items_q = sqlx::query(
             r#"SELECT id, item_id, description, quantity, unit_price, line_discount
                FROM selling.sales_order_items WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(order_id).fetch_all(&self.db_pool).await?;
+        .bind(order_id);
+        let items = company_scope::fetch_all_rows_scoped(&self.db_pool, items_q).await?;
         if items.is_empty() {
             return Err(SellingError::EmptyDocument);
         }
@@ -661,7 +695,9 @@ impl SellingWriteService {
         let currency: String = o.get("currency");
 
         let id = Uuid::new_v4();
+        let order_company: Uuid = o.get("company_id");
         let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_company_on(&mut tx, order_company).await?;
         let r = sqlx::query(
             r#"INSERT INTO selling.sales_invoices
                 (id, invoice_number, sales_order_id, company_id, branch_id, customer_id, status,
@@ -704,14 +740,16 @@ impl SellingWriteService {
     /// party) · Cr Revenue (per income account, summed) · Cr PPN Output (tax_amount, if any).
     /// Pure + deterministic — the golden oracle asserts these lines directly.
     pub async fn build_revenue_post(&self, invoice_id: Uuid) -> Result<AccountingPostEnvelope, SellingError> {
-        let inv = sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern — see `convert_quotation_to_order`.
+        let inv_q = sqlx::query(
             r#"SELECT invoice_number, company_id, branch_id, customer_id, invoice_date, currency,
                       subtotal, tax_amount, total, receivable_account_id, tax_output_account_id
                FROM selling.sales_invoices
                WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(invoice_id).fetch_optional(&self.db_pool).await?
-        .ok_or(SellingError::InvoiceNotFound(invoice_id))?;
+        .bind(invoice_id);
+        let inv = company_scope::fetch_optional_row_scoped(&self.db_pool, inv_q).await?
+            .ok_or(SellingError::InvoiceNotFound(invoice_id))?;
 
         let company_id: Uuid = inv.get("company_id");
         let branch_id: Option<Uuid> = inv.get("branch_id");
@@ -733,11 +771,12 @@ impl SellingWriteService {
         }
 
         // Credit revenue grouped by income account (BTreeMap → deterministic line order).
-        let rows = sqlx::query(
+        let rows_q = sqlx::query(
             r#"SELECT revenue_account_id, line_amount FROM selling.sales_invoice_items
                WHERE invoice_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(invoice_id).fetch_all(&self.db_pool).await?;
+        .bind(invoice_id);
+        let rows = company_scope::fetch_all_rows_scoped(&self.db_pool, rows_q).await?;
         if rows.is_empty() {
             return Err(SellingError::EmptyDocument);
         }
@@ -794,12 +833,17 @@ impl SellingWriteService {
         sink: &dyn GlPostSink,
     ) -> Result<PostOutcome, SellingError> {
         // Idempotency short-circuit: already posted → return the recorded ids, no re-emit.
-        let existing = sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern: identified by the invoice id alone. Under HTTP the
+        // request-dedicated connection carries the scope. When driven by an EVENT or a job, the caller
+        // must wrap this in `with_company_scope(Some(event.company_id))` — otherwise these reads fail
+        // closed.
+        let existing_q = sqlx::query(
             r#"SELECT posting_state::text AS ps, journal_id, accounting_post_id
                FROM selling.sales_invoices WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(invoice_id).fetch_optional(&self.db_pool).await?
-        .ok_or(SellingError::InvoiceNotFound(invoice_id))?;
+        .bind(invoice_id);
+        let existing = company_scope::fetch_optional_row_scoped(&self.db_pool, existing_q).await?
+            .ok_or(SellingError::InvoiceNotFound(invoice_id))?;
         let state: String = existing.get("ps");
         if state == "posted" {
             let journal_id: Option<Uuid> = existing.get("journal_id");
@@ -820,7 +864,7 @@ impl SellingWriteService {
         // are defense-in-depth so selling is self-consistent even if a downstream ever weakened.
         match sink.post(&envelope).await {
             Ok(ack) => {
-                sqlx::query(
+                let reconcile_q = sqlx::query(
                     r#"UPDATE selling.sales_invoices
                        SET posting_state='posted'::gl_posting_state,
                            status='submitted'::sales_invoice_status,
@@ -828,8 +872,8 @@ impl SellingWriteService {
                            outstanding_amount=total
                        WHERE id=$1 AND posting_state <> 'posted'::gl_posting_state"#,
                 )
-                .bind(invoice_id).bind(ack.journal_id).bind(ack.post_id)
-                .execute(&self.db_pool).await?;
+                .bind(invoice_id).bind(ack.journal_id).bind(ack.post_id);
+                company_scope::execute_scoped(&self.db_pool, reconcile_q).await?;
 
                 // Advance the source order's billed watermarks (only for a fresh post) and close it
                 // out when fully billed. Each invoice line carries its `sales_order_item_id`.
@@ -838,10 +882,11 @@ impl SellingWriteService {
                 }
 
                 // Read total for the event, then publish SalesInvoicePosted.
-                let total: Decimal = sqlx::query_scalar(
+                let total_q = sqlx::query_scalar(
                     "SELECT total FROM selling.sales_invoices WHERE id=$1",
                 )
-                .bind(invoice_id).fetch_one(&self.db_pool).await?;
+                .bind(invoice_id);
+                let total: Decimal = company_scope::fetch_one_scalar_scoped(&self.db_pool, total_q).await?;
                 self.sink.publish(SellingEvent::SalesInvoicePosted(SalesInvoicePosted {
                     invoice_id,
                     company_id: envelope.company_id,
@@ -859,10 +904,11 @@ impl SellingWriteService {
             }
             Err(rej) => {
                 // Record the failure so the invoice reflects the rejected post (audit/retry).
-                let _ = sqlx::query(
+                let fail_q = sqlx::query(
                     r#"UPDATE selling.sales_invoices SET posting_state='failed'::gl_posting_state WHERE id=$1"#,
                 )
-                .bind(invoice_id).execute(&self.db_pool).await;
+                .bind(invoice_id);
+                let _ = company_scope::execute_scoped(&self.db_pool, fail_q).await;
                 Err(SellingError::GlRejected { code: rej.code, message: rej.message })
             }
         }
@@ -871,7 +917,8 @@ impl SellingWriteService {
     /// For each invoice line linked to a sales-order line, add the invoiced quantity to that SO
     /// line's `billed_qty`; then recompute the order status. No-op for a direct invoice.
     async fn advance_billing_watermarks(&self, invoice_id: Uuid) -> Result<(), SellingError> {
-        sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern — inherits the caller's scope (`post_sales_invoice`).
+        let advance_q = sqlx::query(
             r#"UPDATE selling.sales_order_items soi
                SET billed_qty = soi.billed_qty + ii.qty
                FROM (SELECT sales_order_item_id AS soi_id, SUM(quantity) AS qty
@@ -881,12 +928,14 @@ impl SellingWriteService {
                      GROUP BY sales_order_item_id) ii
                WHERE soi.id = ii.soi_id"#,
         )
-        .bind(invoice_id).execute(&self.db_pool).await?;
+        .bind(invoice_id);
+        company_scope::execute_scoped(&self.db_pool, advance_q).await?;
 
-        let order_id: Option<Uuid> = sqlx::query_scalar(
+        let order_q = sqlx::query_scalar(
             "SELECT sales_order_id FROM selling.sales_invoices WHERE id=$1",
         )
-        .bind(invoice_id).fetch_one(&self.db_pool).await?;
+        .bind(invoice_id);
+        let order_id: Option<Uuid> = company_scope::fetch_one_scalar_scoped(&self.db_pool, order_q).await?;
         if let Some(oid) = order_id {
             self.recompute_order_status(oid).await?;
         }
@@ -898,13 +947,15 @@ impl SellingWriteService {
     /// (delivered, awaiting billing) / `to_deliver_and_bill` (awaiting both). Never touches a
     /// draft/closed/cancelled order.
     async fn recompute_order_status(&self, order_id: Uuid) -> Result<(), SellingError> {
-        let row = sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern — inherits the caller's scope.
+        let row_q = sqlx::query(
             r#"SELECT bool_and(billed_qty >= quantity) AS billed_all,
                       bool_and(delivered_qty >= quantity) AS delivered_all
                FROM selling.sales_order_items
                WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(order_id).fetch_one(&self.db_pool).await?;
+        .bind(order_id);
+        let row = company_scope::fetch_one_row_scoped(&self.db_pool, row_q).await?;
         let billed_all: Option<bool> = row.get("billed_all");
         let delivered_all: Option<bool> = row.get("delivered_all");
         let next = match (billed_all.unwrap_or(false), delivered_all.unwrap_or(false)) {
@@ -914,11 +965,12 @@ impl SellingWriteService {
             (false, false) => "to_deliver_and_bill",
         };
         // Only advance an in-flight (confirmed) order; leave draft/closed/cancelled alone.
-        sqlx::query(
+        let advance_q = sqlx::query(
             r#"UPDATE selling.sales_orders SET status=$2::sales_order_status
                WHERE id=$1 AND status = ANY(ARRAY['to_deliver','to_bill','to_deliver_and_bill']::sales_order_status[])"#,
         )
-        .bind(order_id).bind(next).execute(&self.db_pool).await?;
+        .bind(order_id).bind(next);
+        company_scope::execute_scoped(&self.db_pool, advance_q).await?;
         Ok(())
     }
 
@@ -928,21 +980,25 @@ impl SellingWriteService {
     /// a fulfillment/composition layer maps it into inventory's `DeliveryRequested`). Emits the
     /// `DeliveryRequested` domain event. Guard: the order must be confirmed (not draft/cancelled).
     pub async fn build_delivery_request(&self, order_id: Uuid) -> Result<DeliveryRequestEnvelope, SellingError> {
-        let hdr = sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern: the reads ride the request-dedicated connection;
+        // having read the order we bind ITS company onto the outbox transaction below.
+        let hdr_q = sqlx::query(
             r#"SELECT company_id, customer_id, currency, status::text AS st
                FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(order_id).fetch_optional(&self.db_pool).await?
-        .ok_or(SellingError::OrderNotFound(order_id))?;
+        .bind(order_id);
+        let hdr = company_scope::fetch_optional_row_scoped(&self.db_pool, hdr_q).await?
+            .ok_or(SellingError::OrderNotFound(order_id))?;
         if hdr.get::<String, _>("st") == "draft" {
             return Err(SellingError::NotDraft(order_id.to_string())); // reuse: "not in a confirmable/deliverable state"
         }
-        let rows = sqlx::query(
+        let rows_q = sqlx::query(
             r#"SELECT item_id, (quantity - delivered_qty) AS remaining
                FROM selling.sales_order_items
                WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL AND (quantity - delivered_qty) > 0"#,
         )
-        .bind(order_id).fetch_all(&self.db_pool).await?;
+        .bind(order_id);
+        let rows = company_scope::fetch_all_rows_scoped(&self.db_pool, rows_q).await?;
         let lines: Vec<DeliveryRequestLine> = rows.iter().map(|r| DeliveryRequestLine {
             item_id: r.get("item_id"),
             quantity: r.get("remaining"),
@@ -965,6 +1021,7 @@ impl SellingWriteService {
             chrono::Utc::now(),
         );
         let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_company_on(&mut tx, env.company_id).await?;
         backbone_outbox::outbox::stage(&mut *tx, "selling", &record)
             .await.map_err(|e| SellingError::Outbox(format!("stage: {e}")))?;
         tx.commit().await?;
@@ -975,13 +1032,17 @@ impl SellingWriteService {
     /// Record a delivery against an order (the inbound handler for inventory's `StockDelivered`):
     /// advance `delivered_qty` per item and recompute the order status. Matches by `item_id`.
     pub async fn mark_delivered(&self, order_id: Uuid, deliveries: &[(Uuid, Decimal)]) -> Result<(), SellingError> {
+        // RLS scope (ADR-0008), ID-only pattern: no company is available here, and this is the inbound
+        // handler for inventory's `StockDelivered` — the CALLER must wrap this in
+        // `with_company_scope(Some(event.company_id))`, otherwise these writes fail closed.
         for (item_id, qty) in deliveries {
-            sqlx::query(
+            let deliver_q = sqlx::query(
                 r#"UPDATE selling.sales_order_items
                    SET delivered_qty = delivered_qty + $3
                    WHERE order_id=$1 AND item_id=$2 AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(order_id).bind(item_id).bind(qty).execute(&self.db_pool).await?;
+            .bind(order_id).bind(item_id).bind(qty);
+            company_scope::execute_scoped(&self.db_pool, deliver_q).await?;
         }
         self.recompute_order_status(order_id).await?;
         Ok(())
@@ -994,21 +1055,24 @@ impl SellingWriteService {
     /// accounts) and posts the real revenue journal — so selling no longer owns invoicing or posts
     /// revenue itself (retiring `create_invoice_from_order` in the composed flow).
     pub async fn build_invoice_request(&self, order_id: Uuid) -> Result<InvoiceRequestEnvelope, SellingError> {
-        let hdr = sqlx::query(
+        // RLS scope (ADR-0008), ID-only pattern — see `build_delivery_request`. Read-only.
+        let hdr_q = sqlx::query(
             r#"SELECT company_id, customer_id, currency, status::text AS st
                FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(order_id).fetch_optional(&self.db_pool).await?
-        .ok_or(SellingError::OrderNotFound(order_id))?;
+        .bind(order_id);
+        let hdr = company_scope::fetch_optional_row_scoped(&self.db_pool, hdr_q).await?
+            .ok_or(SellingError::OrderNotFound(order_id))?;
         if hdr.get::<String, _>("st") == "draft" {
             return Err(SellingError::NotDraft(order_id.to_string()));
         }
-        let rows = sqlx::query(
+        let rows_q = sqlx::query(
             r#"SELECT item_id, (quantity - billed_qty) AS remaining, unit_price
                FROM selling.sales_order_items
                WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL AND (quantity - billed_qty) > 0"#,
         )
-        .bind(order_id).fetch_all(&self.db_pool).await?;
+        .bind(order_id);
+        let rows = company_scope::fetch_all_rows_scoped(&self.db_pool, rows_q).await?;
         let lines: Vec<InvoiceRequestLine> = rows.iter().map(|r| InvoiceRequestLine {
             item_id: r.get("item_id"),
             quantity: r.get("remaining"),
@@ -1035,7 +1099,13 @@ impl SellingWriteService {
     /// `completed`. Serializing the *writer* (not just the upstream remainder) is what closes the race.
     /// Aggregate-by-item, fill in line order — correct even for duplicate-item orders.
     pub async fn mark_invoiced(&self, order_id: Uuid, billed: &[(Uuid, Decimal)]) -> Result<(), SellingError> {
+        // RLS scope (ADR-0008), ID-only pattern: this method has NO company available — it is the
+        // inbound handler for billing's `SalesInvoicePosted`, so the allocation tx binds the AMBIENT
+        // task-local company. The CALLER must wrap this in `with_company_scope(Some(event.company_id))`
+        // — the event carries the company — otherwise the `FOR UPDATE` reads inside `allocate_billed`
+        // fail closed and every allocation would read zero capacity.
         let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_current_company(&mut tx).await?;
         for (item_id, qty) in billed {
             Self::allocate_billed(&mut tx, order_id, *item_id, *qty).await?;
         }
