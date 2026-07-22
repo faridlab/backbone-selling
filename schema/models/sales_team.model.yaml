@@ -58,6 +58,11 @@ models:
         attributes: ["@required", "@foreign_key(SalesOrder.id)"]
         description: "Owning sales order"
 
+      company_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Books owner # logical FK to organization.Company.id (denormalized from SalesOrder.company_id for direct RLS fencing — ADR-0010 Decision A)"
+
       sales_person_id:
         type: uuid
         attributes: ["@required", "@exclude_from_foreign_key_check"]

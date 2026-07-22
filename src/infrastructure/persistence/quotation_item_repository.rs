@@ -46,6 +46,7 @@ impl QuotationItemRepository {
 pub struct NewQuotationItemRow<'a> {
     pub id: Uuid,
     pub quotation_id: Uuid,
+    pub company_id: Uuid,
     pub item_id: Uuid,
     pub description: Option<&'a str>,
     pub quantity: Decimal,
@@ -77,10 +78,10 @@ impl QuotationItemRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.quotation_items
-                (id, quotation_id, item_id, description, quantity, unit_price, line_discount, line_amount)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"#,
+                (id, quotation_id, company_id, item_id, description, quantity, unit_price, line_discount, line_amount)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)"#,
         )
-        .bind(l.id).bind(l.quotation_id).bind(l.item_id).bind(l.description)
+        .bind(l.id).bind(l.quotation_id).bind(l.company_id).bind(l.item_id).bind(l.description)
         .bind(l.quantity).bind(l.unit_price).bind(l.line_discount).bind(l.line_amount)
         .execute(conn)
         .await?;

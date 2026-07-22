@@ -337,6 +337,7 @@ impl SellingWriteService {
             self.repos.quotation_items.insert_line(&mut tx, &NewQuotationItemRow {
                 id: Uuid::new_v4(),
                 quotation_id: id,
+                company_id: q.company_id,
                 item_id: p.item_id,
                 description: p.description.as_deref(),
                 quantity: p.quantity,
@@ -381,6 +382,7 @@ impl SellingWriteService {
             self.repos.order_items.insert_line(&mut tx, &NewSalesOrderItemRow {
                 id: Uuid::new_v4(),
                 order_id: id,
+                company_id: o.company_id,
                 item_id: p.item_id,
                 description: p.description.as_deref(),
                 quantity: p.quantity,
@@ -641,6 +643,7 @@ impl SellingWriteService {
             self.repos.invoice_items.insert_line(&mut tx, &NewSalesInvoiceItemRow {
                 id: Uuid::new_v4(),
                 invoice_id: id,
+                company_id: inv.company_id,
                 item_id: p.item_id,
                 sales_order_item_id: None,
                 revenue_account_id: p.revenue_account_id,
@@ -744,6 +747,7 @@ impl SellingWriteService {
             self.repos.invoice_items.insert_line(&mut tx, &NewSalesInvoiceItemRow {
                 id: Uuid::new_v4(),
                 invoice_id: id,
+                company_id: order_company,
                 item_id: p.item_id,
                 sales_order_item_id: Some(*soi_id),
                 revenue_account_id: p.revenue_account_id,
