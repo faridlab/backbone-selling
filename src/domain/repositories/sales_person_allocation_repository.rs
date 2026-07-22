@@ -45,6 +45,7 @@ pub struct SalesPersonAllocationPaginatedResult {
 #[derive(Debug, Clone, Default)]
 pub struct SalesPersonAllocationFilter {
     pub order_id: Option<Uuid>,
+    pub company_id: Option<Uuid>,
     pub sales_person_id: Option<Uuid>,
     pub sales_team_id: Option<Uuid>,
 }
@@ -52,7 +53,7 @@ pub struct SalesPersonAllocationFilter {
 impl SalesPersonAllocationFilter {
     /// Check if any filter is set
     pub fn has_filters(&self) -> bool {
-        self.order_id.is_some() || self.sales_person_id.is_some() || self.sales_team_id.is_some()
+        self.order_id.is_some() || self.company_id.is_some() || self.sales_person_id.is_some() || self.sales_team_id.is_some()
     }
 }
 

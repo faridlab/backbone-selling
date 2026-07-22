@@ -296,6 +296,9 @@ impl backbone_orm::EntityRepoMeta for SalesOrder {
     fn search_fields() -> &'static [&'static str] {
         &["order_number", "currency"]
     }
+    fn company_field() -> Option<&'static str> {
+        Some("company_id")
+    }
 }
 
 /// Builder for SalesOrder entity

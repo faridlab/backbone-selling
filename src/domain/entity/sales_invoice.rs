@@ -361,6 +361,9 @@ impl backbone_orm::EntityRepoMeta for SalesInvoice {
     fn search_fields() -> &'static [&'static str] {
         &["invoice_number", "currency"]
     }
+    fn company_field() -> Option<&'static str> {
+        Some("company_id")
+    }
 }
 
 /// Builder for SalesInvoice entity

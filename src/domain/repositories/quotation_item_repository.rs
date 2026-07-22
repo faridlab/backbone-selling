@@ -45,6 +45,7 @@ pub struct QuotationItemPaginatedResult {
 #[derive(Debug, Clone, Default)]
 pub struct QuotationItemFilter {
     pub quotation_id: Option<Uuid>,
+    pub company_id: Option<Uuid>,
     pub item_id: Option<Uuid>,
     pub description: Option<String>,
 }
@@ -52,7 +53,7 @@ pub struct QuotationItemFilter {
 impl QuotationItemFilter {
     /// Check if any filter is set
     pub fn has_filters(&self) -> bool {
-        self.quotation_id.is_some() || self.item_id.is_some() || self.description.is_some()
+        self.quotation_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some()
     }
 }
 

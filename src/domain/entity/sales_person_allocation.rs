@@ -50,6 +50,7 @@ impl std::ops::Deref for SalesPersonAllocationId {
 pub struct SalesPersonAllocation {
     pub id: Uuid,
     pub order_id: Uuid,
+    pub company_id: Uuid,
     pub sales_person_id: Uuid,
     pub sales_team_id: Option<Uuid>,
     pub allocated_pct: Decimal,
@@ -65,10 +66,11 @@ impl SalesPersonAllocation {
     }
 
     /// Create a new SalesPersonAllocation with required fields
-    pub fn new(order_id: Uuid, sales_person_id: Uuid, allocated_pct: Decimal) -> Self {
+    pub fn new(order_id: Uuid, company_id: Uuid, sales_person_id: Uuid, allocated_pct: Decimal) -> Self {
         Self {
             id: Uuid::new_v4(),
             order_id,
+            company_id,
             sales_person_id,
             sales_team_id: None,
             allocated_pct,
@@ -148,6 +150,9 @@ impl SalesPersonAllocation {
                 "order_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.order_id = v; }
                 }
+                "company_id" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.company_id = v; }
+                }
                 "sales_person_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.sales_person_id = v; }
                 }
@@ -212,12 +217,16 @@ impl backbone_orm::EntityRepoMeta for SalesPersonAllocation {
         let mut m = std::collections::HashMap::new();
         m.insert("id".to_string(), "uuid".to_string());
         m.insert("order_id".to_string(), "uuid".to_string());
+        m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("sales_person_id".to_string(), "uuid".to_string());
         m.insert("sales_team_id".to_string(), "uuid".to_string());
         m
     }
     fn search_fields() -> &'static [&'static str] {
         &[]
+    }
+    fn company_field() -> Option<&'static str> {
+        Some("company_id")
     }
     fn relations() -> &'static [(&'static str, &'static str, &'static str)] {
         &[("order", "sales_orders", "orderId")]
@@ -231,6 +240,7 @@ impl backbone_orm::EntityRepoMeta for SalesPersonAllocation {
 #[derive(Debug, Clone, Default)]
 pub struct SalesPersonAllocationBuilder {
     order_id: Option<Uuid>,
+    company_id: Option<Uuid>,
     sales_person_id: Option<Uuid>,
     sales_team_id: Option<Uuid>,
     allocated_pct: Option<Decimal>,
@@ -240,6 +250,12 @@ impl SalesPersonAllocationBuilder {
     /// Set the order_id field (required)
     pub fn order_id(mut self, value: Uuid) -> Self {
         self.order_id = Some(value);
+        self
+    }
+
+    /// Set the company_id field (required)
+    pub fn company_id(mut self, value: Uuid) -> Self {
+        self.company_id = Some(value);
         self
     }
 
@@ -266,12 +282,14 @@ impl SalesPersonAllocationBuilder {
     /// Returns Err if any required field without a default is missing.
     pub fn build(self) -> Result<SalesPersonAllocation, String> {
         let order_id = self.order_id.ok_or_else(|| "order_id is required".to_string())?;
+        let company_id = self.company_id.ok_or_else(|| "company_id is required".to_string())?;
         let sales_person_id = self.sales_person_id.ok_or_else(|| "sales_person_id is required".to_string())?;
         let allocated_pct = self.allocated_pct.ok_or_else(|| "allocated_pct is required".to_string())?;
 
         Ok(SalesPersonAllocation {
             id: Uuid::new_v4(),
             order_id,
+            company_id,
             sales_person_id,
             sales_team_id: self.sales_team_id,
             allocated_pct,

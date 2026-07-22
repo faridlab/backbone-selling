@@ -117,6 +117,7 @@ impl From<QuotationItemId> for Uuid {
 pub struct QuotationItemDto {
     pub id: QuotationItemId,
     pub quotation_id: Uuid,
+    pub company_id: Uuid,
     pub item_id: Uuid,
     pub description: Option<String>,
     pub quantity: Decimal,
@@ -252,6 +253,7 @@ impl From<SalesInvoiceItemId> for Uuid {
 pub struct SalesInvoiceItemDto {
     pub id: SalesInvoiceItemId,
     pub invoice_id: Uuid,
+    pub company_id: Uuid,
     pub item_id: Uuid,
     pub sales_order_item_id: Option<Uuid>,
     pub revenue_account_id: Uuid,
@@ -382,6 +384,7 @@ impl From<SalesOrderItemId> for Uuid {
 pub struct SalesOrderItemDto {
     pub id: SalesOrderItemId,
     pub order_id: Uuid,
+    pub company_id: Uuid,
     pub item_id: Uuid,
     pub description: Option<String>,
     pub quantity: Decimal,
@@ -501,6 +504,7 @@ impl From<SalesPersonAllocationId> for Uuid {
 pub struct SalesPersonAllocationDto {
     pub id: SalesPersonAllocationId,
     pub order_id: Uuid,
+    pub company_id: Uuid,
     pub sales_person_id: Uuid,
     pub sales_team_id: Option<Uuid>,
     pub allocated_pct: Decimal,
