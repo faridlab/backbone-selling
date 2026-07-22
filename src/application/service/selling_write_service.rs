@@ -976,7 +976,7 @@ impl SellingWriteService {
         // the in-proc publish stays as the fast path.
         let event = SellingEvent::DeliveryRequested(env.clone());
         let record = backbone_outbox::OutboxRecord::new(
-            "DeliveryRequested", "SalesOrder", order_id.to_string(),
+            "DeliveryRequested", "SalesOrder", order_id.to_string(), env.company_id,
             serde_json::to_value(&event).map_err(|e| SellingError::Outbox(e.to_string()))?,
             chrono::Utc::now(),
         );
