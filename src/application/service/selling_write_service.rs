@@ -833,6 +833,7 @@ impl SellingWriteService {
             posting_date: invoice_date,
             currency,
             posting_type: "original".into(),
+            reverses_post_id: None,
             description: Some("Sales invoice revenue".into()),
             lines,
         };
