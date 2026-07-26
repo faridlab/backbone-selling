@@ -18,6 +18,15 @@ user_owned:
   - "src/application/service/selling_write_service.rs"
   - "src/application/service/selling_cart_pricing.rs"
   - "src/application/service/consumer_credit_rule_custom.rs"
+  # The write surface, chunked out of selling_write_service.rs. Each is an
+  # `impl SellingWriteService` block; the shared vocabulary (input structs, outcomes, errors,
+  # money/price helpers, the repository bag) stays in selling_write_service.rs.
+  - "src/application/service/selling_quotation.rs"
+  - "src/application/service/selling_order.rs"
+  - "src/application/service/selling_invoice_create.rs"
+  - "src/application/service/selling_invoice_post.rs"
+  - "src/application/service/selling_delivery_seam.rs"
+  - "src/application/service/selling_invoice_seam.rs"
   - "src/presentation/http/guarded_routes.rs"
 
   # The six document repositories own the hand-written selling SQL that the write service

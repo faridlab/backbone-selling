@@ -19,6 +19,16 @@ pub mod selling_events;
 pub mod selling_gl;
 pub mod selling_cart_pricing;
 pub mod selling_write_service;
+// The write surface, chunked out of selling_write_service.rs. Each is an
+// `impl SellingWriteService` block; the shared vocabulary (input structs, outcomes, errors,
+// money/price helpers, the repository bag) stays in selling_write_service (so the
+// `selling_write_service::{NewLine, ...}` import paths are unchanged).
+pub mod selling_quotation;
+pub mod selling_order;
+pub mod selling_invoice_create;
+pub mod selling_invoice_post;
+pub mod selling_delivery_seam;
+pub mod selling_invoice_seam;
 // Reference consumer extension (extension-contract §5, second half) — a downstream rule on events.
 pub mod consumer_credit_rule_custom;
 // END CUSTOM
