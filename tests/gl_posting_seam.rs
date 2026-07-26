@@ -27,6 +27,8 @@ use backbone_selling::application::service::selling_write_service::{
 use backbone_accounting::application::service::posting_service::{
     PostingLine, PostingRequest, PostingService,
 };
+use std::sync::Arc;
+use backbone_accounting::infrastructure::persistence::SqlxPostingRepository;
 
 // ── the ACL adapter: envelope → accounting PostingRequest → real PostingService ──────────────
 struct AccountingAdapter {
@@ -129,7 +131,7 @@ async fn revenue_post_lands_balanced_in_the_real_gl() {
     let pool = pool().await;
     let (company, coa) = seed_coa(&pool).await;
     let write = SellingWriteService::new(pool.clone());
-    let adapter = AccountingAdapter { svc: PostingService::new(pool.clone()) };
+    let adapter = AccountingAdapter { svc: PostingService::new(Arc::new(SqlxPostingRepository::new(pool.clone()))) };
     let customer = Uuid::new_v4();
 
     let invoice_id = write.create_sales_invoice(NewSalesInvoice {
@@ -213,7 +215,7 @@ async fn reposting_is_idempotent() {
     let pool = pool().await;
     let (company, coa) = seed_coa(&pool).await;
     let write = SellingWriteService::new(pool.clone());
-    let adapter = AccountingAdapter { svc: PostingService::new(pool.clone()) };
+    let adapter = AccountingAdapter { svc: PostingService::new(Arc::new(SqlxPostingRepository::new(pool.clone()))) };
 
     let invoice_id = write.create_sales_invoice(NewSalesInvoice {
         invoice_number: uq("INV"), sales_order_id: None, company_id: company, branch_id: None,
@@ -239,7 +241,7 @@ async fn gl_rejection_marks_invoice_failed() {
     let pool = pool().await;
     let (company, coa) = seed_coa(&pool).await;
     let write = SellingWriteService::new(pool.clone());
-    let adapter = AccountingAdapter { svc: PostingService::new(pool.clone()) };
+    let adapter = AccountingAdapter { svc: PostingService::new(Arc::new(SqlxPostingRepository::new(pool.clone()))) };
 
     // Point A/R at a HEADER account (1000) — accounting must reject as non-postable.
     let invoice_id = write.create_sales_invoice(NewSalesInvoice {
@@ -282,11 +284,11 @@ async fn concurrent_double_post_yields_one_journal() {
     let (p1, p2) = (pool.clone(), pool.clone());
     let id1 = invoice_id;
     let a = tokio::spawn(async move {
-        let adapter = AccountingAdapter { svc: PostingService::new(p1) };
+        let adapter = AccountingAdapter { svc: PostingService::new(Arc::new(SqlxPostingRepository::new(p1))) };
         w1.post_sales_invoice(id1, &adapter).await
     });
     let b = tokio::spawn(async move {
-        let adapter = AccountingAdapter { svc: PostingService::new(p2) };
+        let adapter = AccountingAdapter { svc: PostingService::new(Arc::new(SqlxPostingRepository::new(p2))) };
         w2.post_sales_invoice(id1, &adapter).await
     });
     let (ra, rb) = (a.await.unwrap(), b.await.unwrap());
