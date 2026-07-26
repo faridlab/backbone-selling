@@ -28,6 +28,7 @@ use backbone_billing::application::service::billing_write_service::{
 };
 
 use backbone_accounting::application::service::posting_service::{PostingLine, PostingRequest, PostingService};
+use backbone_accounting::infrastructure::persistence::SqlxPostingRepository;
 
 /// ACL: billing's serialized envelope → accounting's PostingRequest against the REAL ledger.
 struct GlAdapter { svc: PostingService }
@@ -116,10 +117,10 @@ async fn over_billing_is_refused() {
     let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
     let order = confirmed_order(&selling, company, vec![line(item, "10")]).await;
 
-    selling.mark_invoiced(order, &[(item, d("10"))]).await.unwrap();
+    selling.mark_invoiced(order, company, &[(item, d("10"))]).await.unwrap();
     assert_eq!(billed_total(&pool, order).await, d("10.0000"));
     // a second full invoice against the same order is refused — the order is fully billed.
-    let e = selling.mark_invoiced(order, &[(item, d("10"))]).await.unwrap_err();
+    let e = selling.mark_invoiced(order, company, &[(item, d("10"))]).await.unwrap_err();
     assert!(matches!(e, SellingError::OverBilled));
     assert_eq!(billed_total(&pool, order).await, d("10.0000"), "a rejected mark_invoiced leaves the watermark untouched");
 }
@@ -134,10 +135,10 @@ async fn duplicate_item_lines_allocate_by_capacity() {
     let order = confirmed_order(&selling, company, vec![line(item, "6"), line(item, "4")]).await;
 
     // 12 > total capacity 10 → refused, nothing advances.
-    assert!(matches!(selling.mark_invoiced(order, &[(item, d("12"))]).await.unwrap_err(), SellingError::OverBilled));
+    assert!(matches!(selling.mark_invoiced(order, company, &[(item, d("12"))]).await.unwrap_err(), SellingError::OverBilled));
     assert_eq!(billed_total(&pool, order).await, d("0.0000"));
     // 10 fills both lines to their caps.
-    selling.mark_invoiced(order, &[(item, d("10"))]).await.unwrap();
+    selling.mark_invoiced(order, company, &[(item, d("10"))]).await.unwrap();
     let caps: Vec<Decimal> = sqlx::query_scalar("SELECT billed_qty FROM selling.sales_order_items WHERE order_id=$1 ORDER BY quantity DESC").bind(order).fetch_all(&pool).await.unwrap();
     assert_eq!(caps, vec![d("6.0000"), d("4.0000")]);
 }
@@ -154,7 +155,7 @@ async fn order_invoiced_across_three_modules() {
     let selling = SellingWriteService::with_sink(pool.clone(), Arc::new(sell_rec.clone()));
     let bill_rec = RecordingBillSink::default();
     let billing = BillingWriteService::with_sink(pool.clone(), Arc::new(bill_rec.clone()));
-    let gl = GlAdapter { svc: PostingService::new(pool.clone()) };
+    let gl = GlAdapter { svc: PostingService::new(Arc::new(SqlxPostingRepository::new(pool.clone()))) };
 
     // 1) selling: create + confirm a Sales Order — 10 @ 100,000 (no tax).
     let order = selling.create_sales_order(NewSalesOrder {
@@ -190,7 +191,7 @@ async fn order_invoiced_across_three_modules() {
     assert_eq!(posted.grand_total, d("1000000.00"));
     let billed: Vec<(Uuid, Decimal)> = posted.billed_lines.iter().map(|l| (l.item_id, l.quantity)).collect();
     assert_eq!(billed, vec![(item, d("10.0000"))]);
-    selling.mark_invoiced(order, &billed).await.unwrap();
+    selling.mark_invoiced(order, company, &billed).await.unwrap();
 
     // 5) the order's billed watermark advanced via a REAL billing invoice (not a simulated leg).
     let bq: Decimal = sqlx::query_scalar("SELECT billed_qty FROM selling.sales_order_items WHERE order_id=$1").bind(order).fetch_one(&pool).await.unwrap();

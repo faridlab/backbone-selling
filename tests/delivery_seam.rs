@@ -40,6 +40,7 @@ use backbone_inventory::application::service::inventory_write_service::{
 };
 
 use backbone_accounting::application::service::posting_service::{PostingLine, PostingRequest, PostingService};
+use backbone_accounting::infrastructure::persistence::SqlxPostingRepository;
 
 // One ACL adapter maps EITHER module's envelope into accounting's PostingRequest. Both selling and
 // inventory post into the SAME real ledger.
@@ -130,7 +131,7 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
     let recorder = RecordingInvSink::default();
     let inventory = InventoryWriteService::with_sink(pool.clone(), Arc::new(recorder.clone()));
     let intake = DeliveryIntake::new(pool.clone());
-    let gl = GlAdapter { svc: PostingService::new(pool.clone()) };
+    let gl = GlAdapter { svc: PostingService::new(Arc::new(SqlxPostingRepository::new(pool.clone()))) };
 
     // 1) inventory receives 10 @ 100 into a warehouse.
     let wh = inventory.create_warehouse(NewWarehouse { company_id: company, code: uq("WH"), name: "Main".into(), warehouse_type: None, parent_warehouse_id: None, is_group: false }).await.unwrap();
@@ -176,7 +177,7 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
     }).expect("StockDelivered for our order");
     assert_eq!(delivered_so.total_cogs, d("1000.00"));
     // We know the delivered lines from the request we routed (the composition's correspondence).
-    selling.mark_delivered(oid, &[(item, d("10"))]).await.unwrap();
+    selling.mark_delivered(oid, delivered_so.company_id, &[(item, d("10"))]).await.unwrap();
     assert_eq!(order_status(&pool, oid).await, "to_bill", "delivered, still awaiting billing");
 
     // 6) selling bills FROM the order (links lines so billed_qty advances) + posts → revenue post.

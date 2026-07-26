@@ -992,17 +992,24 @@ impl SellingWriteService {
 
     /// Record a delivery against an order (the inbound handler for inventory's `StockDelivered`):
     /// advance `delivered_qty` per item and recompute the order status. Matches by `item_id`.
-    pub async fn mark_delivered(&self, order_id: Uuid, deliveries: &[(Uuid, Decimal)]) -> Result<(), SellingError> {
-        // RLS scope (ADR-0008), ID-only pattern: no company is available here, and this is the inbound
-        // handler for inventory's `StockDelivered` — the CALLER must wrap this in
-        // `with_company_scope(Some(event.company_id))`, otherwise these writes fail closed.
-        for (item_id, qty) in deliveries {
-            self.repos.order_items
-                .add_delivered_qty(&self.db_pool, order_id, *item_id, *qty)
-                .await?;
-        }
-        self.recompute_order_status(order_id).await?;
-        Ok(())
+    pub async fn mark_delivered(
+        &self,
+        order_id: Uuid,
+        company_id: Uuid,
+        deliveries: &[(Uuid, Decimal)],
+    ) -> Result<(), SellingError> {
+        // RLS scope (ADR-0008): company on the parameter — scope the delivered-qty writes + status
+        // recompute so they run with `app.company_id` set. The inbound handler for inventory's
+        // `StockDelivered` passes the event's company; an event/job caller can no longer forget to.
+        company_scope::with_company_scope(Some(company_id), async move {
+            for (item_id, qty) in deliveries {
+                self.repos.order_items
+                    .add_delivered_qty(&self.db_pool, order_id, *item_id, *qty)
+                    .await?;
+            }
+            self.recompute_order_status(order_id).await?;
+            Ok(())
+        }).await
     }
 
     /// Build the invoice request for a confirmed order (the order-to-cash mirror of
@@ -1044,20 +1051,26 @@ impl SellingWriteService {
     /// beyond the order while `recompute_order_status` (`billed_qty ≥ quantity`) silently masks it as
     /// `completed`. Serializing the *writer* (not just the upstream remainder) is what closes the race.
     /// Aggregate-by-item, fill in line order — correct even for duplicate-item orders.
-    pub async fn mark_invoiced(&self, order_id: Uuid, billed: &[(Uuid, Decimal)]) -> Result<(), SellingError> {
-        // RLS scope (ADR-0008), ID-only pattern: this method has NO company available — it is the
-        // inbound handler for billing's `SalesInvoicePosted`, so the allocation tx binds the AMBIENT
-        // task-local company. The CALLER must wrap this in `with_company_scope(Some(event.company_id))`
-        // — the event carries the company — otherwise the `FOR UPDATE` reads inside `allocate_billed`
-        // fail closed and every allocation would read zero capacity.
-        let mut tx = self.db_pool.begin().await?;
-        company_scope::bind_current_company(&mut tx).await?;
-        for (item_id, qty) in billed {
-            self.allocate_billed(&mut tx, order_id, *item_id, *qty).await?;
-        }
-        tx.commit().await?;
-        self.recompute_order_status(order_id).await?;
-        Ok(())
+    pub async fn mark_invoiced(
+        &self,
+        order_id: Uuid,
+        company_id: Uuid,
+        billed: &[(Uuid, Decimal)],
+    ) -> Result<(), SellingError> {
+        // RLS scope (ADR-0008): company on the parameter — the allocation tx binds it explicitly
+        // (`bind_company_on`), and the status recompute runs inside the scope. The inbound handler for
+        // billing's `SalesInvoicePosted` passes the event's company; an event/job caller can no longer
+        // forget to scope the `FOR UPDATE` reads inside `allocate_billed`.
+        company_scope::with_company_scope(Some(company_id), async move {
+            let mut tx = self.db_pool.begin().await?;
+            company_scope::bind_company_on(&mut tx, company_id).await?;
+            for (item_id, qty) in billed {
+                self.allocate_billed(&mut tx, order_id, *item_id, *qty).await?;
+            }
+            tx.commit().await?;
+            self.recompute_order_status(order_id).await?;
+            Ok(())
+        }).await
     }
 
     /// Fill `billed_qty` up to `quantity` across an item's order lines (`FOR UPDATE`, fill-in-order);
