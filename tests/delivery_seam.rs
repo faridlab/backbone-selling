@@ -66,11 +66,23 @@ impl SellSink for GlAdapter {
         }
     }
 }
-// (Removed the duplicate `impl InvSink for GlAdapter`: selling_gl::GlPostSink and
-// inventory_gl::GlPostSink are now the SAME trait — both re-export backbone_gl_posting::GlPostSink
-// (framework v2.7.5) — so the single `impl SellSink for GlAdapter` above already satisfies the
-// inventory service's GlPostSink requirement too. The InvEnv/InvAck/InvRej aliases resolve to the
-// same unified types, so inventory's `.post(&gl)` routes to the one impl above.)
+// `impl InvSink for GlAdapter` — restored. After the v2.7.6 framework alignment, selling's
+// backbone-gl-posting (v2.7.6) and inventory's (v2.7.5, via the test-dep) resolve to DISTINCT
+// trait instances, so GlAdapter must impl BOTH SellSink and InvSink (no conflict — different traits).
+#[async_trait::async_trait]
+impl InvSink for GlAdapter {
+    async fn post(&self, e: &InvEnv) -> Result<InvAck, InvRej> {
+        let lines = e.lines.iter().map(|l| PostingLine {
+            account_id: l.account_id, debit: l.debit, credit: l.credit,
+            party_type: l.party_type.clone(), party_id: l.party_id,
+            cost_center_id: None, project_id: None, department_id: None, description: l.description.clone(),
+        }).collect();
+        match self.svc.post(to_req(e.company_id, &e.source_type, e.source_id, e.posting_date, lines, e.source_reference.clone()), None).await {
+            Ok(r) => Ok(InvAck { post_id: r.post_id, journal_id: r.journal_id, idempotent_reuse: r.idempotent_reuse }),
+            Err(x) => Err(InvRej { code: x.code().to_string(), message: x.to_string() }),
+        }
+    }
+}
 
 // Recording sink for inventory domain events (captures StockDelivered).
 #[derive(Default, Clone)]
