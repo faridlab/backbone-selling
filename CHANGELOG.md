@@ -33,6 +33,17 @@ the date the change was applied.
 - Handbook, README, PRD/FSD/BRD, glossary, and extension-guide updated to reflect the live delivery
   seam.
 
+### Fixed — delivery over-delivery + outbox drift (2026-07-27)
+
+- `SellingWriteService::mark_delivered` is now capacity-checked and `FOR UPDATE`-serialized,
+  rejecting `OverDelivered` — the delivery twin of `mark_invoiced`. Previously a single
+  `StockDelivered` for more than was ordered pushed `delivered_qty` past `quantity`, and
+  `recompute_order_status` (`delivered_qty >= quantity`) silently masked it as the delivered band
+  (and could mark the order `completed` for stock never ordered). See [ADR-004] amendment.
+- `selling.outbox_events` now carries `company_id` (migration `20260727000100`), so
+  `backbone-outbox` v2.7.6 `multi_tenant` `stage()` writes succeed — the column was missing after the
+  v2.7.6 pin bump, breaking `build_delivery_request`.
+
 ## [2026-07-04] — Initial selling module
 
 The order-to-cash foundation: Quotation → Sales Order → Sales Invoice, revenue recognised by emitting

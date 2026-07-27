@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "backbone-inventory"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "backbone-selling"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "async-trait",
