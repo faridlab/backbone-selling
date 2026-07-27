@@ -44,6 +44,17 @@ the date the change was applied.
   `backbone-outbox` v2.7.6 `multi_tenant` `stage()` writes succeed — the column was missing after the
   v2.7.6 pin bump, breaking `build_delivery_request`.
 
+### Docs — cross-module FK contract + council outcome (2026-07-27)
+
+- `docs/extension-guide.md` now states cross-module FKs are logical
+  (`@exclude_from_foreign_key_check`), not DB-enforced — integrators must not assume referential
+  integrity across schemas; enforce correspondence at the composition/ACL layer.
+- `docs/council/2026-07-27-module-backbone-selling-maturity.md` gained an execution post-script: **#1
+  shipped (v0.5.4)**; **#2/#4 are blocked** by the `metaphor-codegen` template (the generated
+  `SellingModule` + the generated ES scaffold can't be reshaped/deleted at module level); **#3 is a
+  deferred** cross-module architecture migration. The council's diagnosis holds; 3 of 4 fixes are
+  upstream of this module.
+
 ## [2026-07-04] — Initial selling module
 
 The order-to-cash foundation: Quotation → Sales Order → Sales Invoice, revenue recognised by emitting
