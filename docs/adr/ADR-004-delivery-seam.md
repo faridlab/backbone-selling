@@ -33,6 +33,15 @@ transaction — the proof that the decomposition composes, not just isolates.
 3. **Physical + financial stay decoupled and eventually consistent.** The delivery's COGS post and
    the invoice's revenue post are independent `AccountingPost`s into the same ledger; either can
    happen first; each is idempotent on its own `source_id`.
+4. **`mark_delivered` is bounded (amendment 2026-07-27, maturity council).** It is the delivery
+   twin of `mark_invoiced`: a capacity-checked, `FOR UPDATE`-serialized allocation capped at each
+   line's `quantity`, rejecting `OverDelivered`. The rollup's `delivered_qty >= quantity`
+   comparator is only safe because the writer enforces `delivered_qty <= quantity` — without the
+   cap, a single `StockDelivered` for more than was ordered (or a racy/repeat event) pushed
+   `delivered_qty` past `quantity` and the rollup silently masked it as the delivered band, so
+   `completed` could become true for stock never ordered. The lock serializes concurrent
+   deliverers; the cap closes the over-delivery. `tests/delivery_seam.rs` (`over_delivery_is_refused`,
+   `duplicate_item_lines_allocate_delivery_by_capacity`) guard both.
 
 ## Consequences
 
@@ -48,5 +57,6 @@ transaction — the proof that the decomposition composes, not just isolates.
   composed service would run them; the shared `gl_posting_state` enum carries the union of both
   modules' variants.
 - Residual / parking lot: partial deliveries across multiple Delivery Notes (the watermark supports
-  it; not yet tested); a real event bus + fulfillment service to own the ACL in production (today the
-  test is the composition root); stock soft-reservation on Sales Order confirmation.
+  it; the over-delivery *bounds* are now tested per Decision 4, but multi-note partial flow is not);
+  a real event bus + fulfillment service to own the ACL in production (today the test is the
+  composition root); stock soft-reservation on Sales Order confirmation.

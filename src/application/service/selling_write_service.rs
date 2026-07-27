@@ -163,6 +163,11 @@ pub enum SellingError {
     OrderNotFound(Uuid),
     NotDraft(String),
     OverBilled,
+    /// An inbound delivery (`mark_delivered`) tried to advance `delivered_qty` past a line's
+    /// `quantity`. Mirror of `OverBilled` for the delivery watermark (council 2026-07-27): without
+    /// it the rollup's `delivered_qty >= quantity` silently masks an over-delivery as the delivered
+    /// band, and `completed` can become true for stock that was never ordered.
+    OverDelivered,
     GlRejected { code: String, message: String },
     PricingRejected { code: String, message: String },
     Db(sqlx::Error),
@@ -185,6 +190,7 @@ impl SellingError {
             SellingError::OrderNotFound(_) => "order_not_found".into(),
             SellingError::NotDraft(_) => "not_draft".into(),
             SellingError::OverBilled => "over_billed".into(),
+            SellingError::OverDelivered => "over_delivered".into(),
             // Surface the GL's own stable code so callers see one contract vocabulary.
             SellingError::GlRejected { code, .. } => code.clone(),
             SellingError::PricingRejected { code, .. } => code.clone(),

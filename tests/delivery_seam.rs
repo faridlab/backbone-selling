@@ -27,7 +27,7 @@ use backbone_selling::application::service::selling_gl::{
     AccountingPostEnvelope as SellEnv, GlPostAck as SellAck, GlPostRejected as SellRej, GlPostSink as SellSink,
 };
 use backbone_selling::application::service::selling_write_service::{
-    NewLine, NewSalesInvoice, NewSalesOrder, SellingWriteService,
+    NewLine, NewSalesOrder, SellingError, SellingWriteService,
 };
 
 use backbone_inventory::application::service::inventory_gl::{
@@ -205,4 +205,79 @@ async fn order_status(pool: &PgPool, oid: Uuid) -> String {
 async fn journal_totals(pool: &PgPool, jid: Uuid) -> (Decimal, Decimal) {
     let r = sqlx::query("SELECT total_debit, total_credit FROM accounting.journals WHERE id=$1").bind(jid).fetch_one(pool).await.unwrap();
     (r.get("total_debit"), r.get("total_credit"))
+}
+
+// ── helpers for the delivered-qty capacity tests (mirror of the invoice seam's billing-capacity
+//    helpers). These exercise selling alone — no inventory/accounting — so they need only the
+//    selling schema + RLS at DATABASE_URL. ─────────────────────────────────────────────────────
+fn dline(item: Uuid, qty: &str) -> NewLine {
+    NewLine {
+        item_id: item, revenue_account_id: None, description: None,
+        quantity: d(qty), unit_price: d("150000"), line_discount: Decimal::ZERO,
+    }
+}
+async fn confirmed_deliverable_order(
+    selling: &SellingWriteService, company: Uuid, lines: Vec<NewLine>,
+) -> Uuid {
+    let order = selling.create_sales_order(NewSalesOrder {
+        order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None,
+        customer_id: Uuid::new_v4(), order_date: day(), delivery_date: None, currency: None,
+        tax_rate: Decimal::ZERO, notes: None, lines,
+    }).await.unwrap();
+    selling.confirm_sales_order(order, company).await.unwrap();
+    order
+}
+async fn delivered_total(pool: &PgPool, order: Uuid) -> Decimal {
+    sqlx::query_scalar("SELECT COALESCE(SUM(delivered_qty),0) FROM selling.sales_order_items WHERE order_id=$1")
+        .bind(order).fetch_one(pool).await.unwrap()
+}
+
+// DSEAM-2 (council 2026-07-27): `mark_delivered` is BOUNDED — you cannot deliver past the ordered
+// quantity. A repeat/racy `StockDelivered`, or an inbound delivery for more than was ordered, is
+// refused at the writer, so `delivered_qty` never exceeds `quantity` and `recompute_order_status`
+// (`delivered_qty >= quantity`) cannot silently mask an over-delivery as a completed band. Without
+// the cap a single `mark_delivered` of 11 on a 10 runs `delivered_qty` to 11 and the order reaches
+// the delivered band with no error.
+#[tokio::test]
+async fn over_delivery_is_refused() {
+    let pool = pool().await;
+    let selling = SellingWriteService::new(pool.clone());
+    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let order = confirmed_deliverable_order(&selling, company, vec![dline(item, "10")]).await;
+    assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
+
+    // 11 > ordered 10 → refused; the watermark stays 0 and the order stays to_deliver_and_bill.
+    let e = selling.mark_delivered(order, company, &[(item, d("11"))]).await.unwrap_err();
+    assert!(matches!(e, SellingError::OverDelivered));
+    assert_eq!(
+        delivered_total(&pool, order).await, d("0.0000"),
+        "a rejected mark_delivered leaves the watermark untouched (tx rolled back)",
+    );
+    assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
+}
+
+// DSEAM-3 (council 2026-07-27): the aggregate-by-item delivery allocation is correct for
+// duplicate-item orders — two lines of item X (6 + 4) have total delivery capacity 10; delivering
+// 12 is refused, delivering 10 fills both lines to their caps. (Mirror of the invoice seam's
+// `duplicate_item_lines_allocate_by_capacity`.)
+#[tokio::test]
+async fn duplicate_item_lines_allocate_delivery_by_capacity() {
+    let pool = pool().await;
+    let selling = SellingWriteService::new(pool.clone());
+    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let order = confirmed_deliverable_order(&selling, company, vec![dline(item, "6"), dline(item, "4")]).await;
+
+    // 12 > total capacity 10 → refused, nothing advances.
+    assert!(matches!(
+        selling.mark_delivered(order, company, &[(item, d("12"))]).await.unwrap_err(),
+        SellingError::OverDelivered,
+    ));
+    assert_eq!(delivered_total(&pool, order).await, d("0.0000"));
+
+    // 10 fills both lines to their caps (6 then 4, fill-in-id order).
+    selling.mark_delivered(order, company, &[(item, d("10"))]).await.unwrap();
+    let caps: Vec<Decimal> = sqlx::query_scalar(
+        "SELECT delivered_qty FROM selling.sales_order_items WHERE order_id=$1 ORDER BY quantity DESC",
+    ).bind(order).fetch_all(&pool).await.unwrap();
+    assert_eq!(caps, vec![d("6.0000"), d("4.0000")]);
 }

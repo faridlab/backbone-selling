@@ -96,6 +96,13 @@ pub struct LineBillingCapacityRow {
     pub capacity: Decimal,
 }
 
+/// One order line's remaining delivery capacity (`quantity - delivered_qty`), read under `FOR UPDATE`.
+/// Mirror of [`LineBillingCapacityRow`] for the delivery watermark (council 2026-07-27).
+pub struct LineDeliveryCapacityRow {
+    pub id: Uuid,
+    pub capacity: Decimal,
+}
+
 /// Hand-written SalesOrderItem SQL. Lives here (not in the write service) per the module's 4-layer
 /// rule: services orchestrate and own the unit of work, repositories hold the SQL.
 impl SalesOrderItemRepository {
@@ -215,30 +222,6 @@ impl SalesOrderItemRepository {
         }).collect())
     }
 
-    /// Advance the `delivered_qty` watermark for every line of an order matching `item_id`.
-    ///
-    /// ID-only: no company is available — the caller (`mark_delivered`) is the inbound handler for
-    /// inventory's `StockDelivered`, so the CALLER must wrap this in
-    /// `with_company_scope(Some(event.company_id))`, otherwise these writes fail closed.
-    pub async fn add_delivered_qty(
-        &self,
-        pool: &PgPool,
-        order_id: Uuid,
-        item_id: Uuid,
-        qty: Decimal,
-    ) -> Result<(), sqlx::Error> {
-        company_scope::execute_scoped(
-            pool,
-            sqlx::query(
-                r#"UPDATE selling.sales_order_items
-                   SET delivered_qty = delivered_qty + $3
-                   WHERE order_id=$1 AND item_id=$2 AND (metadata->>'deleted_at') IS NULL"#,
-            )
-            .bind(order_id).bind(item_id).bind(qty),
-        ).await?;
-        Ok(())
-    }
-
     /// Advance `billed_qty` on every order line an invoice's lines point at, in one statement.
     ///
     /// Scoped through the INVOICE, not the order: the `sales_invoice_items` subquery is what the
@@ -301,6 +284,49 @@ impl SalesOrderItemRepository {
         qty: Decimal,
     ) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE selling.sales_order_items SET billed_qty = billed_qty + $2 WHERE id=$1")
+            .bind(line_id).bind(qty)
+            .execute(conn)
+            .await?;
+        Ok(())
+    }
+
+    /// Lock an item's order lines and read their remaining delivery capacity
+    /// (`quantity - delivered_qty`), in a stable `ORDER BY id` fill order.
+    ///
+    /// Mirror of [`Self::lock_billing_capacity`] for the delivery watermark (council 2026-07-27).
+    /// Takes the CALLER'S connection: the `FOR UPDATE` is only meaningful inside the caller's
+    /// transaction — it is what serializes concurrent deliverers and closes the over-delivery race.
+    /// The caller binds the company on that connection (`bind_company_on`) before calling.
+    pub async fn lock_delivery_capacity(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        order_id: Uuid,
+        item_id: Uuid,
+    ) -> Result<Vec<LineDeliveryCapacityRow>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"SELECT id, (quantity - delivered_qty) AS capacity FROM selling.sales_order_items
+               WHERE order_id=$1 AND item_id=$2 AND (metadata->>'deleted_at') IS NULL ORDER BY id FOR UPDATE"#,
+        )
+        .bind(order_id).bind(item_id)
+        .fetch_all(conn)
+        .await?;
+        Ok(rows.iter().map(|r| LineDeliveryCapacityRow {
+            id: r.get("id"),
+            capacity: r.get("capacity"),
+        }).collect())
+    }
+
+    /// Add to one order line's `delivered_qty`. Takes the CALLER'S connection so it lands in the same
+    /// transaction that holds the `FOR UPDATE` lock from [`Self::lock_delivery_capacity`] — the read
+    /// and the write must not be split, or the capacity check would race. Mirror of
+    /// [`Self::add_billed_qty`] (council 2026-07-27).
+    pub async fn add_delivered_qty_on_line(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        line_id: Uuid,
+        qty: Decimal,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE selling.sales_order_items SET delivered_qty = delivered_qty + $2 WHERE id=$1")
             .bind(line_id).bind(qty)
             .execute(conn)
             .await?;
