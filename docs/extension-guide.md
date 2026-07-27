@@ -26,6 +26,17 @@ ADR-004.
 GlPostRejected}`. A composing service implements `GlPostSink` (map envelope → your ledger) to receive
 revenue postings. The envelope is the versioned wire contract — not a shared Rust type.
 
+## Cross-module references are logical FKs (not DB-enforced)
+
+Every cross-module reference — `customer_id → party.Party`, `item_id → catalog.Item`,
+`company_id`/`branch_id → organization`, the GL accounts → `accounting.Account` — is declared
+`@exclude_from_foreign_key_check` in the schema. They are **logical** references: selling holds **no
+DB foreign keys into another schema** (this is what keeps `cargo tree -e normal -i backbone-*` empty
+and lets each module migrate independently). Consequence for integrators: **do not assume referential
+integrity across schemas** — a row in `selling.*` can reference a party/item/account that another
+schema has not yet provisioned. Enforce correspondence at the composition / ACL layer (the same layer
+that maps the cross-module envelopes), not at the DB.
+
 ## How a consumer extends (the supported pattern)
 
 1. **Subscribe to a domain event.** Implement `SellingEventSink` in your own crate / a `*_custom.rs`
