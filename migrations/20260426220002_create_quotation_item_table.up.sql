@@ -6,6 +6,7 @@ CREATE SCHEMA IF NOT EXISTS selling;
 CREATE TABLE IF NOT EXISTS selling.quotation_items (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     quotation_id UUID NOT NULL,
+    company_id UUID NOT NULL,
     item_id UUID NOT NULL,
     description TEXT,
     quantity NUMERIC(18, 4) NOT NULL CHECK (quantity >= 0),

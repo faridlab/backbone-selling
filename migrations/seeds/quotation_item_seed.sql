@@ -7,6 +7,7 @@
 -- INSERT INTO selling.quotation_items (
 --     id,
 --     quotation_id,
+--     company_id,
 --     item_id,
 --     description,
 --     quantity,

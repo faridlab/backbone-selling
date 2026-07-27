@@ -6,6 +6,7 @@ CREATE SCHEMA IF NOT EXISTS selling;
 CREATE TABLE IF NOT EXISTS selling.sales_invoice_items (
     id UUID NOT NULL DEFAULT gen_random_uuid(),
     invoice_id UUID NOT NULL,
+    company_id UUID NOT NULL,
     item_id UUID NOT NULL,
     sales_order_item_id UUID,
     revenue_account_id UUID NOT NULL,

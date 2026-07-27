@@ -7,6 +7,7 @@
 -- INSERT INTO selling.sales_invoice_items (
 --     id,
 --     invoice_id,
+--     company_id,
 --     item_id,
 --     sales_order_item_id,
 --     revenue_account_id,

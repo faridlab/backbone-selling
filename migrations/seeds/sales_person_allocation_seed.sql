@@ -7,6 +7,7 @@
 -- INSERT INTO selling.sales_person_allocations (
 --     id,
 --     order_id,
+--     company_id,
 --     sales_person_id,
 --     sales_team_id,
 --     allocated_pct,
