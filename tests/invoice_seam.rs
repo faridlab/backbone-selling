@@ -196,8 +196,7 @@ async fn order_invoiced_across_three_modules() {
     // 5) the order's billed watermark advanced via a REAL billing invoice (not a simulated leg).
     let bq: Decimal = sqlx::query_scalar("SELECT billed_qty FROM selling.sales_order_items WHERE order_id=$1").bind(order).fetch_one(&pool).await.unwrap();
     assert_eq!(bq, d("10.0000"));
-    // selling's own SalesInvoicePosted was NOT emitted — selling posted no revenue itself.
-    assert!(!sell_rec.events.lock().unwrap().iter().any(|e| matches!(e, SellingEvent::SalesInvoicePosted(_))), "selling posts no revenue in the composed flow");
+    // (selling no longer emits a SalesInvoicePosted event — it exited the invoice business; ADR-006.)
     // billing's sales invoice is posted + linked to the order.
     let (ps, so): (String, Option<Uuid>) = sqlx::query_as("SELECT posting_state::text, source_so_id FROM billing.sales_invoices WHERE id=$1").bind(inv).fetch_one(&pool).await.unwrap();
     assert_eq!(ps, "posted");

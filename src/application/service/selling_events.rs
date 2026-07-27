@@ -30,25 +30,8 @@ pub struct SalesOrderConfirmed {
     pub currency: String,
 }
 
-/// A sales invoice was created (issued) from an order or directly — before it posts to the GL.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SalesInvoiceIssued {
-    pub invoice_id: Uuid,
-    pub sales_order_id: Option<Uuid>,
-    pub company_id: Uuid,
-    pub customer_id: Uuid,
-    pub total: Decimal,
-}
-
-/// A sales invoice's revenue was posted to the GL (reconciled from the AccountingPost ack).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SalesInvoicePosted {
-    pub invoice_id: Uuid,
-    pub company_id: Uuid,
-    pub journal_id: Uuid,
-    pub post_id: Uuid,
-    pub total: Decimal,
-}
+// (SalesInvoiceIssued + SalesInvoicePosted removed — selling exited the invoice business; billing
+// owns the AR invoice + emits its own SalesInvoicePosted. ADR-006.)
 
 /// One line of a delivery request (what selling asks inventory to ship).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -99,8 +82,6 @@ pub struct InvoiceRequestEnvelope {
 pub enum SellingEvent {
     QuotationAccepted(QuotationAccepted),
     SalesOrderConfirmed(SalesOrderConfirmed),
-    SalesInvoiceIssued(SalesInvoiceIssued),
-    SalesInvoicePosted(SalesInvoicePosted),
     DeliveryRequested(DeliveryRequestEnvelope),
     OrderInvoiced(InvoiceRequestEnvelope),
 }

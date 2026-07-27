@@ -7,8 +7,6 @@
 
 pub mod quotation_dto;
 pub mod quotation_item_dto;
-pub mod sales_invoice_dto;
-pub mod sales_invoice_item_dto;
 pub mod sales_order_dto;
 pub mod sales_order_item_dto;
 pub mod sales_team_dto;
@@ -30,22 +28,6 @@ pub use quotation_item_dto::{
     QuotationItemResponseDto,
     QuotationItemListResponseDto,
     QuotationItemSummaryDto,
-};
-pub use sales_invoice_dto::{
-    CreateSalesInvoiceDto,
-    UpdateSalesInvoiceDto,
-    PatchSalesInvoiceDto,
-    SalesInvoiceResponseDto,
-    SalesInvoiceListResponseDto,
-    SalesInvoiceSummaryDto,
-};
-pub use sales_invoice_item_dto::{
-    CreateSalesInvoiceItemDto,
-    UpdateSalesInvoiceItemDto,
-    PatchSalesInvoiceItemDto,
-    SalesInvoiceItemResponseDto,
-    SalesInvoiceItemListResponseDto,
-    SalesInvoiceItemSummaryDto,
 };
 pub use sales_order_dto::{
     CreateSalesOrderDto,

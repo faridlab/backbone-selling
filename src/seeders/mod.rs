@@ -11,8 +11,6 @@ use sqlx::PgPool;
 
 mod quotation_seeder;
 mod quotation_item_seeder;
-mod sales_invoice_seeder;
-mod sales_invoice_item_seeder;
 mod sales_order_seeder;
 mod sales_order_item_seeder;
 mod sales_team_seeder;
@@ -20,8 +18,6 @@ mod sales_person_allocation_seeder;
 
 pub use quotation_seeder::SeedQuotationSeeder;
 pub use quotation_item_seeder::SeedQuotationItemSeeder;
-pub use sales_invoice_seeder::SeedSalesInvoiceSeeder;
-pub use sales_invoice_item_seeder::SeedSalesInvoiceItemSeeder;
 pub use sales_order_seeder::SeedSalesOrderSeeder;
 pub use sales_order_item_seeder::SeedSalesOrderItemSeeder;
 pub use sales_team_seeder::SeedSalesTeamSeeder;

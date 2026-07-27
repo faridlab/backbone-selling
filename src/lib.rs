@@ -33,8 +33,6 @@ pub use infrastructure::persistence::*;
 // Re-exports - Application services
 pub use application::service::QuotationService;
 pub use application::service::QuotationItemService;
-pub use application::service::SalesInvoiceService;
-pub use application::service::SalesInvoiceItemService;
 pub use application::service::SalesOrderService;
 pub use application::service::SalesOrderItemService;
 pub use application::service::SalesTeamService;
@@ -62,8 +60,6 @@ use sqlx::PgPool;
 pub struct SellingModule {
     pub quotation_service: Arc<QuotationService>,
     pub quotation_item_service: Arc<QuotationItemService>,
-    pub sales_invoice_service: Arc<SalesInvoiceService>,
-    pub sales_invoice_item_service: Arc<SalesInvoiceItemService>,
     pub sales_order_service: Arc<SalesOrderService>,
     pub sales_order_item_service: Arc<SalesOrderItemService>,
     pub sales_team_service: Arc<SalesTeamService>,
@@ -85,8 +81,6 @@ impl SellingModule {
         use presentation::http::{
             create_quotation_routes,
             create_quotation_item_routes,
-            create_sales_invoice_routes,
-            create_sales_invoice_item_routes,
             create_sales_order_routes,
             create_sales_order_item_routes,
             create_sales_team_routes,
@@ -96,8 +90,6 @@ impl SellingModule {
         Router::new()
             .merge(create_quotation_routes(self.quotation_service.clone()))
             .merge(create_quotation_item_routes(self.quotation_item_service.clone()))
-            .merge(create_sales_invoice_routes(self.sales_invoice_service.clone()))
-            .merge(create_sales_invoice_item_routes(self.sales_invoice_item_service.clone()))
             .merge(create_sales_order_routes(self.sales_order_service.clone()))
             .merge(create_sales_order_item_routes(self.sales_order_item_service.clone()))
             .merge(create_sales_team_routes(self.sales_team_service.clone()))
@@ -150,14 +142,6 @@ impl SellingModuleBuilder {
         let quotation_item_repository = Arc::new(QuotationItemRepository::new(db_pool.clone()));
         let quotation_item_service = Arc::new(QuotationItemService::with_repository(quotation_item_repository.clone()));
 
-        // SalesInvoice service
-        let sales_invoice_repository = Arc::new(SalesInvoiceRepository::new(db_pool.clone()));
-        let sales_invoice_service = Arc::new(SalesInvoiceService::with_repository(sales_invoice_repository.clone()));
-
-        // SalesInvoiceItem service
-        let sales_invoice_item_repository = Arc::new(SalesInvoiceItemRepository::new(db_pool.clone()));
-        let sales_invoice_item_service = Arc::new(SalesInvoiceItemService::with_repository(sales_invoice_item_repository.clone()));
-
         // SalesOrder service
         let sales_order_repository = Arc::new(SalesOrderRepository::new(db_pool.clone()));
         let sales_order_service = Arc::new(SalesOrderService::with_repository(sales_order_repository.clone()));
@@ -180,8 +164,6 @@ impl SellingModuleBuilder {
         Ok(SellingModule {
             quotation_service,
             quotation_item_service,
-            sales_invoice_service,
-            sales_invoice_item_service,
             sales_order_service,
             sales_order_item_service,
             sales_team_service,

@@ -8,8 +8,6 @@ pub mod crud_test_base;
 
 pub mod quotation_api_test;
 pub mod quotation_item_api_test;
-pub mod sales_invoice_api_test;
-pub mod sales_invoice_item_api_test;
 pub mod sales_order_api_test;
 pub mod sales_order_item_api_test;
 pub mod sales_team_api_test;
@@ -18,8 +16,6 @@ pub mod sales_person_allocation_api_test;
 // Re-exports for convenience
 pub use quotation_api_test::*;
 pub use quotation_item_api_test::*;
-pub use sales_invoice_api_test::*;
-pub use sales_invoice_item_api_test::*;
 pub use sales_order_api_test::*;
 pub use sales_order_item_api_test::*;
 pub use sales_team_api_test::*;

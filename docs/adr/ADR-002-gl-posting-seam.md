@@ -1,6 +1,8 @@
 # ADR-002: The GL-posting seam — a serialized envelope + ACL adapter, never a code edge
 
-**Status**: Accepted — **Applied 2026-07-03** (the marquee cross-module seam, proven end-to-end)
+**Status**: ⚠️ **Superseded by [ADR-006](ADR-006-selling-exits-invoice-business.md) (2026-07-27)** — selling no longer posts to the GL (it exited the invoice business), so its `selling_gl` re-export + `backbone-gl-posting` dependency are removed. The seam *pattern* (serialized envelope + ACL, zero code edge) lives on in `backbone-billing/src/application/service/billing_gl.rs`, and the AR revenue-post coverage moved to `backbone-billing/tests/ar_seam.rs`.
+
+**Status (historical)**: Accepted — **Applied 2026-07-03** (the marquee cross-module seam, proven end-to-end)
 **Deciders**: Farid (owner), build session 2026-07-03
 **Related**: `docs/erp/gl-posting-contract.md`, `docs/erp/extension-contract.md`, accounting ADR
 (the inbound `PostingService` port), ADR-001

@@ -11,8 +11,6 @@ use std::sync::Arc;
 // Import all services
 use crate::application::service::QuotationService;
 use crate::application::service::QuotationItemService;
-use crate::application::service::SalesInvoiceService;
-use crate::application::service::SalesInvoiceItemService;
 use crate::application::service::SalesOrderService;
 use crate::application::service::SalesOrderItemService;
 use crate::application::service::SalesTeamService;
@@ -40,10 +38,6 @@ pub struct AppState {
     pub quotation_service: Arc<QuotationService>,
     /// QuotationItem service
     pub quotation_item_service: Arc<QuotationItemService>,
-    /// SalesInvoice service
-    pub sales_invoice_service: Arc<SalesInvoiceService>,
-    /// SalesInvoiceItem service
-    pub sales_invoice_item_service: Arc<SalesInvoiceItemService>,
     /// SalesOrder service
     pub sales_order_service: Arc<SalesOrderService>,
     /// SalesOrderItem service
@@ -59,8 +53,6 @@ impl AppState {
     pub fn new(
         quotation_service: Arc<QuotationService>,
         quotation_item_service: Arc<QuotationItemService>,
-        sales_invoice_service: Arc<SalesInvoiceService>,
-        sales_invoice_item_service: Arc<SalesInvoiceItemService>,
         sales_order_service: Arc<SalesOrderService>,
         sales_order_item_service: Arc<SalesOrderItemService>,
         sales_team_service: Arc<SalesTeamService>,
@@ -69,8 +61,6 @@ impl AppState {
         Self {
             quotation_service,
             quotation_item_service,
-            sales_invoice_service,
-            sales_invoice_item_service,
             sales_order_service,
             sales_order_item_service,
             sales_team_service,
@@ -83,8 +73,6 @@ impl AppState {
         Self {
             quotation_service: module.quotation_service.clone(),
             quotation_item_service: module.quotation_item_service.clone(),
-            sales_invoice_service: module.sales_invoice_service.clone(),
-            sales_invoice_item_service: module.sales_invoice_item_service.clone(),
             sales_order_service: module.sales_order_service.clone(),
             sales_order_item_service: module.sales_order_item_service.clone(),
             sales_team_service: module.sales_team_service.clone(),
@@ -100,8 +88,6 @@ impl AppState {
 pub struct AppStateBuilder {
     quotation_service: Option<Arc<QuotationService>>,
     quotation_item_service: Option<Arc<QuotationItemService>>,
-    sales_invoice_service: Option<Arc<SalesInvoiceService>>,
-    sales_invoice_item_service: Option<Arc<SalesInvoiceItemService>>,
     sales_order_service: Option<Arc<SalesOrderService>>,
     sales_order_item_service: Option<Arc<SalesOrderItemService>>,
     sales_team_service: Option<Arc<SalesTeamService>>,
@@ -123,18 +109,6 @@ impl AppStateBuilder {
     /// Set the QuotationItem service.
     pub fn with_quotation_item_service(mut self, service: Arc<QuotationItemService>) -> Self {
         self.quotation_item_service = Some(service);
-        self
-    }
-
-    /// Set the SalesInvoice service.
-    pub fn with_sales_invoice_service(mut self, service: Arc<SalesInvoiceService>) -> Self {
-        self.sales_invoice_service = Some(service);
-        self
-    }
-
-    /// Set the SalesInvoiceItem service.
-    pub fn with_sales_invoice_item_service(mut self, service: Arc<SalesInvoiceItemService>) -> Self {
-        self.sales_invoice_item_service = Some(service);
         self
     }
 
@@ -171,8 +145,6 @@ impl AppStateBuilder {
         AppState {
             quotation_service: self.quotation_service.expect("quotation_service is required"),
             quotation_item_service: self.quotation_item_service.expect("quotation_item_service is required"),
-            sales_invoice_service: self.sales_invoice_service.expect("sales_invoice_service is required"),
-            sales_invoice_item_service: self.sales_invoice_item_service.expect("sales_invoice_item_service is required"),
             sales_order_service: self.sales_order_service.expect("sales_order_service is required"),
             sales_order_item_service: self.sales_order_item_service.expect("sales_order_item_service is required"),
             sales_team_service: self.sales_team_service.expect("sales_team_service is required"),

@@ -15,10 +15,6 @@ use crate::presentation::http::{
     create_quotation_read_routes,
     create_quotation_item_routes,
     create_quotation_item_read_routes,
-    create_sales_invoice_routes,
-    create_sales_invoice_read_routes,
-    create_sales_invoice_item_routes,
-    create_sales_invoice_item_read_routes,
     create_sales_order_routes,
     create_sales_order_read_routes,
     create_sales_order_item_routes,
@@ -52,8 +48,6 @@ pub fn create_stateless_routes(module: &crate::SellingModule) -> Router<()> {
     Router::new()
         .merge(create_quotation_routes(module.quotation_service.clone()))
         .merge(create_quotation_item_routes(module.quotation_item_service.clone()))
-        .merge(create_sales_invoice_routes(module.sales_invoice_service.clone()))
-        .merge(create_sales_invoice_item_routes(module.sales_invoice_item_service.clone()))
         .merge(create_sales_order_routes(module.sales_order_service.clone()))
         .merge(create_sales_order_item_routes(module.sales_order_item_service.clone()))
         .merge(create_sales_team_routes(module.sales_team_service.clone()))
@@ -69,8 +63,6 @@ pub fn create_readonly_selling_routes(module: &crate::SellingModule) -> Router<(
     Router::new()
         .merge(create_quotation_read_routes(module.quotation_service.clone()))
         .merge(create_quotation_item_read_routes(module.quotation_item_service.clone()))
-        .merge(create_sales_invoice_read_routes(module.sales_invoice_service.clone()))
-        .merge(create_sales_invoice_item_read_routes(module.sales_invoice_item_service.clone()))
         .merge(create_sales_order_read_routes(module.sales_order_service.clone()))
         .merge(create_sales_order_item_read_routes(module.sales_order_item_service.clone()))
         .merge(create_sales_team_read_routes(module.sales_team_service.clone()))

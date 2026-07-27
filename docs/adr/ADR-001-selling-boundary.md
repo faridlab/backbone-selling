@@ -1,6 +1,8 @@
 # ADR-001: Selling owns order-to-cash intent + revenue recognition; it is a GL producer, never the ledger
 
-**Status**: Accepted — **Applied 2026-07-03**
+**Status**: ⚠️ **Superseded by [ADR-006](ADR-006-selling-exits-invoice-business.md) (2026-07-27)** — selling no longer recognises revenue or posts to the GL; the invoice + revenue post live in `backbone-billing`. The order-to-cash *intent* ownership (Quotation → Sales Order) and the "no masters / logical FKs only" boundaries below still hold; only the folded-in invoice/revenue half moved to billing.
+
+**Status (historical)**: Accepted — **Applied 2026-07-03**
 **Deciders**: Farid (owner), build session 2026-07-03
 **Related**: `docs/erp/supply-chain.md`, `docs/erp/gl-posting-contract.md`, ADR-002 (the GL seam)
 

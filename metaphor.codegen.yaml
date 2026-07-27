@@ -29,17 +29,16 @@ user_owned:
   - "src/application/service/selling_invoice_seam.rs"
   - "src/presentation/http/guarded_routes.rs"
 
-  # The six document repositories own the hand-written selling SQL that the write service
-  # orchestrates (the header+lines inserts, the guarded state transitions, the GL posting-state
-  # transitions, the fulfillment watermarks, the FOR UPDATE billing allocation). Declared here — not
-  # renamed with a `_custom` suffix — so the generator skips them wholesale; this declaration is what
-  # makes editing them legitimate.
+  # The four document repositories own the hand-written selling SQL that the write service
+  # orchestrates (the header+lines inserts, the guarded state transitions, the fulfillment
+  # watermarks, the FOR UPDATE billing allocation). Declared here — not renamed with a `_custom`
+  # suffix — so the generator skips them wholesale; this declaration is what makes editing them
+  # legitimate. (The two SalesInvoice repositories were removed when selling exited the invoice
+  # business — ADR-006.)
   - "src/infrastructure/persistence/quotation_repository.rs"
   - "src/infrastructure/persistence/quotation_item_repository.rs"
   - "src/infrastructure/persistence/sales_order_repository.rs"
   - "src/infrastructure/persistence/sales_order_item_repository.rs"
-  - "src/infrastructure/persistence/sales_invoice_repository.rs"
-  - "src/infrastructure/persistence/sales_invoice_item_repository.rs"
 
   # Behavior tests (the golden oracle) + route probes + seam + extension-contract round-trip + BDD.
   - "tests/selling_golden_cases.rs"
@@ -56,9 +55,6 @@ user_owned:
   # Tradeoff: a newly-added entity will NOT auto-generate its integration test here — add it by hand.
   - "tests/integration_tests.rs"
   - "tests/integration/**"
-
-  # Hand-authored DB constraint (IDR-only sales invoices) — regen must not remove it.
-  - "migrations/20260426220020_sales_invoice_idr_only_check.*"
 
   # Hand-authored module documentation.
   - "docs/**"

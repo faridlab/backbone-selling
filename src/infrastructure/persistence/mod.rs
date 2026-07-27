@@ -6,8 +6,6 @@
 
 mod quotation_repository;
 mod quotation_item_repository;
-mod sales_invoice_repository;
-mod sales_invoice_item_repository;
 mod sales_order_repository;
 mod sales_order_item_repository;
 mod sales_team_repository;
@@ -20,8 +18,6 @@ mod sales_person_allocation_repository;
 // Re-exports
 pub use quotation_repository::QuotationRepository;
 pub use quotation_item_repository::QuotationItemRepository;
-pub use sales_invoice_repository::SalesInvoiceRepository;
-pub use sales_invoice_item_repository::SalesInvoiceItemRepository;
 pub use sales_order_repository::SalesOrderRepository;
 pub use sales_order_item_repository::SalesOrderItemRepository;
 pub use sales_team_repository::SalesTeamRepository;
@@ -48,8 +44,4 @@ pub use sales_order_item_repository::{
     LineBillingCapacityRow, NewSalesOrderItemRow, OrderBillingRemainderRow,
     OrderDeliveryRemainderRow, OrderLineForInvoiceRow, WatermarkRollupRow,
 };
-pub use sales_invoice_repository::{
-    InvoicePostSourceRow, InvoicePostingStateRow, NewSalesInvoiceRow,
-};
-pub use sales_invoice_item_repository::{InvoiceRevenueLineRow, NewSalesInvoiceItemRow};
 // END CUSTOM

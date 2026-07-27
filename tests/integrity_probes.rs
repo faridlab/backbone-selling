@@ -112,74 +112,23 @@ async fn guarded_routes_lock_generic_invoice_delete() {
     );
 }
 
-// IGC-3: the validated create endpoint accepts a well-formed invoice (201). No `companyId` in the
-// body — the tenant rides on the token.
-#[tokio::test]
-async fn guarded_create_invoice_ok() {
-    let pool = pool().await;
-    let m = module(&pool).await;
-    let (company, customer, ar, ppn, rev) = (
-        uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-        uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-    );
-    let body = format!(
-        r#"{{"invoiceNumber":"{}","customerId":"{}","invoiceDate":"2026-07-03",
-             "taxRate":"11","receivableAccountId":"{}","taxOutputAccountId":"{}",
-             "lines":[{{"itemId":"{}","revenueAccountId":"{}","quantity":"1","unitPrice":"1000000"}}]}}"#,
-        uq("INV"), customer, ar, ppn, uuid::Uuid::new_v4(), rev,
-    );
-    let (status, _) = req_as(app(&pool, &m), company, "POST", "/sales-invoices", Some(body)).await;
-    assert_eq!(status, StatusCode::CREATED);
-}
-
-// IGC-4: the validated create endpoint rejects an empty invoice (422 empty_document).
-#[tokio::test]
-async fn guarded_create_invoice_rejects_empty() {
-    let pool = pool().await;
-    let m = module(&pool).await;
-    let body = format!(
-        r#"{{"invoiceNumber":"{}","customerId":"{}","invoiceDate":"2026-07-03",
-             "receivableAccountId":"{}","lines":[]}}"#,
-        uq("INV"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-    );
-    let (status, body) = req_as(
-        app(&pool, &m), uuid::Uuid::new_v4(), "POST", "/sales-invoices", Some(body),
-    ).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body.contains("empty_document"), "got: {body}");
-}
-
-// IGC-5: tax charged with no PPN output account is rejected (422 tax_account_missing).
-#[tokio::test]
-async fn guarded_create_invoice_rejects_missing_tax_account() {
-    let pool = pool().await;
-    let m = module(&pool).await;
-    let body = format!(
-        r#"{{"invoiceNumber":"{}","customerId":"{}","invoiceDate":"2026-07-03",
-             "taxRate":"11","receivableAccountId":"{}",
-             "lines":[{{"itemId":"{}","revenueAccountId":"{}","quantity":"1","unitPrice":"1000000"}}]}}"#,
-        uq("INV"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-        uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-    );
-    let (status, body) = req_as(
-        app(&pool, &m), uuid::Uuid::new_v4(), "POST", "/sales-invoices", Some(body),
-    ).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(body.contains("tax_account_missing"), "got: {body}");
-}
+// (IGC-3/4/5 — the invoice-create validation probes — removed: the `/sales-invoices` validated
+// create route is gone now that selling exited the invoice business; ADR-006. The AR invoice create
+// + its validation live in backbone-billing.)
 
 // IGT-1: an unauthenticated write is rejected. Before the tenant guard this create succeeded and
-// stamped whatever `companyId` the caller put in the body.
+// stamped whatever `companyId` the caller put in the body. (Re-pointed from invoices to sales-orders
+// when the invoice route was removed.)
 #[tokio::test]
 async fn guarded_write_rejects_unauthenticated() {
     let pool = pool().await;
     let m = module(&pool).await;
     let body = format!(
-        r#"{{"invoiceNumber":"{}","customerId":"{}","invoiceDate":"2026-07-03",
-             "receivableAccountId":"{}","lines":[]}}"#,
-        uq("INV"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
+        r#"{{"orderNumber":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
+             "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
+        uq("SO"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
     );
-    let (status, _) = req(app(&pool, &m), "POST", "/sales-invoices", Some(body)).await;
+    let (status, _) = req(app(&pool, &m), "POST", "/sales-orders", Some(body)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "an unauthenticated write must not reach the service");
 }
 
@@ -190,12 +139,12 @@ async fn guarded_write_rejects_token_without_company_id() {
     let pool = pool().await;
     let m = module(&pool).await;
     let body = format!(
-        r#"{{"invoiceNumber":"{}","customerId":"{}","invoiceDate":"2026-07-03",
-             "receivableAccountId":"{}","lines":[]}}"#,
-        uq("INV"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
+        r#"{{"orderNumber":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
+             "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
+        uq("SO"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
     );
     let (status, _) = req_with(
-        app(&pool, &m), "POST", "/sales-invoices", Some(body), Some(token(None)),
+        app(&pool, &m), "POST", "/sales-orders", Some(body), Some(token(None)),
     ).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a token with no tenant must not write");
 }
@@ -240,30 +189,29 @@ async fn a_principal_cannot_confirm_another_tenants_order() {
 }
 
 // IGT-3: a `companyId` smuggled in the body is ignored — the persisted tenant is the token's. This is
-// the regression that motivated the change: the body must not be able to name the tenant.
+// the regression that motivated the change: the body must not be able to name the tenant. (Re-pointed
+// from invoices to sales-orders when the invoice route was removed.)
 #[tokio::test]
 async fn body_company_id_cannot_override_the_token_tenant() {
     let pool = pool().await;
     let m = module(&pool).await;
     let token_company = uuid::Uuid::new_v4();
     let attacker_company = uuid::Uuid::new_v4();
-    let number = uq("INV");
+    let number = uq("SO");
     let body = format!(
-        r#"{{"invoiceNumber":"{}","companyId":"{}","customerId":"{}","invoiceDate":"2026-07-03",
-             "taxRate":"11","receivableAccountId":"{}","taxOutputAccountId":"{}",
-             "lines":[{{"itemId":"{}","revenueAccountId":"{}","quantity":"1","unitPrice":"1000000"}}]}}"#,
+        r#"{{"orderNumber":"{}","companyId":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
+             "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
         number, attacker_company, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-        uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
     );
-    let (status, _) = req_as(app(&pool, &m), token_company, "POST", "/sales-invoices", Some(body)).await;
+    let (status, _) = req_as(app(&pool, &m), token_company, "POST", "/sales-orders", Some(body)).await;
     assert_eq!(status, StatusCode::CREATED);
 
     let persisted: Uuid =
-        sqlx::query_scalar("SELECT company_id FROM selling.sales_invoices WHERE invoice_number = $1")
+        sqlx::query_scalar("SELECT company_id FROM selling.sales_orders WHERE order_number = $1")
             .bind(&number)
             .fetch_one(&pool)
             .await
-            .expect("invoice row");
+            .expect("order row");
     assert_eq!(persisted, token_company, "tenant must come from the token, not the body");
     assert_ne!(persisted, attacker_company, "the body's companyId must be ignored");
 }

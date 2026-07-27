@@ -34,8 +34,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::infrastructure::persistence::{
-    QuotationItemRepository, QuotationRepository, SalesInvoiceItemRepository,
-    SalesInvoiceRepository, SalesOrderItemRepository, SalesOrderRepository,
+    QuotationItemRepository, QuotationRepository, SalesOrderItemRepository, SalesOrderRepository,
 };
 
 use super::selling_events::{LoggingSink, SellingEventSink};
@@ -117,34 +116,7 @@ pub struct NewCartSalesOrder {
     pub lines: Vec<CartOrderLine>,
 }
 
-#[derive(Debug, Clone)]
-pub struct NewSalesInvoice {
-    pub invoice_number: String,
-    pub sales_order_id: Option<Uuid>,
-    pub company_id: Uuid,
-    pub branch_id: Option<Uuid>,
-    pub customer_id: Uuid,
-    pub invoice_date: chrono::NaiveDate,
-    pub due_date: Option<chrono::NaiveDate>,
-    pub currency: Option<String>,
-    pub tax_rate: Decimal,
-    /// A/R control account to debit (the "debit_to").
-    pub receivable_account_id: Uuid,
-    /// PPN Output account — required iff the computed tax is > 0.
-    pub tax_output_account_id: Option<Uuid>,
-    pub notes: Option<String>,
-    pub lines: Vec<NewLine>,
-}
-
-/// Outcome of posting an invoice to the GL.
-#[derive(Debug, Clone)]
-pub struct PostOutcome {
-    pub invoice_id: Uuid,
-    pub post_id: Uuid,
-    pub journal_id: Uuid,
-    /// True when the invoice was already posted (idempotent replay — no new emission).
-    pub idempotent_reuse: bool,
-}
+// (NewSalesInvoice + PostOutcome removed — selling exited the invoice business; ADR-006.)
 
 // --- errors ------------------------------------------------------------------
 
@@ -152,12 +124,7 @@ pub struct PostOutcome {
 pub enum SellingError {
     EmptyDocument,
     NegativeQuantity,
-    MissingRevenueAccount,
-    TaxAccountMissing,
-    UnbalancedPost,
-    UnsupportedCurrency(String),
     DuplicateNumber(String),
-    InvoiceNotFound(Uuid),
     QuotationNotFound(Uuid),
     QuotationNotAccepted(Uuid),
     OrderNotFound(Uuid),
@@ -168,7 +135,6 @@ pub enum SellingError {
     /// it the rollup's `delivered_qty >= quantity` silently masks an over-delivery as the delivered
     /// band, and `completed` can become true for stock that was never ordered.
     OverDelivered,
-    GlRejected { code: String, message: String },
     PricingRejected { code: String, message: String },
     Db(sqlx::Error),
     Outbox(String),
@@ -179,20 +145,13 @@ impl SellingError {
         match self {
             SellingError::EmptyDocument => "empty_document".into(),
             SellingError::NegativeQuantity => "negative_quantity".into(),
-            SellingError::MissingRevenueAccount => "missing_revenue_account".into(),
-            SellingError::TaxAccountMissing => "tax_account_missing".into(),
-            SellingError::UnbalancedPost => "unbalanced_post".into(),
-            SellingError::UnsupportedCurrency(_) => "unsupported_currency".into(),
             SellingError::DuplicateNumber(_) => "duplicate_number".into(),
-            SellingError::InvoiceNotFound(_) => "invoice_not_found".into(),
             SellingError::QuotationNotFound(_) => "quotation_not_found".into(),
             SellingError::QuotationNotAccepted(_) => "quotation_not_accepted".into(),
             SellingError::OrderNotFound(_) => "order_not_found".into(),
             SellingError::NotDraft(_) => "not_draft".into(),
             SellingError::OverBilled => "over_billed".into(),
             SellingError::OverDelivered => "over_delivered".into(),
-            // Surface the GL's own stable code so callers see one contract vocabulary.
-            SellingError::GlRejected { code, .. } => code.clone(),
             SellingError::PricingRejected { code, .. } => code.clone(),
             SellingError::Db(_) => "internal_error".into(),
             SellingError::Outbox(_) => "outbox_error".into(),
@@ -200,8 +159,7 @@ impl SellingError {
     }
     pub fn http_status(&self) -> u16 {
         match self {
-            SellingError::InvoiceNotFound(_)
-            | SellingError::QuotationNotFound(_)
+            SellingError::QuotationNotFound(_)
             | SellingError::OrderNotFound(_) => 404,
             SellingError::Db(_) | SellingError::Outbox(_) => 500,
             _ => 422,
@@ -212,7 +170,6 @@ impl SellingError {
 impl std::fmt::Display for SellingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SellingError::GlRejected { code, message } => write!(f, "{code}: {message}"),
             other => write!(f, "{}", other.code()),
         }
     }
@@ -231,7 +188,6 @@ pub(super) fn is_dup(e: &sqlx::Error) -> bool {
 /// A priced line after server-side computation.
 pub(super) struct PricedLine {
     pub(super) item_id: Uuid,
-    pub(super) revenue_account_id: Option<Uuid>,
     pub(super) description: Option<String>,
     pub(super) quantity: Decimal,
     pub(super) unit_price: Decimal,
@@ -259,7 +215,6 @@ pub(super) fn price_document(lines: &[NewLine], tax_rate: Decimal) -> Result<(Ve
         subtotal += line_amount;
         priced.push(PricedLine {
             item_id: l.item_id,
-            revenue_account_id: l.revenue_account_id,
             description: l.description.clone(),
             quantity: l.quantity,
             unit_price: l.unit_price,
@@ -273,16 +228,16 @@ pub(super) fn price_document(lines: &[NewLine], tax_rate: Decimal) -> Result<(Ve
     Ok((priced, subtotal, tax_amount, total))
 }
 
-/// The six document repositories this service orchestrates. Held behind `Arc` so the service stays
-/// `Clone` (the repositories are not `Clone` themselves) without re-building them per call.
+/// The four document repositories this service orchestrates (quotations + orders, each with line
+/// children). Held behind `Arc` so the service stays `Clone` (the repositories are not `Clone`
+/// themselves) without re-building them per call. (SalesInvoice repositories lived here before
+/// selling exited the invoice business — ADR-006.)
 #[derive(Clone)]
 pub(super) struct SellingRepos {
     pub(super) quotations: Arc<QuotationRepository>,
     pub(super) quotation_items: Arc<QuotationItemRepository>,
     pub(super) orders: Arc<SalesOrderRepository>,
     pub(super) order_items: Arc<SalesOrderItemRepository>,
-    pub(super) invoices: Arc<SalesInvoiceRepository>,
-    pub(super) invoice_items: Arc<SalesInvoiceItemRepository>,
 }
 
 impl SellingRepos {
@@ -292,8 +247,6 @@ impl SellingRepos {
             quotation_items: Arc::new(QuotationItemRepository::new(pool.clone())),
             orders: Arc::new(SalesOrderRepository::new(pool.clone())),
             order_items: Arc::new(SalesOrderItemRepository::new(pool.clone())),
-            invoices: Arc::new(SalesInvoiceRepository::new(pool.clone())),
-            invoice_items: Arc::new(SalesInvoiceItemRepository::new(pool.clone())),
         }
     }
 }
@@ -315,5 +268,29 @@ impl SellingWriteService {
     pub fn with_sink(db_pool: PgPool, sink: Arc<dyn SellingEventSink>) -> Self {
         let repos = SellingRepos::new(&db_pool);
         Self { db_pool, sink, repos }
+    }
+
+    /// Recompute an order's status from its two watermarks (ADR-003): `completed` iff every line is
+    /// fully billed AND fully delivered; else `to_deliver` (billed, awaiting delivery) / `to_bill`
+    /// (delivered, awaiting billing) / `to_deliver_and_bill` (awaiting both). Never touches a
+    /// draft/closed/cancelled order.
+    ///
+    /// `pub(super)` — the single watermark → status rollup shared by the delivery seam
+    /// (`mark_delivered`) and the invoice seam (`mark_invoiced`), so the two watermark advancers can
+    /// never drift. (Relocated here from the retired `selling_invoice_post.rs` when selling exited
+    /// the invoice business — ADR-006.)
+    pub(super) async fn recompute_order_status(&self, order_id: Uuid) -> Result<(), SellingError> {
+        // RLS scope (ADR-0008), ID-only pattern — inherits the caller's scope.
+        let row = self.repos.order_items.watermark_rollup(&self.db_pool, order_id).await?;
+        let next = match (row.billed_all.unwrap_or(false), row.delivered_all.unwrap_or(false)) {
+            (true, true) => "completed",
+            (true, false) => "to_deliver",
+            (false, true) => "to_bill",
+            (false, false) => "to_deliver_and_bill",
+        };
+        // Only advance an in-flight (confirmed) order; leave draft/closed/cancelled alone — the
+        // repo statement's `status = ANY(...)` gate enforces that.
+        self.repos.orders.advance_status(&self.db_pool, order_id, next).await?;
+        Ok(())
     }
 }

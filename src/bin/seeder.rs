@@ -14,8 +14,6 @@ use std::env;
 // Import seeders
 use backbone_selling::seeders::SeedQuotationSeeder;
 use backbone_selling::seeders::SeedQuotationItemSeeder;
-use backbone_selling::seeders::SeedSalesInvoiceSeeder;
-use backbone_selling::seeders::SeedSalesInvoiceItemSeeder;
 use backbone_selling::seeders::SeedSalesOrderSeeder;
 use backbone_selling::seeders::SeedSalesOrderItemSeeder;
 use backbone_selling::seeders::SeedSalesTeamSeeder;
@@ -50,8 +48,6 @@ async fn main() -> Result<()> {
     let mut seeders: Vec<Box<dyn Seeder + Send + Sync>> = Vec::new();
     seeders.push(Box::new(SeedQuotationSeeder::new()));
     seeders.push(Box::new(SeedQuotationItemSeeder::new()));
-    seeders.push(Box::new(SeedSalesInvoiceSeeder::new()));
-    seeders.push(Box::new(SeedSalesInvoiceItemSeeder::new()));
     seeders.push(Box::new(SeedSalesOrderSeeder::new()));
     seeders.push(Box::new(SeedSalesOrderItemSeeder::new()));
     seeders.push(Box::new(SeedSalesTeamSeeder::new()));

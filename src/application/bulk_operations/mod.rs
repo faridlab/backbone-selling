@@ -7,8 +7,6 @@ pub use shared_types::*;
 
 pub mod quotation_bulk;
 pub mod quotation_item_bulk;
-pub mod sales_invoice_bulk;
-pub mod sales_invoice_item_bulk;
 pub mod sales_order_bulk;
 pub mod sales_order_item_bulk;
 pub mod sales_team_bulk;
@@ -16,8 +14,6 @@ pub mod sales_person_allocation_bulk;
 
 pub use quotation_bulk::QuotationBulkService;
 pub use quotation_item_bulk::QuotationItemBulkService;
-pub use sales_invoice_bulk::SalesInvoiceBulkService;
-pub use sales_invoice_item_bulk::SalesInvoiceItemBulkService;
 pub use sales_order_bulk::SalesOrderBulkService;
 pub use sales_order_item_bulk::SalesOrderItemBulkService;
 pub use sales_team_bulk::SalesTeamBulkService;

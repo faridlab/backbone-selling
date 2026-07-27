@@ -65,60 +65,6 @@ pub struct QuotationItemDeletedEvent {
 }
 
 // ============================================================================
-// SALESINVOICE EVENTS
-// ============================================================================
-
-/// Event published when a SalesInvoice is created
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SalesInvoiceCreatedEvent {
-    pub id: SalesInvoiceId,
-    pub data: SalesInvoiceDto,
-    pub occurred_at: DateTime<Utc>,
-}
-
-/// Event published when a SalesInvoice is updated
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SalesInvoiceUpdatedEvent {
-    pub id: SalesInvoiceId,
-    pub data: SalesInvoiceDto,
-    pub occurred_at: DateTime<Utc>,
-}
-
-/// Event published when a SalesInvoice is deleted
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SalesInvoiceDeletedEvent {
-    pub id: SalesInvoiceId,
-    pub occurred_at: DateTime<Utc>,
-}
-
-// ============================================================================
-// SALESINVOICEITEM EVENTS
-// ============================================================================
-
-/// Event published when a SalesInvoiceItem is created
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SalesInvoiceItemCreatedEvent {
-    pub id: SalesInvoiceItemId,
-    pub data: SalesInvoiceItemDto,
-    pub occurred_at: DateTime<Utc>,
-}
-
-/// Event published when a SalesInvoiceItem is updated
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SalesInvoiceItemUpdatedEvent {
-    pub id: SalesInvoiceItemId,
-    pub data: SalesInvoiceItemDto,
-    pub occurred_at: DateTime<Utc>,
-}
-
-/// Event published when a SalesInvoiceItem is deleted
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SalesInvoiceItemDeletedEvent {
-    pub id: SalesInvoiceItemId,
-    pub occurred_at: DateTime<Utc>,
-}
-
-// ============================================================================
 // SALESORDER EVENTS
 // ============================================================================
 
@@ -240,12 +186,6 @@ pub enum SellingEvent {
     QuotationItemCreated(QuotationItemCreatedEvent),
     QuotationItemUpdated(QuotationItemUpdatedEvent),
     QuotationItemDeleted(QuotationItemDeletedEvent),
-    SalesInvoiceCreated(SalesInvoiceCreatedEvent),
-    SalesInvoiceUpdated(SalesInvoiceUpdatedEvent),
-    SalesInvoiceDeleted(SalesInvoiceDeletedEvent),
-    SalesInvoiceItemCreated(SalesInvoiceItemCreatedEvent),
-    SalesInvoiceItemUpdated(SalesInvoiceItemUpdatedEvent),
-    SalesInvoiceItemDeleted(SalesInvoiceItemDeletedEvent),
     SalesOrderCreated(SalesOrderCreatedEvent),
     SalesOrderUpdated(SalesOrderUpdatedEvent),
     SalesOrderDeleted(SalesOrderDeletedEvent),

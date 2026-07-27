@@ -41,24 +41,6 @@ pub trait SellingQueryService: Send + Sync {
     /// Check if QuotationItem exists
     async fn quotation_item_exists(&self, id: QuotationItemId) -> Result<bool>;
 
-    /// Get SalesInvoice by ID
-    async fn get_sales_invoice(&self, id: SalesInvoiceId) -> Result<Option<SalesInvoiceDto>>;
-
-    /// Get SalesInvoice summary by ID
-    async fn get_sales_invoice_summary(&self, id: SalesInvoiceId) -> Result<Option<SalesInvoiceSummary>>;
-
-    /// Check if SalesInvoice exists
-    async fn sales_invoice_exists(&self, id: SalesInvoiceId) -> Result<bool>;
-
-    /// Get SalesInvoiceItem by ID
-    async fn get_sales_invoice_item(&self, id: SalesInvoiceItemId) -> Result<Option<SalesInvoiceItemDto>>;
-
-    /// Get SalesInvoiceItem summary by ID
-    async fn get_sales_invoice_item_summary(&self, id: SalesInvoiceItemId) -> Result<Option<SalesInvoiceItemSummary>>;
-
-    /// Check if SalesInvoiceItem exists
-    async fn sales_invoice_item_exists(&self, id: SalesInvoiceItemId) -> Result<bool>;
-
     /// Get SalesOrder by ID
     async fn get_sales_order(&self, id: SalesOrderId) -> Result<Option<SalesOrderDto>>;
 

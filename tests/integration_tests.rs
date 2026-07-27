@@ -39,34 +39,6 @@ async fn test_quotation_item_api() {
 }
 
 #[tokio::test]
-async fn test_sales_invoice_api() {
-    let mut test = SalesInvoiceApiTest::new();
-    let results = test.run_all().await;
-
-    let failed: Vec<_> = results.iter().filter(|r| !r.success).collect();
-    if !failed.is_empty() {
-        for f in &failed {
-            eprintln!("FAILED: {} - {}", f.test_name, f.details);
-        }
-        panic!("{} tests failed", failed.len());
-    }
-}
-
-#[tokio::test]
-async fn test_sales_invoice_item_api() {
-    let mut test = SalesInvoiceItemApiTest::new();
-    let results = test.run_all().await;
-
-    let failed: Vec<_> = results.iter().filter(|r| !r.success).collect();
-    if !failed.is_empty() {
-        for f in &failed {
-            eprintln!("FAILED: {} - {}", f.test_name, f.details);
-        }
-        panic!("{} tests failed", failed.len());
-    }
-}
-
-#[tokio::test]
 async fn test_sales_order_api() {
     let mut test = SalesOrderApiTest::new();
     let results = test.run_all().await;

@@ -13,8 +13,6 @@ pub use registry::SubscriptionRegistry;
 
 pub use handlers::QuotationEventSubscriber;
 pub use handlers::QuotationItemEventSubscriber;
-pub use handlers::SalesInvoiceEventSubscriber;
-pub use handlers::SalesInvoiceItemEventSubscriber;
 pub use handlers::SalesOrderEventSubscriber;
 pub use handlers::SalesOrderItemEventSubscriber;
 pub use handlers::SalesTeamEventSubscriber;

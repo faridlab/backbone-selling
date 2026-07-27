@@ -7,8 +7,6 @@
 
 pub mod quotation_handler;
 pub mod quotation_item_handler;
-pub mod sales_invoice_handler;
-pub mod sales_invoice_item_handler;
 pub mod sales_order_handler;
 pub mod sales_order_item_handler;
 // <<< CUSTOM
@@ -23,8 +21,6 @@ pub mod sales_person_allocation_handler;
 // Re-exports
 pub use quotation_handler::{create_quotation_routes, create_quotation_read_routes, create_quotation_write_routes};
 pub use quotation_item_handler::{create_quotation_item_routes, create_quotation_item_read_routes, create_quotation_item_write_routes};
-pub use sales_invoice_handler::{create_sales_invoice_routes, create_sales_invoice_read_routes, create_sales_invoice_write_routes};
-pub use sales_invoice_item_handler::{create_sales_invoice_item_routes, create_sales_invoice_item_read_routes, create_sales_invoice_item_write_routes};
 pub use sales_order_handler::{create_sales_order_routes, create_sales_order_read_routes, create_sales_order_write_routes};
 pub use sales_order_item_handler::{create_sales_order_item_routes, create_sales_order_item_read_routes, create_sales_order_item_write_routes};
 // <<< CUSTOM

@@ -11,8 +11,6 @@ use std::sync::Arc;
 use super::{
     quotation_handler::create_quotation_routes,
     quotation_item_handler::create_quotation_item_routes,
-    sales_invoice_handler::create_sales_invoice_routes,
-    sales_invoice_item_handler::create_sales_invoice_item_routes,
     sales_order_handler::create_sales_order_routes,
     sales_order_item_handler::create_sales_order_item_routes,
     sales_team_handler::create_sales_team_routes,
@@ -22,8 +20,6 @@ use super::{
 use crate::application::service::{
     QuotationService,
     QuotationItemService,
-    SalesInvoiceService,
-    SalesInvoiceItemService,
     SalesOrderService,
     SalesOrderItemService,
     SalesTeamService,
@@ -34,8 +30,6 @@ use crate::application::service::{
 pub struct HttpServices {
     pub quotation: Arc<QuotationService>,
     pub quotation_item: Arc<QuotationItemService>,
-    pub sales_invoice: Arc<SalesInvoiceService>,
-    pub sales_invoice_item: Arc<SalesInvoiceItemService>,
     pub sales_order: Arc<SalesOrderService>,
     pub sales_order_item: Arc<SalesOrderItemService>,
     pub sales_team: Arc<SalesTeamService>,
@@ -63,10 +57,6 @@ pub fn configure_routes(services: HttpServices) -> Router {
         .merge(create_quotation_routes(services.quotation))
         // QuotationItem routes (12 Backbone endpoints)
         .merge(create_quotation_item_routes(services.quotation_item))
-        // SalesInvoice routes (12 Backbone endpoints)
-        .merge(create_sales_invoice_routes(services.sales_invoice))
-        // SalesInvoiceItem routes (12 Backbone endpoints)
-        .merge(create_sales_invoice_item_routes(services.sales_invoice_item))
         // SalesOrder routes (12 Backbone endpoints)
         .merge(create_sales_order_routes(services.sales_order))
         // SalesOrderItem routes (12 Backbone endpoints)
@@ -87,14 +77,6 @@ pub mod individual {
 
     pub fn quotation_item_routes(service: Arc<QuotationItemService>) -> Router {
         create_quotation_item_routes(service)
-    }
-
-    pub fn sales_invoice_routes(service: Arc<SalesInvoiceService>) -> Router {
-        create_sales_invoice_routes(service)
-    }
-
-    pub fn sales_invoice_item_routes(service: Arc<SalesInvoiceItemService>) -> Router {
-        create_sales_invoice_item_routes(service)
     }
 
     pub fn sales_order_routes(service: Arc<SalesOrderService>) -> Router {

@@ -6,8 +6,6 @@ use backbone_messaging::GenericEventSubscriber;
 
 use crate::domain::event::QuotationEvent;
 use crate::domain::event::QuotationItemEvent;
-use crate::domain::event::SalesInvoiceEvent;
-use crate::domain::event::SalesInvoiceItemEvent;
 use crate::domain::event::SalesOrderEvent;
 use crate::domain::event::SalesOrderItemEvent;
 use crate::domain::event::SalesTeamEvent;
@@ -22,16 +20,6 @@ pub type QuotationEventSubscriber = GenericEventSubscriber<QuotationEvent>;
 ///
 /// Register handlers via `GenericEventSubscriber::new(topics, handlers)`.
 pub type QuotationItemEventSubscriber = GenericEventSubscriber<QuotationItemEvent>;
-
-/// Subscriber for SalesInvoice events.
-///
-/// Register handlers via `GenericEventSubscriber::new(topics, handlers)`.
-pub type SalesInvoiceEventSubscriber = GenericEventSubscriber<SalesInvoiceEvent>;
-
-/// Subscriber for SalesInvoiceItem events.
-///
-/// Register handlers via `GenericEventSubscriber::new(topics, handlers)`.
-pub type SalesInvoiceItemEventSubscriber = GenericEventSubscriber<SalesInvoiceItemEvent>;
 
 /// Subscriber for SalesOrder events.
 ///

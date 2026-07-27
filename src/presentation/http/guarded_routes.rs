@@ -25,13 +25,12 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::application::service::selling_write_service::{
-    NewLine, NewQuotation, NewSalesInvoice, NewSalesOrder, SellingError, SellingWriteService,
+    NewLine, NewQuotation, NewSalesOrder, SellingError, SellingWriteService,
 };
 use crate::SellingModule;
 
 use super::{
     create_quotation_read_routes, create_quotation_item_read_routes,
-    create_sales_invoice_read_routes, create_sales_invoice_item_read_routes,
     create_sales_order_read_routes, create_sales_order_item_read_routes,
 };
 
@@ -179,60 +178,14 @@ async fn confirm_sales_order(
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateSalesInvoiceBody {
-    invoice_number: String,
-    #[serde(default)]
-    sales_order_id: Option<Uuid>,
-    // Tenant comes from the signed token (`CompanyContext`), not the body.
-    customer_id: Uuid,
-    invoice_date: chrono::NaiveDate,
-    #[serde(default)]
-    due_date: Option<chrono::NaiveDate>,
-    #[serde(default)]
-    currency: Option<String>,
-    #[serde(default)]
-    tax_rate: Decimal,
-    receivable_account_id: Uuid,
-    #[serde(default)]
-    tax_output_account_id: Option<Uuid>,
-    #[serde(default)]
-    notes: Option<String>,
-    lines: Vec<LineBody>,
-}
-async fn create_sales_invoice(
-    State(svc): State<Arc<SellingWriteService>>,
-    tenant: CompanyContext,
-    Json(b): Json<CreateSalesInvoiceBody>,
-) -> axum::response::Response {
-    let inv = NewSalesInvoice {
-        invoice_number: b.invoice_number,
-        sales_order_id: b.sales_order_id,
-        company_id: tenant.company_id,
-        branch_id: tenant.branch_id,
-        customer_id: b.customer_id,
-        invoice_date: b.invoice_date,
-        due_date: b.due_date,
-        currency: b.currency,
-        tax_rate: b.tax_rate,
-        receivable_account_id: b.receivable_account_id,
-        tax_output_account_id: b.tax_output_account_id,
-        notes: b.notes,
-        lines: b.lines.into_iter().map(Into::into).collect(),
-    };
-    match svc.create_sales_invoice(inv).await {
-        Ok(id) => (StatusCode::CREATED, Json(IdResponse { id })).into_response(),
-        Err(e) => err_response(e),
-    }
-}
+// (create_sales_invoice + CreateSalesInvoiceBody removed — selling exited the invoice business;
+// the AR invoice is now billing's. ADR-006.)
 
 fn create_selling_write_routes(svc: Arc<SellingWriteService>, verifier: CompanyVerifier) -> Router {
     Router::new()
         .route("/quotations", post(create_quotation))
         .route("/sales-orders", post(create_sales_order))
         .route("/sales-orders/confirm", post(confirm_sales_order))
-        .route("/sales-invoices", post(create_sales_invoice))
         // Every write above is tenant-scoped: `company_auth` rejects a request whose token is absent,
         // invalid, or carries no `company_id`, so a handler only ever runs with a proven tenant.
         //
@@ -260,7 +213,5 @@ pub fn create_guarded_selling_routes(
         .merge(create_quotation_item_read_routes(m.quotation_item_service.clone()))
         .merge(create_sales_order_read_routes(m.sales_order_service.clone()))
         .merge(create_sales_order_item_read_routes(m.sales_order_item_service.clone()))
-        .merge(create_sales_invoice_read_routes(m.sales_invoice_service.clone()))
-        .merge(create_sales_invoice_item_read_routes(m.sales_invoice_item_service.clone()))
         .merge(create_selling_write_routes(write, verifier))
 }

@@ -4,8 +4,6 @@
 
 pub mod quotation_auth;
 pub mod quotation_item_auth;
-pub mod sales_invoice_auth;
-pub mod sales_invoice_item_auth;
 pub mod sales_order_auth;
 pub mod sales_order_item_auth;
 pub mod sales_team_auth;
@@ -13,8 +11,6 @@ pub mod sales_person_allocation_auth;
 
 pub use quotation_auth::{QuotationPolicy, QuotationGuard, QuotationServiceGuard};
 pub use quotation_item_auth::{QuotationItemPolicy, QuotationItemGuard, QuotationItemServiceGuard};
-pub use sales_invoice_auth::{SalesInvoicePolicy, SalesInvoiceGuard, SalesInvoiceServiceGuard};
-pub use sales_invoice_item_auth::{SalesInvoiceItemPolicy, SalesInvoiceItemGuard, SalesInvoiceItemServiceGuard};
 pub use sales_order_auth::{SalesOrderPolicy, SalesOrderGuard, SalesOrderServiceGuard};
 pub use sales_order_item_auth::{SalesOrderItemPolicy, SalesOrderItemGuard, SalesOrderItemServiceGuard};
 pub use sales_team_auth::{SalesTeamPolicy, SalesTeamGuard, SalesTeamServiceGuard};

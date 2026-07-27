@@ -8,8 +8,6 @@
 
 pub mod quotation_repository;
 pub mod quotation_item_repository;
-pub mod sales_invoice_repository;
-pub mod sales_invoice_item_repository;
 pub mod sales_order_repository;
 pub mod sales_order_item_repository;
 pub mod sales_team_repository;
@@ -27,18 +25,6 @@ pub use quotation_item_repository::{
     QuotationItemPaginationParams,
     QuotationItemPaginatedResult,
     QuotationItemFilter,
-};
-pub use sales_invoice_repository::{
-    SalesInvoiceRepository,
-    SalesInvoicePaginationParams,
-    SalesInvoicePaginatedResult,
-    SalesInvoiceFilter,
-};
-pub use sales_invoice_item_repository::{
-    SalesInvoiceItemRepository,
-    SalesInvoiceItemPaginationParams,
-    SalesInvoiceItemPaginatedResult,
-    SalesInvoiceItemFilter,
 };
 pub use sales_order_repository::{
     SalesOrderRepository,

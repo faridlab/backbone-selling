@@ -4,8 +4,6 @@
 
 pub mod quotation_domain_policy;
 pub mod quotation_item_domain_policy;
-pub mod sales_invoice_domain_policy;
-pub mod sales_invoice_item_domain_policy;
 pub mod sales_order_domain_policy;
 pub mod sales_order_item_domain_policy;
 pub mod sales_team_domain_policy;
@@ -13,8 +11,6 @@ pub mod sales_person_allocation_domain_policy;
 
 pub use quotation_domain_policy::QuotationDomainPolicy;
 pub use quotation_item_domain_policy::QuotationItemDomainPolicy;
-pub use sales_invoice_domain_policy::SalesInvoiceDomainPolicy;
-pub use sales_invoice_item_domain_policy::SalesInvoiceItemDomainPolicy;
 pub use sales_order_domain_policy::SalesOrderDomainPolicy;
 pub use sales_order_item_domain_policy::SalesOrderItemDomainPolicy;
 pub use sales_team_domain_policy::SalesTeamDomainPolicy;

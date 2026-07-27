@@ -10,16 +10,6 @@ DROP POLICY IF EXISTS quotation_items_company_isolation ON selling.quotation_ite
 ALTER TABLE selling.quotation_items NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE selling.quotation_items DISABLE ROW LEVEL SECURITY;
 
--- Reverse the company RLS fence for selling.sales_invoices
-DROP POLICY IF EXISTS sales_invoices_company_isolation ON selling.sales_invoices;
-ALTER TABLE selling.sales_invoices NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE selling.sales_invoices DISABLE ROW LEVEL SECURITY;
-
--- Reverse the company RLS fence for selling.sales_invoice_items
-DROP POLICY IF EXISTS sales_invoice_items_company_isolation ON selling.sales_invoice_items;
-ALTER TABLE selling.sales_invoice_items NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE selling.sales_invoice_items DISABLE ROW LEVEL SECURITY;
-
 -- Reverse the company RLS fence for selling.sales_orders
 DROP POLICY IF EXISTS sales_orders_company_isolation ON selling.sales_orders;
 ALTER TABLE selling.sales_orders NO FORCE ROW LEVEL SECURITY;

@@ -7,8 +7,6 @@ pub use shared_types::{ValidationError, ValidationErrors, ValidationResult, Enti
 
 pub mod quotation_validator;
 pub mod quotation_item_validator;
-pub mod sales_invoice_validator;
-pub mod sales_invoice_item_validator;
 pub mod sales_order_validator;
 pub mod sales_order_item_validator;
 pub mod sales_team_validator;
@@ -16,8 +14,6 @@ pub mod sales_person_allocation_validator;
 
 pub use quotation_validator::{QuotationValidator, quotation_validator};
 pub use quotation_item_validator::{QuotationItemValidator, quotation_item_validator};
-pub use sales_invoice_validator::{SalesInvoiceValidator, sales_invoice_validator};
-pub use sales_invoice_item_validator::{SalesInvoiceItemValidator, sales_invoice_item_validator};
 pub use sales_order_validator::{SalesOrderValidator, sales_order_validator};
 pub use sales_order_item_validator::{SalesOrderItemValidator, sales_order_item_validator};
 pub use sales_team_validator::{SalesTeamValidator, sales_team_validator};

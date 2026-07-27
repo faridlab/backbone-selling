@@ -23,9 +23,6 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use backbone_selling::application::service::selling_gl::{
-    AccountingPostEnvelope as SellEnv, GlPostAck as SellAck, GlPostRejected as SellRej, GlPostSink as SellSink,
-};
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewSalesOrder, SellingError, SellingWriteService,
 };
@@ -42,8 +39,8 @@ use backbone_inventory::application::service::inventory_write_service::{
 use backbone_accounting::application::service::posting_service::{PostingLine, PostingRequest, PostingService};
 use backbone_accounting::infrastructure::persistence::SqlxPostingRepository;
 
-// One ACL adapter maps EITHER module's envelope into accounting's PostingRequest. Both selling and
-// inventory post into the SAME real ledger.
+// The ACL adapter maps inventory's envelope into accounting's PostingRequest. (Selling no longer
+// posts — it exited the invoice business; ADR-006 — so GlAdapter only impls InvSink now.)
 struct GlAdapter { svc: PostingService }
 fn to_req(company: Uuid, source_type: &str, source_id: Uuid, date: chrono::NaiveDate,
           lines: Vec<PostingLine>, reference: Option<String>) -> PostingRequest {
@@ -52,23 +49,6 @@ fn to_req(company: Uuid, source_type: &str, source_id: Uuid, date: chrono::Naive
     r.lines = lines;
     r
 }
-#[async_trait::async_trait]
-impl SellSink for GlAdapter {
-    async fn post(&self, e: &SellEnv) -> Result<SellAck, SellRej> {
-        let lines = e.lines.iter().map(|l| PostingLine {
-            account_id: l.account_id, debit: l.debit, credit: l.credit,
-            party_type: l.party_type.clone(), party_id: l.party_id,
-            cost_center_id: None, project_id: None, department_id: None, description: l.description.clone(),
-        }).collect();
-        match self.svc.post(to_req(e.company_id, &e.source_type, e.source_id, e.posting_date, lines, e.source_reference.clone()), None).await {
-            Ok(r) => Ok(SellAck { post_id: r.post_id, journal_id: r.journal_id, idempotent_reuse: r.idempotent_reuse }),
-            Err(x) => Err(SellRej { code: x.code().to_string(), message: x.to_string() }),
-        }
-    }
-}
-// `impl InvSink for GlAdapter` — restored. After the v2.7.6 framework alignment, selling's
-// backbone-gl-posting (v2.7.6) and inventory's (v2.7.5, via the test-dep) resolve to DISTINCT
-// trait instances, so GlAdapter must impl BOTH SellSink and InvSink (no conflict — different traits).
 #[async_trait::async_trait]
 impl InvSink for GlAdapter {
     async fn post(&self, e: &InvEnv) -> Result<InvAck, InvRej> {
@@ -183,20 +163,10 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
     selling.mark_delivered(oid, delivered_so.company_id, &[(item, d("10"))]).await.unwrap();
     assert_eq!(order_status(&pool, oid).await, "to_bill", "delivered, still awaiting billing");
 
-    // 6) selling bills FROM the order (links lines so billed_qty advances) + posts → revenue post.
-    let inv = selling.create_invoice_from_order(oid, uq("INV"), day(), coa["1200"], coa["4000"], Some(coa["2200"])).await.unwrap();
-    let po = selling.post_sales_invoice(inv, &gl).await.unwrap();
-    // Revenue journal: Dr A/R 1,665,000 · Cr Revenue 1,500,000 · Cr PPN 165,000.
-    assert_eq!(journal_totals(&pool, po.journal_id).await, (d("1665000"), d("1665000")));
-
-    // 7) order is billed AND delivered → completed. Both journals exist for the company.
-    assert_eq!(order_status(&pool, oid).await, "completed");
-    let n_journals: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounting.journals WHERE company_id=$1").bind(company).fetch_one(&pool).await.unwrap();
-    assert_eq!(n_journals, 3, "goods-receipt + COGS + revenue journals");
-    // inventory Bin drained to 0 (residual flush).
-    let (bin_qty, bin_val): (Decimal, Decimal) = sqlx::query_as("SELECT actual_qty, stock_value FROM inventory.bins WHERE company_id=$1 AND item_id=$2 AND warehouse_id=$3").bind(company).bind(item).bind(wh).fetch_one(&pool).await.unwrap();
-    assert_eq!(bin_qty, d("0.0000"));
-    assert_eq!(bin_val, d("0.00"));
+    // (The revenue leg — billing posts the invoice, the order reaches `completed`, and the Bin
+    // residual flushes — is owned by backbone-billing and proven in tests/invoice_seam.rs +
+    // backbone-billing/tests/ar_seam.rs. This test stops at `to_bill` because selling exited the
+    // invoice business; ADR-006.)
 }
 
 async fn order_status(pool: &PgPool, oid: Uuid) -> String {

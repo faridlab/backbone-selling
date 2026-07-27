@@ -9,14 +9,12 @@ pub use error::{ServiceError, ServiceResult};
 
 pub mod quotation_service;
 pub mod quotation_item_service;
-pub mod sales_invoice_service;
-pub mod sales_invoice_item_service;
 pub mod sales_order_service;
 pub mod sales_order_item_service;
 // <<< CUSTOM
-// Hand-authored (user-owned): domain events, the outbound GL-posting port, the validated write path.
+// Hand-authored (user-owned): domain events, the validated write path. (selling_gl + the invoice
+// create/post chunks were removed when selling exited the invoice business — ADR-006.)
 pub mod selling_events;
-pub mod selling_gl;
 pub mod selling_cart_pricing;
 pub mod selling_write_service;
 // The write surface, chunked out of selling_write_service.rs. Each is an
@@ -25,8 +23,6 @@ pub mod selling_write_service;
 // `selling_write_service::{NewLine, ...}` import paths are unchanged).
 pub mod selling_quotation;
 pub mod selling_order;
-pub mod selling_invoice_create;
-pub mod selling_invoice_post;
 pub mod selling_delivery_seam;
 pub mod selling_invoice_seam;
 // Reference consumer extension (extension-contract §5, second half) — a downstream rule on events.
@@ -40,26 +36,20 @@ pub mod sales_person_allocation_service;
 
 pub use quotation_service::QuotationService;
 pub use quotation_item_service::QuotationItemService;
-pub use sales_invoice_service::SalesInvoiceService;
-pub use sales_invoice_item_service::SalesInvoiceItemService;
 pub use sales_order_service::SalesOrderService;
 pub use sales_order_item_service::SalesOrderItemService;
 // <<< CUSTOM
 pub use selling_events::{
     DeliveryRequestEnvelope, DeliveryRequestLine, InvoiceRequestEnvelope, InvoiceRequestLine,
-    QuotationAccepted, SalesInvoiceIssued, SalesInvoicePosted, SalesOrderConfirmed, SellingEvent,
-    SellingEventSink,
-};
-pub use selling_gl::{
-    AccountingPostEnvelope, GlPostAck, GlPostLine, GlPostRejected, GlPostSink,
+    QuotationAccepted, SalesOrderConfirmed, SellingEvent, SellingEventSink,
 };
 pub use selling_cart_pricing::{
     CartPriceLine, CartPriceRequest, CartPricingError, CartPricingPort, PricedCart, PricedCartLine,
     PricedRewardLine,
 };
 pub use selling_write_service::{
-    CartOrderLine, NewCartSalesOrder, NewLine, NewQuotation, NewSalesInvoice, NewSalesOrder,
-    PostOutcome, SellingError, SellingWriteService,
+    CartOrderLine, NewCartSalesOrder, NewLine, NewQuotation, NewSalesOrder, SellingError,
+    SellingWriteService,
 };
 // END CUSTOM
 pub use sales_team_service::SalesTeamService;

@@ -33,12 +33,6 @@ pub use events::*;
 /// - `QuotationItemDto` - Data transfer object for QuotationItem
 /// - `QuotationItemSummary` - Summary view of QuotationItem
 /// - `QuotationItemId` - Type-safe ID wrapper
-/// - `SalesInvoiceDto` - Data transfer object for SalesInvoice
-/// - `SalesInvoiceSummary` - Summary view of SalesInvoice
-/// - `SalesInvoiceId` - Type-safe ID wrapper
-/// - `SalesInvoiceItemDto` - Data transfer object for SalesInvoiceItem
-/// - `SalesInvoiceItemSummary` - Summary view of SalesInvoiceItem
-/// - `SalesInvoiceItemId` - Type-safe ID wrapper
 /// - `SalesOrderDto` - Data transfer object for SalesOrder
 /// - `SalesOrderSummary` - Summary view of SalesOrder
 /// - `SalesOrderId` - Type-safe ID wrapper
@@ -62,12 +56,6 @@ pub use events::*;
 /// - `QuotationItemCreatedEvent` - Published when QuotationItem is created
 /// - `QuotationItemUpdatedEvent` - Published when QuotationItem is updated
 /// - `QuotationItemDeletedEvent` - Published when QuotationItem is deleted
-/// - `SalesInvoiceCreatedEvent` - Published when SalesInvoice is created
-/// - `SalesInvoiceUpdatedEvent` - Published when SalesInvoice is updated
-/// - `SalesInvoiceDeletedEvent` - Published when SalesInvoice is deleted
-/// - `SalesInvoiceItemCreatedEvent` - Published when SalesInvoiceItem is created
-/// - `SalesInvoiceItemUpdatedEvent` - Published when SalesInvoiceItem is updated
-/// - `SalesInvoiceItemDeletedEvent` - Published when SalesInvoiceItem is deleted
 /// - `SalesOrderCreatedEvent` - Published when SalesOrder is created
 /// - `SalesOrderUpdatedEvent` - Published when SalesOrder is updated
 /// - `SalesOrderDeletedEvent` - Published when SalesOrder is deleted
