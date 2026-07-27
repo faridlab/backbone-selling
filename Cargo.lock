@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "backbone-selling"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -530,7 +530,6 @@ dependencies = [
  "backbone-auth 2.0.0 (git+https://github.com/faridlab/backbone-framework?tag=v2.7.6)",
  "backbone-billing",
  "backbone-core 2.0.0 (git+https://github.com/faridlab/backbone-framework?tag=v2.7.6)",
- "backbone-gl-posting 0.1.0 (git+https://github.com/faridlab/backbone-framework?tag=v2.7.6)",
  "backbone-inventory",
  "backbone-messaging 2.0.0 (git+https://github.com/faridlab/backbone-framework?tag=v2.7.6)",
  "backbone-orm 2.0.0 (git+https://github.com/faridlab/backbone-framework?tag=v2.7.6)",

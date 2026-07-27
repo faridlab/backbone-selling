@@ -7,6 +7,23 @@ the date the change was applied.
 
 ## [Unreleased]
 
+### Removed — BREAKING: selling exits the invoice business ([ADR-006], 2026-07-27)
+
+Billing now owns AR invoicing + revenue recognition, end to end. Selling's own invoice write/post path,
+its GL seam, the `SalesInvoice` entity, and the tables are removed (supersedes ADR-001 / ADR-002):
+
+- **Removed (public API):** `SellingWriteService::{create_sales_invoice, create_invoice_from_order,
+  post_sales_invoice, build_revenue_post}`, the `NewSalesInvoice` / `PostOutcome` types, the
+  `SalesInvoiceIssued` / `SalesInvoicePosted` events, the `selling_gl` GL-posting re-exports, the
+  `backbone-gl-posting` Cargo dependency, the generated `SalesInvoice*` entity/DTO/service/route
+  surface, and the `sales_invoices` / `sales_invoice_items` tables
+  (migration `20260728000100_drop_sales_invoice_tables`).
+- **Kept:** `build_invoice_request` (outbound `InvoiceRequestEnvelope`) + `mark_invoiced` (advances
+  `billed_qty`) — selling's entire invoice surface is now the billing-owned seam (ADR-005).
+- Revenue/invoice coverage relocated to `backbone-billing` (`tests/ar_seam.rs`, `billing_golden_cases.rs`).
+- `tests/delivery_seam.rs` now stops at `to_bill`; `tests/order_to_cash.rs` + `tests/gl_posting_seam.rs`
+  + the 7 invoice golden cases are removed from selling.
+
 ### Added — selling↔inventory delivery seam ([ADR-004], applied 2026-07-04)
 
 - `SellingWriteService::build_delivery_request` — builds the cross-module `DeliveryRequestEnvelope`

@@ -1,6 +1,6 @@
 [package]
 name = "backbone-selling"
-version = "0.5.5"
+version = "0.6.0"
 edition = "2021"
 description = "Selling: Quotation -> Sales Order -> Sales Invoice; emits revenue AccountingPost to backbone-accounting (order-to-cash intent + GL seam)"
 
@@ -9,9 +9,6 @@ path = "src/lib.rs"
 
 [dependencies]
 backbone-outbox = { git = "https://github.com/faridlab/backbone-framework", tag = "v2.7.6", features = ["multi_tenant"] }
-# The GL-posting wire contract (envelope + sink port), shared across producers (phase 2).
-# backbone-gl-posting 0.1.0 shipped on backbone-framework v2.7.5; selling_gl.rs re-exports it.
-backbone-gl-posting = { git = "https://github.com/faridlab/backbone-framework", tag = "v2.7.6" }
 # -----------------------------------------------------------------------------
 # Backbone Framework crates
 #
