@@ -58,12 +58,12 @@ use sqlx::PgPool;
 /// let router = selling.all_crud_routes();
 /// ```
 pub struct SellingModule {
-    pub quotation_service: Arc<QuotationService>,
-    pub quotation_item_service: Arc<QuotationItemService>,
-    pub sales_order_service: Arc<SalesOrderService>,
-    pub sales_order_item_service: Arc<SalesOrderItemService>,
-    pub sales_team_service: Arc<SalesTeamService>,
-    pub sales_person_allocation_service: Arc<SalesPersonAllocationService>,
+    pub(crate) quotation_service: Arc<QuotationService>,
+    pub(crate) quotation_item_service: Arc<QuotationItemService>,
+    pub(crate) sales_order_service: Arc<SalesOrderService>,
+    pub(crate) sales_order_item_service: Arc<SalesOrderItemService>,
+    pub(crate) sales_team_service: Arc<SalesTeamService>,
+    pub(crate) sales_person_allocation_service: Arc<SalesPersonAllocationService>,
 }
 
 impl SellingModule {
