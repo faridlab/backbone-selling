@@ -72,26 +72,37 @@ CREATE INDEX IF NOT EXISTS idx_sales_order_items_company_id ON selling.sales_ord
 
 -- ===========================================================================
 -- 3. selling.sales_invoice_items  (parent FK: invoice_id → selling.sales_invoices.id)
+--
+-- Conditional on the table existing: selling later exited the invoice business (ADR-006) and the
+-- sales_invoice_items CREATE migrations are no longer part of this chain, so on a fresh database
+-- the table never exists (the later DROP migration is a no-op there). Databases provisioned before
+-- that removal still carry the table and get the same fence as the other three children.
 -- ===========================================================================
-ALTER TABLE selling.sales_invoice_items ADD COLUMN IF NOT EXISTS company_id UUID;
+DO $$
+BEGIN
+    IF to_regclass('selling.sales_invoice_items') IS NOT NULL THEN
+        ALTER TABLE selling.sales_invoice_items ADD COLUMN IF NOT EXISTS company_id UUID;
 
-UPDATE selling.sales_invoice_items AS child
-   SET company_id = parent.company_id
-  FROM selling.sales_invoices AS parent
- WHERE child.invoice_id = parent.id
-   AND child.company_id IS NULL;
+        UPDATE selling.sales_invoice_items AS child
+           SET company_id = parent.company_id
+          FROM selling.sales_invoices AS parent
+         WHERE child.invoice_id = parent.id
+           AND child.company_id IS NULL;
 
-ALTER TABLE selling.sales_invoice_items ALTER COLUMN company_id SET NOT NULL;
+        ALTER TABLE selling.sales_invoice_items ALTER COLUMN company_id SET NOT NULL;
 
-ALTER TABLE selling.sales_invoice_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE selling.sales_invoice_items FORCE  ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS sales_invoice_items_company_isolation ON selling.sales_invoice_items;
-CREATE POLICY sales_invoice_items_company_isolation ON selling.sales_invoice_items
-    FOR ALL
-    USING      (company_id = NULLIF(current_setting('app.company_id', true), '')::uuid)
-    WITH CHECK (company_id = NULLIF(current_setting('app.company_id', true), '')::uuid);
+        ALTER TABLE selling.sales_invoice_items ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE selling.sales_invoice_items FORCE  ROW LEVEL SECURITY;
+        DROP POLICY IF EXISTS sales_invoice_items_company_isolation ON selling.sales_invoice_items;
+        CREATE POLICY sales_invoice_items_company_isolation ON selling.sales_invoice_items
+            FOR ALL
+            USING      (company_id = NULLIF(current_setting('app.company_id', true), '')::uuid)
+            WITH CHECK (company_id = NULLIF(current_setting('app.company_id', true), '')::uuid);
 
-CREATE INDEX IF NOT EXISTS idx_sales_invoice_items_company_id ON selling.sales_invoice_items (company_id);
+        CREATE INDEX IF NOT EXISTS idx_sales_invoice_items_company_id ON selling.sales_invoice_items (company_id);
+    END IF;
+END
+$$;
 
 -- ===========================================================================
 -- 4. selling.sales_person_allocations  (parent FK: order_id → selling.sales_orders.id)

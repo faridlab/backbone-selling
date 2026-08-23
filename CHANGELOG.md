@@ -7,6 +7,25 @@ the date the change was applied.
 
 ## [Unreleased]
 
+### Fixed — the migration chain applies cleanly to a fresh database (2026-08-23)
+
+The invoice-business exit ([ADR-006]) removed the `sales_invoices` / `sales_invoice_items` tables
+and their CREATE migrations from the chain, but two earlier invoice-era migrations still referenced
+those tables unconditionally — so applying the full chain to a **fresh** database failed:
+
+- `20260426220020_sales_invoice_idr_only_check` — `ALTER TABLE selling.sales_invoices` errored with
+  `relation "selling.sales_invoices" does not exist` (the constraint's target table never comes into
+  being on a fresh chain).
+- `20260722000100_child_tables_company_rls` — the `sales_invoice_items` fencing block errored the
+  same way; the other three child-table blocks were unaffected.
+
+Both invoice-era blocks are now guarded with `IF to_regclass(...) IS NOT NULL` (and the IDR-only
+CHECK's down side likewise), so the chain is valid on a fresh database **and** on databases
+provisioned before the exit, where the tables still existed and the statements still apply.
+`20260728000100_drop_sales_invoice_tables` already used `DROP TABLE IF EXISTS` and needed no change.
+No schema shape changes: on a fresh database the guarded statements are skipped, exactly matching
+the post-drop end state the exit produced.
+
 ### Removed — BREAKING: selling exits the invoice business ([ADR-006], 2026-07-27)
 
 Billing now owns AR invoicing + revenue recognition, end to end. Selling's own invoice write/post path,
