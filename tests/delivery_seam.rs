@@ -120,7 +120,7 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
     let wh = inventory.create_warehouse(NewWarehouse { company_id: company, code: uq("WH"), name: "Main".into(), warehouse_type: None, parent_warehouse_id: None, is_group: false }).await.unwrap();
     let rid = inventory.create_purchase_receipt(NewReceipt {
         receipt_number: uq("PR"), company_id: company, branch_id: None, supplier_id: Uuid::new_v4(),
-        source_po_id: None, warehouse_id: wh, posting_date: day(),
+        source_po_id: None, warehouse_id: wh, posting_date: day(), currency: "IDR".into(),
         inventory_account_id: coa["1300"], grir_account_id: coa["2150"],
         lines: vec![ReceiptLine { item_id: item, quantity: d("10"), rate: d("100") }],
     }).await.unwrap();
@@ -143,7 +143,7 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
     let dn = intake.on_delivery_requested(DeliveryRequested {
         delivery_number: uq("DN"), company_id: req.company_id, branch_id: None,
         customer_id: req.customer_id, source_so_id: Some(req.order_id), warehouse_id: wh,
-        posting_date: day(), cogs_account_id: coa["5100"], inventory_account_id: coa["1300"],
+        posting_date: day(), currency: "IDR".into(), cogs_account_id: coa["5100"], inventory_account_id: coa["1300"],
         lines: req.lines.iter().map(|l| InvReqLine { item_id: l.item_id, quantity: l.quantity }).collect(),
     }).await.unwrap();
 

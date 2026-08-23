@@ -7,7 +7,7 @@
 //! billing raises + posts the invoice → **revenue post** (`Dr A/R · Cr Revenue`) into the REAL ledger
 //! + a `SalesInvoicePosted{source_so_id, billed_lines}` event; an ACL routes it → selling
 //! `mark_invoiced` → the order's `billed_qty` advances. Selling posts NO revenue itself.
-//! Requires DATABASE_URL (:5433/backbone_selling with selling + billing + accounting migrated).
+//! Requires DATABASE_URL (:5432/backbone_selling_test with selling + billing + accounting migrated).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -171,12 +171,16 @@ async fn order_invoiced_across_three_modules() {
     assert_eq!(req.lines[0].quantity, d("10.0000"));
 
     // 3) ACL: map the request into billing's NewSalesInvoice (adding A/R + revenue accounts) → post.
+    // No payment term and no tax template: this scenario bills the un-taxed remainder (tax_rate 0,
+    // empty tax overlay), so the invoice must stay on the manual-due-date + caller-tax-lines path —
+    // a template would route the document through the (unwired) tax engine and fail closed.
     let inv = billing.create_sales_invoice(NewSalesInvoice {
         invoice_number: uq("SI"), company_id: req.company_id, branch_id: None, customer_id: req.customer_id,
-        source_so_id: Some(req.order_id), posting_date: day(), due_date: None, currency: None,
+        source_so_id: Some(req.order_id), posting_date: day(), due_date: None, payment_term_id: None, currency: None,
         receivable_account_id: coa["1200"],
         lines: req.lines.iter().map(|l| NewInvoiceLine {
             item_id: l.item_id, account_id: coa["4000"], description: None, quantity: l.quantity, unit_price: l.unit_price,
+            tax_template_id: None,
         }).collect(),
         tax_lines: vec![],
     }).await.unwrap();
