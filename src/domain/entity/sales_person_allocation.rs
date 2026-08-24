@@ -62,7 +62,7 @@ pub struct SalesPersonAllocation {
 impl SalesPersonAllocation {
     /// Create a builder for SalesPersonAllocation
     pub fn builder() -> SalesPersonAllocationBuilder {
-        SalesPersonAllocationBuilder::default()
+        <SalesPersonAllocationBuilder as Default>::default()
     }
 
     /// Create a new SalesPersonAllocation with required fields

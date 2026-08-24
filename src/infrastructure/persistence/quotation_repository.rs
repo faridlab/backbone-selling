@@ -59,12 +59,31 @@ pub struct NewQuotationRow<'a> {
     pub tax_amount: Decimal,
     pub total: Decimal,
     pub notes: Option<&'a str>,
+    pub opportunity_id: Option<Uuid>,
+    pub status_reason: Option<&'a str>,
 }
 
 /// The `accept_quotation` guard's projection — who the now-accepted quotation belongs to.
 pub struct AcceptedQuotationRow {
     pub company_id: Uuid,
     pub customer_id: Uuid,
+}
+
+/// A machine verb's guard projection — who the quotation belongs to (for the event payloads).
+pub struct QuotationGuardRow {
+    pub company_id: Uuid,
+}
+
+/// The post-refusal classification read: what state the quotation is in. `status` is read as
+/// `::text` so an unknown state fails the state checks rather than panicking in a decode.
+pub struct QuotationStatusRow {
+    pub status: String,
+}
+
+/// The quotation header the invoice-status read model surfaces.
+pub struct QuotationInvoiceHeaderRow {
+    pub quotation_number: String,
+    pub status: String,
 }
 
 /// The quotation header `convert_quotation_to_order` copies from. `status` is read as `::text` so a
@@ -98,12 +117,14 @@ impl QuotationRepository {
         sqlx::query(
             r#"INSERT INTO selling.quotations
                 (id, quotation_number, company_id, branch_id, customer_id, status, quotation_date,
-                 valid_until, currency, subtotal, tax_rate, tax_amount, total, notes)
-               VALUES ($1,$2,$3,$4,$5,'draft'::quotation_status,$6,$7,$8,$9,$10,$11,$12,$13)"#,
+                 valid_until, currency, subtotal, tax_rate, tax_amount, total, notes,
+                 opportunity_id, status_reason)
+               VALUES ($1,$2,$3,$4,$5,'draft'::quotation_status,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)"#,
         )
         .bind(q.id).bind(q.quotation_number).bind(q.company_id).bind(q.branch_id).bind(q.customer_id)
         .bind(q.quotation_date).bind(q.valid_until).bind(q.currency)
         .bind(q.subtotal).bind(q.tax_rate).bind(q.tax_amount).bind(q.total).bind(q.notes)
+        .bind(q.opportunity_id).bind(q.status_reason)
         .execute(conn)
         .await?;
         Ok(())
@@ -180,6 +201,139 @@ impl QuotationRepository {
             .bind(quotation_id),
         ).await?;
         Ok(())
+    }
+
+    // -- quotation state machine (guarded single-statement flips; the WHERE clause IS the guard) --
+
+    /// Send a quotation (draft → sent). `Ok(None)` = no draft quotation of this company with that
+    /// id, which is also how a wrong-tenant or wrong-state id looks — no existence leak.
+    pub async fn send(
+        &self,
+        pool: &PgPool,
+        quotation_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<Option<QuotationGuardRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"UPDATE selling.quotations SET status='sent'::quotation_status
+                   WHERE id=$1 AND company_id=$2 AND status='draft'::quotation_status
+                     AND (metadata->>'deleted_at') IS NULL
+                   RETURNING company_id"#,
+            )
+            .bind(quotation_id).bind(company_id),
+        ).await?;
+        Ok(row.map(|r| QuotationGuardRow { company_id: r.get("company_id") }))
+    }
+
+    /// Return a quotation to draft (sent/cancelled/rejected → draft), clearing any recorded
+    /// rejection/cancellation reason. `ordered` is deliberately absent from the state array — a
+    /// confirmed order must never be reset.
+    pub async fn redraft(
+        &self,
+        pool: &PgPool,
+        quotation_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<Option<QuotationGuardRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"UPDATE selling.quotations
+                   SET status='draft'::quotation_status, status_reason=NULL
+                   WHERE id=$1 AND company_id=$2
+                     AND status = ANY(ARRAY['sent','cancelled','rejected']::quotation_status[])
+                     AND (metadata->>'deleted_at') IS NULL
+                   RETURNING company_id"#,
+            )
+            .bind(quotation_id).bind(company_id),
+        ).await?;
+        Ok(row.map(|r| QuotationGuardRow { company_id: r.get("company_id") }))
+    }
+
+    /// Reject a quotation (sent → rejected), persisting the optional reason.
+    pub async fn reject(
+        &self,
+        pool: &PgPool,
+        quotation_id: Uuid,
+        company_id: Uuid,
+        reason: Option<&str>,
+    ) -> Result<Option<QuotationGuardRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"UPDATE selling.quotations
+                   SET status='rejected'::quotation_status, status_reason=$3
+                   WHERE id=$1 AND company_id=$2 AND status='sent'::quotation_status
+                     AND (metadata->>'deleted_at') IS NULL
+                   RETURNING company_id"#,
+            )
+            .bind(quotation_id).bind(company_id).bind(reason),
+        ).await?;
+        Ok(row.map(|r| QuotationGuardRow { company_id: r.get("company_id") }))
+    }
+
+    /// Cancel a quotation (draft/sent/accepted → cancelled), persisting the optional reason.
+    /// `ordered` is deliberately absent from the state array — an order was derived from it.
+    pub async fn cancel(
+        &self,
+        pool: &PgPool,
+        quotation_id: Uuid,
+        company_id: Uuid,
+        reason: Option<&str>,
+    ) -> Result<Option<QuotationGuardRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"UPDATE selling.quotations
+                   SET status='cancelled'::quotation_status, status_reason=$3
+                   WHERE id=$1 AND company_id=$2
+                     AND status = ANY(ARRAY['draft','sent','accepted']::quotation_status[])
+                     AND (metadata->>'deleted_at') IS NULL
+                   RETURNING company_id"#,
+            )
+            .bind(quotation_id).bind(company_id).bind(reason),
+        ).await?;
+        Ok(row.map(|r| QuotationGuardRow { company_id: r.get("company_id") }))
+    }
+
+    /// Read a quotation's current status (company-scoped) — the post-refusal classification read
+    /// that turns a failed guarded flip into a precise error. `Ok(None)` = not found / wrong tenant.
+    pub async fn find_status(
+        &self,
+        pool: &PgPool,
+        quotation_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<Option<QuotationStatusRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT status::text AS st FROM selling.quotations
+                   WHERE id=$1 AND company_id=$2 AND (metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(quotation_id).bind(company_id),
+        ).await?;
+        Ok(row.map(|r| QuotationStatusRow { status: r.get("st") }))
+    }
+
+    /// Read the quotation header the invoice-status read model surfaces. ID-only — same scoping
+    /// as [`Self::find_conversion_source`].
+    pub async fn find_invoice_status_header(
+        &self,
+        pool: &PgPool,
+        quotation_id: Uuid,
+    ) -> Result<Option<QuotationInvoiceHeaderRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT quotation_number, status::text AS st FROM selling.quotations
+                   WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(quotation_id),
+        ).await?;
+        Ok(row.map(|r| QuotationInvoiceHeaderRow {
+            quotation_number: r.get("quotation_number"),
+            status: r.get("st"),
+        }))
     }
 }
 

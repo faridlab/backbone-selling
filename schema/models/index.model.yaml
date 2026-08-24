@@ -65,5 +65,5 @@ shared_types:
 imports:
   - quotation.model.yaml
   - sales_order.model.yaml
+  - quotation_template.model.yaml
   - sales_team.model.yaml
-  - sales_invoice.model.yaml

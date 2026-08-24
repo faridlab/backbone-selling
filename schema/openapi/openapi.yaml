@@ -15,6 +15,8 @@ tags:
     description: Quotation management endpoints
   - name: QuotationItems
     description: QuotationItem management endpoints
+  - name: QuotationTemplates
+    description: QuotationTemplate management endpoints
   - name: SalesOrders
     description: SalesOrder management endpoints
   - name: SalesOrderItems
@@ -743,6 +745,372 @@ paths:
         - QuotationItems
       summary: Bulk permanently-delete QuotationItems from trash by ids (atomic)
       operationId: bulkPermanentDeleteQuotationItems
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Permanently deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permanently_deleted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/quotation_templates:
+    get:
+      tags:
+        - QuotationTemplates
+      summary: List QuotationTemplates
+      description: Get a paginated list of QuotationTemplates with optional filtering and sorting
+      operationId: listQuotationTemplates
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplateList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - QuotationTemplates
+      summary: Create QuotationTemplate
+      description: Create a new QuotationTemplate
+      operationId: createQuotationTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateQuotationTemplateRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplate'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/quotation_templates/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+
+    get:
+      tags:
+        - QuotationTemplates
+      summary: Get QuotationTemplate by ID
+      operationId: getQuotationTemplate
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplate'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - QuotationTemplates
+      summary: Update QuotationTemplate (full)
+      operationId: updateQuotationTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateQuotationTemplateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplate'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags:
+        - QuotationTemplates
+      summary: Update QuotationTemplate (partial)
+      operationId: patchQuotationTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchQuotationTemplateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplate'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - QuotationTemplates
+      summary: Delete QuotationTemplate (soft)
+      operationId: deleteQuotationTemplate
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/quotation_templates/bulk:
+    post:
+      tags:
+        - QuotationTemplates
+      summary: Bulk create QuotationTemplates
+      operationId: bulkCreateQuotationTemplates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/CreateQuotationTemplateRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuotationTemplate'
+    put:
+      tags:
+        - QuotationTemplates
+      summary: Bulk update QuotationTemplates (full, atomic)
+      operationId: bulkUpdateQuotationTemplates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                allOf:
+                  - type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                  - $ref: '#/components/schemas/UpdateQuotationTemplateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplateBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    patch:
+      tags:
+        - QuotationTemplates
+      summary: Bulk partial-update QuotationTemplates (atomic)
+      operationId: bulkPatchQuotationTemplates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [ids, patch]
+                  properties:
+                    ids:
+                      type: array
+                      items: { type: string }
+                    patch:
+                      type: object
+                      additionalProperties: true
+                - type: object
+                  required: [items]
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        required: [id, patch]
+                        properties:
+                          id: { type: string }
+                          patch: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplateBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/quotation_templates/upsert:
+    post:
+      tags:
+        - QuotationTemplates
+      summary: Upsert QuotationTemplate
+      operationId: upsertQuotationTemplate
+      parameters:
+        - name: key_field
+          in: query
+          schema:
+            type: string
+        - name: key_value
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateQuotationTemplateRequest'
+      responses:
+        '200':
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplate'
+
+  /api/v1/quotation_templates/trash:
+    get:
+      tags:
+        - QuotationTemplates
+      summary: List deleted QuotationTemplates
+      operationId: listDeletedQuotationTemplates
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplateList'
+
+  /api/v1/quotation_templates/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    post:
+      tags:
+        - QuotationTemplates
+      summary: Restore deleted QuotationTemplate
+      operationId: restoreQuotationTemplate
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplate'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/quotation_templates/empty:
+    delete:
+      tags:
+        - QuotationTemplates
+      summary: Empty trash for QuotationTemplates
+      operationId: emptyTrashQuotationTemplates
+      responses:
+        '200':
+          description: Trash emptied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted_count:
+                    type: integer
+
+  /api/v1/quotation_templates/delete/bulk:
+    post:
+      tags:
+        - QuotationTemplates
+      summary: Bulk soft-delete QuotationTemplates by ids (atomic)
+      operationId: bulkDeleteQuotationTemplates
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Soft-deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  soft_deleted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/quotation_templates/restore/bulk:
+    post:
+      tags:
+        - QuotationTemplates
+      summary: Bulk restore QuotationTemplates by ids (atomic)
+      operationId: bulkRestoreQuotationTemplates
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotationTemplateBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/quotation_templates/restore/all:
+    post:
+      tags:
+        - QuotationTemplates
+      summary: Restore all soft-deleted QuotationTemplates
+      operationId: restoreAllQuotationTemplates
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restored: { type: integer }
+
+  /api/v1/quotation_templates/trash/bulk:
+    delete:
+      tags:
+        - QuotationTemplates
+      summary: Bulk permanently-delete QuotationTemplates from trash by ids (atomic)
+      operationId: bulkPermanentDeleteQuotationTemplates
       requestBody:
         $ref: '#/components/requestBodies/BatchIds'
       responses:
@@ -2279,6 +2647,14 @@ components:
           nullable: true
           type: string
           maxLength: 1000
+        opportunity_id:
+          nullable: true
+          type: string
+          format: uuid
+        status_reason:
+          nullable: true
+          type: string
+          maxLength: 500
         metadata:
           type: object
 
@@ -2347,6 +2723,14 @@ components:
           nullable: true
           type: string
           maxLength: 1000
+        opportunity_id:
+          nullable: true
+          type: string
+          format: uuid
+        status_reason:
+          nullable: true
+          type: string
+          maxLength: 500
         metadata:
           type: object
 
@@ -2402,6 +2786,14 @@ components:
           nullable: true
           type: string
           maxLength: 1000
+        opportunity_id:
+          nullable: true
+          type: string
+          format: uuid
+        status_reason:
+          nullable: true
+          type: string
+          maxLength: 500
         metadata:
           type: object
 
@@ -2445,6 +2837,14 @@ components:
           nullable: true
           type: string
           maxLength: 1000
+        opportunity_id:
+          nullable: true
+          type: string
+          format: uuid
+        status_reason:
+          nullable: true
+          type: string
+          maxLength: 500
         metadata:
           type: object
 
@@ -2469,6 +2869,8 @@ components:
         - unit_price
         - line_discount
         - line_amount
+        - invoice_policy
+        - is_downpayment
         - metadata
       properties:
         id:
@@ -2495,6 +2897,10 @@ components:
           type: string
         line_amount:
           type: string
+        invoice_policy:
+          type: string
+        is_downpayment:
+          type: boolean
         metadata:
           type: object
 
@@ -2521,6 +2927,8 @@ components:
         - unit_price
         - line_discount
         - line_amount
+        - invoice_policy
+        - is_downpayment
         - metadata
       properties:
         quotation_id:
@@ -2544,6 +2952,10 @@ components:
           type: string
         line_amount:
           type: string
+        invoice_policy:
+          type: string
+        is_downpayment:
+          type: boolean
         metadata:
           type: object
 
@@ -2557,6 +2969,8 @@ components:
         - unit_price
         - line_discount
         - line_amount
+        - invoice_policy
+        - is_downpayment
         - metadata
       properties:
         quotation_id:
@@ -2580,6 +2994,10 @@ components:
           type: string
         line_amount:
           type: string
+        invoice_policy:
+          type: string
+        is_downpayment:
+          type: boolean
         metadata:
           type: object
 
@@ -2607,6 +3025,10 @@ components:
           type: string
         line_amount:
           type: string
+        invoice_policy:
+          type: string
+        is_downpayment:
+          type: boolean
         metadata:
           type: object
 
@@ -2617,6 +3039,124 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QuotationItem'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    QuotationTemplate:
+      type: object
+      required:
+        - id
+        - company_id
+        - name
+        - validity_days
+        - metadata
+      properties:
+        id:
+          type: string
+          format: uuid
+        company_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        validity_days:
+          type: integer
+          format: int32
+        default_notes:
+          nullable: true
+          type: string
+          maxLength: 1000
+        metadata:
+          type: object
+
+    QuotationTemplateBulkResult:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotationTemplate'
+        total: { type: integer }
+        failed: { type: integer }
+        errors:
+          type: array
+          items: { type: string }
+
+    CreateQuotationTemplateRequest:
+      type: object
+      required:
+        - company_id
+        - name
+        - validity_days
+        - metadata
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        validity_days:
+          type: integer
+          format: int32
+        default_notes:
+          nullable: true
+          type: string
+          maxLength: 1000
+        metadata:
+          type: object
+
+    UpdateQuotationTemplateRequest:
+      type: object
+      required:
+        - company_id
+        - name
+        - validity_days
+        - metadata
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        validity_days:
+          type: integer
+          format: int32
+        default_notes:
+          nullable: true
+          type: string
+          maxLength: 1000
+        metadata:
+          type: object
+
+    PatchQuotationTemplateRequest:
+      type: object
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        validity_days:
+          type: integer
+          format: int32
+        default_notes:
+          nullable: true
+          type: string
+          maxLength: 1000
+        metadata:
+          type: object
+
+    QuotationTemplateList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotationTemplate'
         meta:
           $ref: '#/components/schemas/PaginationMeta'
 
@@ -2884,6 +3424,8 @@ components:
         - line_amount
         - billed_qty
         - delivered_qty
+        - invoice_policy
+        - is_downpayment
         - metadata
       properties:
         id:
@@ -2914,6 +3456,10 @@ components:
           type: string
         delivered_qty:
           type: string
+        invoice_policy:
+          type: string
+        is_downpayment:
+          type: boolean
         metadata:
           type: object
 
@@ -2942,6 +3488,8 @@ components:
         - line_amount
         - billed_qty
         - delivered_qty
+        - invoice_policy
+        - is_downpayment
         - metadata
       properties:
         order_id:
@@ -2969,6 +3517,10 @@ components:
           type: string
         delivered_qty:
           type: string
+        invoice_policy:
+          type: string
+        is_downpayment:
+          type: boolean
         metadata:
           type: object
 
@@ -2984,6 +3536,8 @@ components:
         - line_amount
         - billed_qty
         - delivered_qty
+        - invoice_policy
+        - is_downpayment
         - metadata
       properties:
         order_id:
@@ -3011,6 +3565,10 @@ components:
           type: string
         delivered_qty:
           type: string
+        invoice_policy:
+          type: string
+        is_downpayment:
+          type: boolean
         metadata:
           type: object
 
@@ -3042,6 +3600,10 @@ components:
           type: string
         delivered_qty:
           type: string
+        invoice_policy:
+          type: string
+        is_downpayment:
+          type: boolean
         metadata:
           type: object
 

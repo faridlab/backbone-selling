@@ -11,6 +11,7 @@ use sqlx::PgPool;
 
 mod quotation_seeder;
 mod quotation_item_seeder;
+mod quotation_template_seeder;
 mod sales_order_seeder;
 mod sales_order_item_seeder;
 mod sales_team_seeder;
@@ -18,6 +19,7 @@ mod sales_person_allocation_seeder;
 
 pub use quotation_seeder::SeedQuotationSeeder;
 pub use quotation_item_seeder::SeedQuotationItemSeeder;
+pub use quotation_template_seeder::SeedQuotationTemplateSeeder;
 pub use sales_order_seeder::SeedSalesOrderSeeder;
 pub use sales_order_item_seeder::SeedSalesOrderItemSeeder;
 pub use sales_team_seeder::SeedSalesTeamSeeder;
@@ -63,8 +65,6 @@ pub enum SeederType {
     Development,
     /// Test data (for automated tests)
     Test,
-// <<< CUSTOM SEEDERS START >>>
-// Add custom seeders here.
 }
 
 // ============================================================================

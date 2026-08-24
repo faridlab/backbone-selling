@@ -7,6 +7,7 @@
 
 pub mod quotation_dto;
 pub mod quotation_item_dto;
+pub mod quotation_template_dto;
 pub mod sales_order_dto;
 pub mod sales_order_item_dto;
 pub mod sales_team_dto;
@@ -28,6 +29,14 @@ pub use quotation_item_dto::{
     QuotationItemResponseDto,
     QuotationItemListResponseDto,
     QuotationItemSummaryDto,
+};
+pub use quotation_template_dto::{
+    CreateQuotationTemplateDto,
+    UpdateQuotationTemplateDto,
+    PatchQuotationTemplateDto,
+    QuotationTemplateResponseDto,
+    QuotationTemplateListResponseDto,
+    QuotationTemplateSummaryDto,
 };
 pub use sales_order_dto::{
     CreateSalesOrderDto,

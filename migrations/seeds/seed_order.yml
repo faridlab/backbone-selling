@@ -17,3 +17,6 @@
 # Newly added seeds (preserve manual order above):
 - sales_team_seed
 - sales_person_allocation_seed
+
+# Newly added seeds (preserve manual order above):
+- quotation_template_seed

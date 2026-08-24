@@ -65,6 +65,33 @@ pub struct QuotationItemDeletedEvent {
 }
 
 // ============================================================================
+// QUOTATIONTEMPLATE EVENTS
+// ============================================================================
+
+/// Event published when a QuotationTemplate is created
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotationTemplateCreatedEvent {
+    pub id: QuotationTemplateId,
+    pub data: QuotationTemplateDto,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Event published when a QuotationTemplate is updated
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotationTemplateUpdatedEvent {
+    pub id: QuotationTemplateId,
+    pub data: QuotationTemplateDto,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Event published when a QuotationTemplate is deleted
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotationTemplateDeletedEvent {
+    pub id: QuotationTemplateId,
+    pub occurred_at: DateTime<Utc>,
+}
+
+// ============================================================================
 // SALESORDER EVENTS
 // ============================================================================
 
@@ -186,6 +213,9 @@ pub enum SellingEvent {
     QuotationItemCreated(QuotationItemCreatedEvent),
     QuotationItemUpdated(QuotationItemUpdatedEvent),
     QuotationItemDeleted(QuotationItemDeletedEvent),
+    QuotationTemplateCreated(QuotationTemplateCreatedEvent),
+    QuotationTemplateUpdated(QuotationTemplateUpdatedEvent),
+    QuotationTemplateDeleted(QuotationTemplateDeletedEvent),
     SalesOrderCreated(SalesOrderCreatedEvent),
     SalesOrderUpdated(SalesOrderUpdatedEvent),
     SalesOrderDeleted(SalesOrderDeletedEvent),

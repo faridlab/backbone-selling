@@ -62,6 +62,8 @@ pub struct QuotationDto {
     pub tax_amount: Decimal,
     pub total: Decimal,
     pub notes: Option<String>,
+    pub opportunity_id: Option<Uuid>,
+    pub status_reason: Option<String>,
     pub metadata: serde_json::Value,
 }
 
@@ -124,6 +126,8 @@ pub struct QuotationItemDto {
     pub unit_price: Decimal,
     pub line_discount: Decimal,
     pub line_amount: Decimal,
+    pub invoice_policy: InvoicePolicy,
+    pub is_downpayment: bool,
     pub metadata: serde_json::Value,
 }
 
@@ -137,6 +141,64 @@ pub struct QuotationItemSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotationItemRef {
     pub id: QuotationItemId,
+}
+
+// ============================================================================
+// QUOTATIONTEMPLATE TYPES
+// ============================================================================
+
+/// Type-safe ID for QuotationTemplate
+///
+/// Use this instead of raw Uuid for type safety across modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct QuotationTemplateId(pub Uuid);
+
+impl QuotationTemplateId {
+    pub fn new(id: Uuid) -> Self {
+        Self(id)
+    }
+
+    pub fn into_inner(self) -> Uuid {
+        self.0
+    }
+}
+
+impl From<Uuid> for QuotationTemplateId {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
+impl From<QuotationTemplateId> for Uuid {
+    fn from(id: QuotationTemplateId) -> Self {
+        id.0
+    }
+}
+
+/// Data transfer object for QuotationTemplate
+///
+/// This is the public representation of QuotationTemplate for other modules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotationTemplateDto {
+    pub id: QuotationTemplateId,
+    pub company_id: Uuid,
+    pub name: String,
+    pub validity_days: i32,
+    pub default_notes: Option<String>,
+    pub metadata: serde_json::Value,
+}
+
+/// Summary view of QuotationTemplate for list displays
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotationTemplateSummary {
+    pub id: QuotationTemplateId,
+    pub name: String,
+}
+
+/// Reference to QuotationTemplate for foreign key relationships
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotationTemplateRef {
+    pub id: QuotationTemplateId,
 }
 
 // ============================================================================
@@ -255,6 +317,8 @@ pub struct SalesOrderItemDto {
     pub line_amount: Decimal,
     pub billed_qty: Decimal,
     pub delivered_qty: Decimal,
+    pub invoice_policy: InvoicePolicy,
+    pub is_downpayment: bool,
     pub metadata: serde_json::Value,
 }
 

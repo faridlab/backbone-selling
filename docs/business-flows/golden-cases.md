@@ -22,9 +22,11 @@ Tax uses a single supplied `tax_rate` (real multi-rate tax is `backbone-tax`; se
 |------|--------------------------|----------|
 | **IGC-1** | `POST /sales-invoices/bulk` (generic) | `405/404` — generic bulk not exposed. |
 | **IGC-2** | `DELETE /sales-invoices/{id}` (generic) | `405/404` — generic delete not exposed. |
-| **IGC-3** | `POST /sales-invoices` well-formed | `201`. |
-| **IGC-4** | `POST /sales-invoices` with `lines:[]` | `422 empty_document`. |
-| **IGC-5** | `POST /sales-invoices` tax>0, no PPN account | `422 tax_account_missing`. |
+| **IGC-3..5** | *(removed)* the invoice-create validation probes | moved to `backbone-billing` with the invoice business ([ADR-006]). |
+| **IGC-6** | `POST /quotation-templates` then duplicate name; same name under another tenant | `201` + listed with `validityDays`; duplicate → `422 duplicate_template_name`; other tenant → `201` (unique index is per company). |
+| **IGC-7** | delivery-policy order confirmed, zero delivery, `GET /sales-orders/:id/invoice-status` | `200`; line `invoicePolicy:"delivery"`, `qtyToInvoice:"0"`, `invoiceStatus:"no"`; order aggregate `"no"`. |
+| **IGC-8** | confirmed order, `PATCH /sales-orders/lines/:id` `{"quantity":"5"}` then `{"description":...}` | priced field → `422 order_line_frozen`; description-only → `200`. |
+| **IGT-5** | foreign tenant calls send/cancel/re-draft on another tenant's quotation | `404 quotation_not_found` each; the victim's quotation stays `draft`; the owner's own send → `200`. |
 
 ## GL-posting seam (`tests/gl_posting_seam.rs`) — selling → the REAL accounting ledger
 
@@ -62,3 +64,55 @@ Tax uses a single supplied `tax_rate` (real multi-rate tax is `backbone-tax`; se
 - `posting_state` (pending→posted/failed) is the GL reconciliation state, distinct from the invoice
   document `status`.
 - Idempotency key = invoice id; a re-post never double-recognises revenue.
+
+## Quotation state machine (`tests/quotation_machine.rs`)
+
+Odoo `sale.order` semantics, adapted — [ADR-007](../adr/ADR-007-invoicing-policy-engine.md). Every
+verb is a guarded single-statement flip; `ordered` is a one-way door.
+
+| Case | Input | Expected |
+|------|-------|----------|
+| **QM-1** | send a draft | → `sent`; `QuotationSent` emitted. |
+| **QM-2** | send a sent quotation | `422 invalid_transition` (verb `send`, current `sent`) — never a silent no-op. |
+| **QM-3** | reject a sent quotation with a reason | → `rejected`; reason persisted. |
+| **QM-4** | reject a draft | `422 invalid_transition`. |
+| **QM-5** | cancel from draft / sent / accepted | → `cancelled` (reason persisted on the first). |
+| **QM-6** | cancel an ordered quotation | `422 quotation_ordered`; state untouched. |
+| **QM-7** | re-draft from sent / rejected / cancelled | → `draft`; recorded reason cleared. |
+| **QM-8** | re-draft an ordered quotation | `422 invalid_transition` (never from `ordered`). |
+| **QM-9** | draft → sent → rejected → re-draft → sent → accepted | full round-trip lands `accepted`. |
+| **QM-10** | machine verb on an unknown or foreign-tenant id | `404 quotation_not_found` — no existence leak. |
+| **QM-11** | one successful pass of each verb | each event exactly once; a refused verb emits nothing. |
+
+## Invoicing-policy engine (`tests/invoice_policy_compute.rs`)
+
+The canonical basis `policy_base = (delivery AND NOT downpayment) ? delivered_qty : quantity`
+consumed by the read model, the invoice request, the watermark bound, and the status rollup —
+[ADR-007](../adr/ADR-007-invoicing-policy-engine.md).
+
+| Case | Input | Expected |
+|------|-------|----------|
+| **PC-1** | order-policy line 10, bill 4 then 6 | `qtyToInvoice` 10 → 6 → 0; statuses `to invoice` → `invoiced`. |
+| **PC-2** | delivery-policy line 10, deliver 0, bill 1 | `no` / `qtyToInvoice 0`; billing refused `422 over_billed` (capacity is 0). |
+| **PC-2b** | same line, deliver 6, bill 6, deliver 4 more | billed-to-delivered → `invoiced`; new delivery reopens the line → `to invoice` (4). |
+| **PC-3** | delivery-policy, delivered 6 of 10, billed 6 | order advances to `to_deliver` — NOT stranded in `to_deliver_and_bill`. |
+| **PC-4** | order-policy line billed 12 of 10 (forced) | line + aggregate read `upselling`, `qtyToInvoice −2` (raw). |
+| **PC-5** | downpayment line under a delivery policy | quantity basis honored by the writer; excluded from aggregate + rollup — the goods line alone completes the order. |
+| **PC-6** | one upselling line + one untouched line | aggregate `to invoice` (actionable-first — deliberate delta from Odoo). |
+| **PC-7** | draft order | all lines + aggregate read `no`. |
+| **PC-8** | quotation read model | per-line `qtyToInvoice = quantity`, status `no` — no watermarks pre-order; policy + downpayment flags surfaced. |
+| **IS-1** | mixed-policy order, delivery line delivered 4 | invoice request asks 10 (order line) + 4 (delivery line). |
+| **IS-2** | delivery line delivered 4, bill 5 | `422 over_billed`; watermark untouched. |
+| **IS-3** | delivery line delivered 7 billed 3 | read model and invoice request both say 4 — single source holds. |
+| **CV-1** | convert a quotation with delivery + downpayment lines | order lines carry `invoice_policy` + `is_downpayment` verbatim. |
+| **QT-1** | create + list a template; duplicate name; same name other tenant | `201` + listed; duplicate `422 duplicate_template_name`; other tenant `201`. |
+| **QT-2** | create via template (validity 15, notes), caller supplied neither | `valid_until = quotation_date + 15d`; notes = template's. |
+| **QT-3** | caller supplied both | caller's values win. |
+| **QT-4** | unknown / foreign-tenant template id | `422 template_not_found`. |
+| **OP-1** | create with `opportunity_id` | persisted on the quotation (logical link, no cross-module key). |
+| **LF-1** | confirmed order line: description edit; each frozen field | description `200`; qty/price/discount/item each `422 order_line_frozen`, line untouched. |
+| **LF-2** | draft line edit (qty 3 × 50,000 − 10,000, tax 11%) | line `140,000.00`; header subtotal `140,000.00`, tax `15,400.00`, total `155,400.00`. |
+| **OM-1** | cancel a draft order | → `cancelled`; `SalesOrderCancelled` emitted. |
+| **OM-2** | cancel a billed order; cancel a delivered-unbilled order | billed → `422 order_billed`, state untouched; delivered-unbilled → `cancelled`. |
+| **OM-3** | cancel a completed order | `422 invalid_transition` (terminal). |
+| **OM-4** | cancel unknown / foreign-tenant order | `404 order_not_found`. |

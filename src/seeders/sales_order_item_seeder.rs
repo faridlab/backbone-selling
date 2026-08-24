@@ -36,7 +36,7 @@ impl Seeder for SeedSalesOrderItemSeeder {
     }
 
     fn order(&self) -> i32 {
-        4
+        5
     }
 
     async fn should_run(&self, pool: &PgPool) -> Result<bool> {
@@ -69,4 +69,3 @@ impl Seeder for SeedSalesOrderItemSeeder {
 // <<< CUSTOM SEED DATA START >>>
 // Add custom seed data methods here
 // <<< CUSTOM SEED DATA END >>>
-

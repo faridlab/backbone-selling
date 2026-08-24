@@ -1,15 +1,18 @@
 # =============================================================================
 # selling Hooks — lifecycle + write-path rules (declarative spec of behavior that
-# lives in src/application/service/selling_write_service.rs and is proven in tests/).
+# lives in src/application/service/selling_*.rs and is proven in tests/).
 # =============================================================================
 
 module: selling
-version: 2
+version: 3
 
 # -----------------------------------------------------------------------------
 # State machines
 # -----------------------------------------------------------------------------
 state_machines:
+  # Odoo sale.order semantics, adapted: an accepted quotation converts to an
+  # order; `ordered` is a one-way door (a confirmed order must never be orphaned
+  # by resetting or cancelling its source quotation).
   - entity: Quotation
     field: status
     initial: draft
@@ -20,24 +23,30 @@ state_machines:
       - { from: sent,     to: accepted,  on: accept }
       - { from: accepted, to: ordered,   on: convert_to_order }
       - { from: draft,    to: cancelled, on: cancel }
+      - { from: sent,     to: cancelled, on: cancel }
+      - { from: accepted, to: cancelled, on: cancel }
+      - { from: sent,     to: rejected,  on: reject }
+      - { from: sent,     to: draft,     on: re_draft }
+      - { from: rejected, to: draft,     on: re_draft }
+      - { from: cancelled,to: draft,     on: re_draft }
 
-  # ADR-003: billing band active now; delivery band (to_deliver*) inventory-gated.
+  # ADR-003: confirm gates BOTH bands (to_deliver_and_bill); the watermark rollup
+  # advances through to_deliver / to_bill to completed when both bands are full.
   - entity: SalesOrder
     field: status
     initial: draft
     states: [draft, to_deliver, to_bill, to_deliver_and_bill, completed, closed, cancelled]
     transitions:
-      - { from: draft,   to: to_bill,   on: confirm }
-      - { from: to_bill, to: completed, on: fully_billed }
-      - { from: to_bill, to: closed,    on: close }
-      - { from: draft,   to: cancelled, on: cancel }
-
-  - entity: SalesInvoice
-    field: status
-    initial: draft
-    states: [draft, submitted, partially_paid, paid, cancelled]
-    transitions:
-      - { from: draft, to: submitted, on: post }
+      - { from: draft,             to: to_deliver_and_bill, on: confirm }
+      - { from: to_deliver_and_bill, to: to_bill,           on: fully_delivered }
+      - { from: to_deliver_and_bill, to: to_deliver,        on: fully_billed }
+      - { from: to_deliver,        to: completed,           on: fully_billed }
+      - { from: to_bill,           to: completed,           on: fully_delivered }
+      - { from: to_bill,           to: closed,              on: close }
+      - { from: draft,             to: cancelled,           on: cancel }
+      - { from: to_deliver,        to: cancelled,           on: cancel }
+      - { from: to_bill,           to: cancelled,           on: cancel }
+      - { from: to_deliver_and_bill, to: cancelled,         on: cancel }
 
 # -----------------------------------------------------------------------------
 # Write-path rules — each maps to a stable error_code + a golden/probe case.
@@ -53,36 +62,56 @@ rules:
     when: create
     assert: "line.qty >= 0 AND line.price >= 0 AND line.discount >= 0 AND line.net >= 0"
     error_code: negative_quantity
-  - id: R3
-    name: revenue_account_present
-    when: create
-    assert: "every invoice line has revenue_account_id"
-    error_code: missing_revenue_account
-  - id: R4
-    name: tax_account_present
-    when: create
-    assert: "tax_amount > 0 => tax_output_account_id present"
-    error_code: tax_account_missing
   - id: R5
     name: unique_document_number
     when: create
     assert: "document number is unique"
     error_code: duplicate_number
-  - id: R6
-    name: idr_only_post
-    when: posting
-    assert: "invoice.currency == 'IDR'"
-    error_code: unsupported_currency
-  - id: R7
-    name: balanced_post
-    when: posting
-    assert: "sum(lines.debit) == sum(lines.credit) == total"
-    error_code: unbalanced_post
   - id: R8
     name: accepted_to_convert
     when: convert
     assert: "quotation.status == 'accepted'"
     error_code: quotation_not_accepted
+  - id: R9
+    name: quotation_transition_guard
+    when: send | reject | re_draft | cancel
+    assert: "current status is in the verb's from-set (see the Quotation machine)"
+    error_code: invalid_transition
+  - id: R10
+    name: quotation_cancel_refuses_ordered
+    when: cancel
+    assert: "quotation.status != 'ordered'"
+    error_code: quotation_ordered
+  - id: R11
+    name: order_cancel_refuses_billed
+    when: cancel
+    assert: "no live order line has billed_qty > 0 (posted invoices are never cancelled)"
+    error_code: order_billed
+  - id: R12
+    name: order_line_freeze
+    when: update_order_line
+    assert: "order.status == 'draft' OR only description changes"
+    error_code: order_line_frozen
+  - id: R13
+    name: template_name_unique
+    when: create_quotation_template
+    assert: "(company_id, name) is unique among live templates"
+    error_code: duplicate_template_name
+
+# -----------------------------------------------------------------------------
+# Invoicing policy (computed at read time; never persisted, no write route).
+# The canonical basis — mirrored in list_billing_remainders, lock_billing_capacity,
+# watermark_rollup (SQL) and selling_invoice_policy.rs (Rust):
+#   policy_base = (invoice_policy == 'delivery' AND NOT is_downpayment) ? delivered_qty
+#                                                                     : quantity
+# -----------------------------------------------------------------------------
+invoicing_policy:
+  per_line:
+    qty_to_invoice: "policy_base - billed_qty"
+    invoice_status: "no | to invoice | invoiced | upselling"
+  order_aggregate:
+    invoice_status: "actionable-first over non-downpayment lines: any 'to invoice' > any 'upselling' > all 'invoiced' > 'no'"
+  downpayment_lines: "quantity basis for the billed watermark; excluded from the order aggregate and status rollup"
 
 # -----------------------------------------------------------------------------
 # Domain events (emitted by SellingWriteService via SellingEventSink).
@@ -91,12 +120,21 @@ events:
   QuotationAccepted:
     when: "a quotation is accepted"
     payload: [quotation_id, company_id, customer_id]
+  QuotationSent:
+    when: "a quotation is sent to the customer"
+    payload: [quotation_id, company_id]
+  QuotationRejected:
+    when: "a quotation is rejected by the customer"
+    payload: [quotation_id, company_id, reason]
+  QuotationCancelled:
+    when: "a quotation is withdrawn"
+    payload: [quotation_id, company_id, reason]
+  QuotationReDrafted:
+    when: "a quotation returns to draft for re-editing"
+    payload: [quotation_id, company_id]
   SalesOrderConfirmed:
     when: "a sales order is confirmed"
     payload: [order_id, company_id, customer_id, grand_total, currency]
-  SalesInvoiceIssued:
-    when: "a sales invoice is created"
-    payload: [invoice_id, sales_order_id, company_id, customer_id, total]
-  SalesInvoicePosted:
-    when: "a sales invoice's revenue is posted to the GL"
-    payload: [invoice_id, company_id, journal_id, post_id, total]
+  SalesOrderCancelled:
+    when: "a sales order is cancelled"
+    payload: [order_id, company_id, customer_id]

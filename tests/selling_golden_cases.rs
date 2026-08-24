@@ -30,7 +30,7 @@ async fn pool() -> PgPool {
     PgPool::connect(&url).await.expect("connect DB")
 }
 fn line(revenue: Uuid, qty: &str, price: &str, discount: &str) -> NewLine {
-    NewLine {
+    NewLine { invoice_policy: None, is_downpayment: None,
         item_id: Uuid::new_v4(),
         revenue_account_id: Some(revenue),
         description: None,
@@ -47,7 +47,7 @@ async fn quotation_order_confirm_flow() {
     let w = SellingWriteService::new(pool.clone());
     let (company, customer, rev) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
 
-    let qid = w.create_quotation(NewQuotation {
+    let qid = w.create_quotation(NewQuotation { opportunity_id: None, template_id: None,
         quotation_number: uq("QUO"), company_id: company, branch_id: None, customer_id: customer,
         quotation_date: day(2026, 7, 1), valid_until: Some(day(2026, 7, 31)), currency: None,
         tax_rate: d("11"), notes: None,

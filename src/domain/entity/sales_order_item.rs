@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 use rust_decimal::Decimal;
+
+use super::InvoicePolicy;
 use super::AuditMetadata;
 
 /// Strongly-typed ID for SalesOrderItem
@@ -59,6 +61,8 @@ pub struct SalesOrderItem {
     pub line_amount: Decimal,
     pub billed_qty: Decimal,
     pub delivered_qty: Decimal,
+    pub invoice_policy: InvoicePolicy,
+    pub is_downpayment: bool,
     #[serde(default)]
     #[sqlx(json)]
     pub metadata: AuditMetadata,
@@ -67,11 +71,11 @@ pub struct SalesOrderItem {
 impl SalesOrderItem {
     /// Create a builder for SalesOrderItem
     pub fn builder() -> SalesOrderItemBuilder {
-        SalesOrderItemBuilder::default()
+        <SalesOrderItemBuilder as Default>::default()
     }
 
     /// Create a new SalesOrderItem with required fields
-    pub fn new(order_id: Uuid, company_id: Uuid, item_id: Uuid, quantity: Decimal, unit_price: Decimal, line_discount: Decimal, line_amount: Decimal, billed_qty: Decimal, delivered_qty: Decimal) -> Self {
+    pub fn new(order_id: Uuid, company_id: Uuid, item_id: Uuid, quantity: Decimal, unit_price: Decimal, line_discount: Decimal, line_amount: Decimal, billed_qty: Decimal, delivered_qty: Decimal, invoice_policy: InvoicePolicy, is_downpayment: bool) -> Self {
         Self {
             id: Uuid::new_v4(),
             order_id,
@@ -84,6 +88,8 @@ impl SalesOrderItem {
             line_amount,
             billed_qty,
             delivered_qty,
+            invoice_policy,
+            is_downpayment,
             metadata: AuditMetadata::default(),
         }
     }
@@ -187,6 +193,12 @@ impl SalesOrderItem {
                 "delivered_qty" => {
                     if let Ok(v) = serde_json::from_value(value) { self.delivered_qty = v; }
                 }
+                "invoice_policy" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.invoice_policy = v; }
+                }
+                "is_downpayment" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.is_downpayment = v; }
+                }
                 _ => {} // ignore unknown fields
             }
         }
@@ -244,6 +256,7 @@ impl backbone_orm::EntityRepoMeta for SalesOrderItem {
         m.insert("order_id".to_string(), "uuid".to_string());
         m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("item_id".to_string(), "uuid".to_string());
+        m.insert("invoice_policy".to_string(), "invoice_policy".to_string());
         m
     }
     fn search_fields() -> &'static [&'static str] {
@@ -273,6 +286,8 @@ pub struct SalesOrderItemBuilder {
     line_amount: Option<Decimal>,
     billed_qty: Option<Decimal>,
     delivered_qty: Option<Decimal>,
+    invoice_policy: Option<InvoicePolicy>,
+    is_downpayment: Option<bool>,
 }
 
 impl SalesOrderItemBuilder {
@@ -336,6 +351,18 @@ impl SalesOrderItemBuilder {
         self
     }
 
+    /// Set the invoice_policy field (default: `InvoicePolicy::default()`)
+    pub fn invoice_policy(mut self, value: InvoicePolicy) -> Self {
+        self.invoice_policy = Some(value);
+        self
+    }
+
+    /// Set the is_downpayment field (default: `false`)
+    pub fn is_downpayment(mut self, value: bool) -> Self {
+        self.is_downpayment = Some(value);
+        self
+    }
+
     /// Build the SalesOrderItem entity
     ///
     /// Returns Err if any required field without a default is missing.
@@ -358,6 +385,8 @@ impl SalesOrderItemBuilder {
             line_amount: self.line_amount.unwrap_or(Decimal::from(0)),
             billed_qty: self.billed_qty.unwrap_or(Decimal::from(0)),
             delivered_qty: self.delivered_qty.unwrap_or(Decimal::from(0)),
+            invoice_policy: self.invoice_policy.unwrap_or_default(),
+            is_downpayment: self.is_downpayment.unwrap_or(false),
             metadata: AuditMetadata::default(),
         })
     }

@@ -9,8 +9,12 @@ pub use error::{ServiceError, ServiceResult};
 
 pub mod quotation_service;
 pub mod quotation_item_service;
+pub mod quotation_template_service;
 pub mod sales_order_service;
 pub mod sales_order_item_service;
+pub mod sales_team_service;
+pub mod sales_person_allocation_service;
+
 // <<< CUSTOM
 // Hand-authored (user-owned): domain events, the validated write path. (selling_gl + the invoice
 // create/post chunks were removed when selling exited the invoice business — ADR-006.)
@@ -25,23 +29,29 @@ pub mod selling_quotation;
 pub mod selling_order;
 pub mod selling_delivery_seam;
 pub mod selling_invoice_seam;
+// The invoicing-policy engine: pure compute (qty_to_invoice / invoice_status) + the read models.
+pub mod selling_invoice_policy;
 // Reference consumer extension (extension-contract §5, second half) — a downstream rule on events.
 pub mod consumer_credit_rule_custom;
-// END CUSTOM
-pub mod sales_team_service;
-pub mod sales_person_allocation_service;
-
-// <<< CUSTOM
 // END CUSTOM
 
 pub use quotation_service::QuotationService;
 pub use quotation_item_service::QuotationItemService;
+pub use quotation_template_service::QuotationTemplateService;
 pub use sales_order_service::SalesOrderService;
 pub use sales_order_item_service::SalesOrderItemService;
+pub use sales_team_service::SalesTeamService;
+pub use sales_person_allocation_service::SalesPersonAllocationService;
 // <<< CUSTOM
 pub use selling_events::{
     DeliveryRequestEnvelope, DeliveryRequestLine, InvoiceRequestEnvelope, InvoiceRequestLine,
-    QuotationAccepted, SalesOrderConfirmed, SellingEvent, SellingEventSink,
+    QuotationAccepted, QuotationCancelled, QuotationReDrafted, QuotationRejected, QuotationSent,
+    SalesOrderCancelled, SalesOrderConfirmed, SellingEvent, SellingEventSink,
+};
+pub use selling_order::UpdateOrderLinePatch;
+pub use selling_invoice_policy::{
+    QuotationInvoiceStatusDto, QuotationItemInvoiceDto, SalesOrderInvoiceStatusDto,
+    SalesOrderItemInvoiceDto,
 };
 pub use selling_cart_pricing::{
     CartPriceLine, CartPriceRequest, CartPricingError, CartPricingPort, PricedCart, PricedCartLine,
@@ -51,8 +61,4 @@ pub use selling_write_service::{
     CartOrderLine, NewCartSalesOrder, NewLine, NewQuotation, NewSalesOrder, SellingError,
     SellingWriteService,
 };
-// END CUSTOM
-pub use sales_team_service::SalesTeamService;
-pub use sales_person_allocation_service::SalesPersonAllocationService;
-// <<< CUSTOM
 // END CUSTOM

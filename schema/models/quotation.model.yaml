@@ -83,6 +83,16 @@ models:
         attributes: ["@max(1000)"]
         description: "Free-text terms/notes"
 
+      opportunity_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Deal's opportunity this quotation came from # logical FK to deal.Opportunity.id (host passes it; no cargo edge)"
+
+      status_reason:
+        type: string?
+        attributes: ["@max(500)"]
+        description: "Why the quotation was rejected/cancelled (optional, set by the machine verbs)"
+
       metadata:
         type: Metadata
         attributes: ["@audit_metadata"]
@@ -103,6 +113,8 @@ models:
         fields: [company_id, customer_id, status]
       - type: index
         fields: [quotation_date]
+      - type: index
+        fields: [opportunity_id]
 
   - name: QuotationItem
     collection: quotation_items
@@ -154,6 +166,16 @@ models:
         attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
         description: "quantity * unit_price - line_discount (computed by write path)"
 
+      invoice_policy:
+        type: InvoicePolicy
+        attributes: ["@default(order)"]
+        description: "When this line's quantity becomes invoiceable (carried to the order line at conversion)"
+
+      is_downpayment:
+        type: bool
+        attributes: ["@default(false)"]
+        description: "Downpayment advance line (excluded from the order invoice-status aggregation; the billed watermark still bounds it)"
+
       metadata:
         type: Metadata
         attributes: ["@audit_metadata"]
@@ -193,3 +215,12 @@ enums:
         description: "Passed valid_until without acceptance"
       - name: cancelled
         description: "Withdrawn"
+
+  - name: InvoicePolicy
+    description: "When a line's quantity becomes invoiceable"
+    variants:
+      - name: order
+        description: "Invoiceable on order confirmation (quantity basis)"
+        default: true
+      - name: delivery
+        description: "Invoiceable on delivery (delivered_qty basis)"

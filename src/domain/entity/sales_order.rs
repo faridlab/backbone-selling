@@ -73,7 +73,7 @@ pub struct SalesOrder {
 impl SalesOrder {
     /// Create a builder for SalesOrder
     pub fn builder() -> SalesOrderBuilder {
-        SalesOrderBuilder::default()
+        <SalesOrderBuilder as Default>::default()
     }
 
     /// Create a new SalesOrder with required fields
@@ -424,7 +424,7 @@ impl SalesOrderBuilder {
             company_id,
             branch_id: self.branch_id,
             customer_id,
-            status: self.status.unwrap_or(SalesOrderStatus::default()),
+            status: self.status.unwrap_or_default(),
             order_date,
             delivery_date: self.delivery_date,
             currency: self.currency.unwrap_or("IDR".to_string()),

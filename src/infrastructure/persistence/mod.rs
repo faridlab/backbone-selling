@@ -6,6 +6,7 @@
 
 mod quotation_repository;
 mod quotation_item_repository;
+mod quotation_template_repository;
 mod sales_order_repository;
 mod sales_order_item_repository;
 mod sales_team_repository;
@@ -13,11 +14,31 @@ mod sales_person_allocation_repository;
 
 // Custom persistence modules
 // <<< CUSTOM
+// The hand-written selling SQL's parameter/projection types. Their repositories are declared
+// `user_owned` in metaphor.codegen.yaml; these types mirror COLUMNS, not entities.
+pub use quotation_repository::{
+    AcceptedQuotationRow, NewQuotationRow, QuotationConversionRow, QuotationInvoiceHeaderRow,
+    QuotationStatusRow,
+};
+pub use quotation_item_repository::{
+    InvoicePolicyLineRow, NewQuotationItemRow, QuotationLineRow,
+};
+pub use quotation_template_repository::{NewQuotationTemplateRow, QuotationTemplateRow};
+pub use sales_order_repository::{
+    CancelRefusalRow, ConfirmedOrderRow, InvoiceSourceOrderRow, InvoiceStatusHeaderRow,
+    NewSalesOrderRow, OrderFulfillmentHeaderRow, SalesOrderRefRow,
+};
+pub use sales_order_item_repository::{
+    InvoicePolicyOrderLineRow, LineBillingCapacityRow, LinePatchRow, NewSalesOrderItemRow,
+    OrderBillingRemainderRow, OrderDeliveryRemainderRow, OrderLineForInvoiceRow,
+    WatermarkRollupRow,
+};
 // END CUSTOM
 
 // Re-exports
 pub use quotation_repository::QuotationRepository;
 pub use quotation_item_repository::QuotationItemRepository;
+pub use quotation_template_repository::QuotationTemplateRepository;
 pub use sales_order_repository::SalesOrderRepository;
 pub use sales_order_item_repository::SalesOrderItemRepository;
 pub use sales_team_repository::SalesTeamRepository;
@@ -32,16 +53,4 @@ pub use backbone_orm::repository::{
 
 // Re-export custom persistence types
 // <<< CUSTOM
-// The hand-written selling SQL's parameter/projection types. Their repositories are declared
-// `user_owned` in metaphor.codegen.yaml; these types mirror COLUMNS, not entities.
-pub use quotation_repository::{AcceptedQuotationRow, NewQuotationRow, QuotationConversionRow};
-pub use quotation_item_repository::{NewQuotationItemRow, QuotationLineRow};
-pub use sales_order_repository::{
-    ConfirmedOrderRow, InvoiceSourceOrderRow, NewSalesOrderRow, OrderFulfillmentHeaderRow,
-    SalesOrderRefRow,
-};
-pub use sales_order_item_repository::{
-    LineBillingCapacityRow, NewSalesOrderItemRow, OrderBillingRemainderRow,
-    OrderDeliveryRemainderRow, OrderLineForInvoiceRow, WatermarkRollupRow,
-};
 // END CUSTOM

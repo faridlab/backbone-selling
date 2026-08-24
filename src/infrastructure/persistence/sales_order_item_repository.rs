@@ -46,7 +46,9 @@ impl SalesOrderItemRepository {
 /// Mirrors the raw column shape rather than the `SalesOrderItem` entity: `line_amount` is already
 /// server-computed by the write service's `price_document`, and the `billed_qty`/`delivered_qty`
 /// watermarks are deliberately absent — a new line starts at the column defaults and only the
-/// watermark methods below ever move them.
+/// watermark methods below ever move them. `invoice_policy` binds as `&str` with a DB-side
+/// `::invoice_policy` cast (hand-written SQL never decodes/encodes the custom enum in Rust —
+/// the fleet's enum-bind lesson).
 pub struct NewSalesOrderItemRow<'a> {
     pub id: Uuid,
     pub order_id: Uuid,
@@ -57,6 +59,36 @@ pub struct NewSalesOrderItemRow<'a> {
     pub unit_price: Decimal,
     pub line_discount: Decimal,
     pub line_amount: Decimal,
+    pub invoice_policy: &'a str,
+    pub is_downpayment: bool,
+}
+
+/// One order line as the invoice-policy read model loads it. `invoice_policy` is read as `::text`
+/// (never decode a custom enum in ad-hoc SQL); the watermarks ride along so the pure compute in
+/// `selling_invoice_policy.rs` has everything it needs.
+pub struct InvoicePolicyOrderLineRow {
+    pub id: Uuid,
+    pub item_id: Uuid,
+    pub invoice_policy: String,
+    pub is_downpayment: bool,
+    pub quantity: Decimal,
+    pub delivered_qty: Decimal,
+    pub billed_qty: Decimal,
+}
+
+/// One order line locked for a line edit (`FOR UPDATE` on line + parent header), with the parent's
+/// status — the read behind the order-line freeze. Editing under this lock serializes against
+/// `confirm_sales_order` (which flips that same header row) and the watermark writers.
+pub struct LinePatchRow {
+    pub order_id: Uuid,
+    pub company_id: Uuid,
+    pub description: Option<String>,
+    pub item_id: Uuid,
+    pub quantity: Decimal,
+    pub unit_price: Decimal,
+    pub line_discount: Decimal,
+    pub line_amount: Decimal,
+    pub order_status: String,
 }
 
 /// One order line as `create_invoice_from_order` copies it. Carries `id` — the invoice line links
@@ -117,11 +149,13 @@ impl SalesOrderItemRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.sales_order_items
-                (id, order_id, company_id, item_id, description, quantity, unit_price, line_discount, line_amount)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)"#,
+                (id, order_id, company_id, item_id, description, quantity, unit_price,
+                 line_discount, line_amount, invoice_policy, is_downpayment)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::invoice_policy,$11)"#,
         )
         .bind(l.id).bind(l.order_id).bind(l.company_id).bind(l.item_id).bind(l.description)
         .bind(l.quantity).bind(l.unit_price).bind(l.line_discount).bind(l.line_amount)
+        .bind(l.invoice_policy).bind(l.is_downpayment)
         .execute(conn)
         .await?;
         Ok(())
@@ -154,7 +188,11 @@ impl SalesOrderItemRepository {
         }).collect())
     }
 
-    /// Roll an order's two watermarks up to a pair of order-wide booleans (ADR-003). ID-only —
+    /// Roll an order's two watermarks up to a pair of order-wide booleans (ADR-003), on the
+    /// canonical policy basis: a delivery-policy line is billed when `billed_qty >= delivered_qty`,
+    /// and downpayment lines are excluded from BOTH bands (a downpayment's placeholder quantity is
+    /// never delivered, so counting it would strand the order in a to_deliver* state forever).
+    /// `completed` still requires both bands full over the live non-downpayment lines. ID-only —
     /// inherits the caller's scope (`recompute_order_status`).
     pub async fn watermark_rollup(
         &self,
@@ -164,10 +202,11 @@ impl SalesOrderItemRepository {
         let row = company_scope::fetch_one_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT bool_and(billed_qty >= quantity) AS billed_all,
+                r#"SELECT bool_and(billed_qty >= (CASE WHEN invoice_policy='delivery' AND NOT is_downpayment
+                                                       THEN delivered_qty ELSE quantity END)) AS billed_all,
                           bool_and(delivered_qty >= quantity) AS delivered_all
                    FROM selling.sales_order_items
-                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL AND NOT is_downpayment"#,
             )
             .bind(order_id),
         ).await?;
@@ -199,8 +238,10 @@ impl SalesOrderItemRepository {
         }).collect())
     }
 
-    /// Read each line's un-invoiced remainder (`quantity - billed_qty > 0`) plus its price for the
-    /// invoice envelope. ID-only — see [`Self::list_for_invoice`].
+    /// Read each line's un-invoiced remainder plus its price for the invoice envelope — on the
+    /// canonical policy basis: `policy_base − billed_qty`, where `policy_base` is `delivered_qty`
+    /// for a delivery-policy line and `quantity` otherwise (downpayment lines stay on the quantity
+    /// basis so billing's advances still bound). ID-only — see [`Self::list_for_invoice`].
     pub async fn list_billing_remainders(
         &self,
         pool: &PgPool,
@@ -209,9 +250,14 @@ impl SalesOrderItemRepository {
         let rows = company_scope::fetch_all_rows_scoped(
             pool,
             sqlx::query(
-                r#"SELECT item_id, (quantity - billed_qty) AS remaining, unit_price
+                r#"SELECT item_id,
+                          (CASE WHEN invoice_policy='delivery' AND NOT is_downpayment
+                                THEN delivered_qty ELSE quantity END) - billed_qty AS remaining,
+                          unit_price
                    FROM selling.sales_order_items
-                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL AND (quantity - billed_qty) > 0"#,
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL
+                     AND (CASE WHEN invoice_policy='delivery' AND NOT is_downpayment
+                                THEN delivered_qty ELSE quantity END) - billed_qty > 0"#,
             )
             .bind(order_id),
         ).await?;
@@ -249,8 +295,10 @@ impl SalesOrderItemRepository {
         Ok(())
     }
 
-    /// Lock an item's order lines and read their remaining billing capacity (`quantity - billed_qty`),
-    /// in a stable `ORDER BY id` fill order.
+    /// Lock an item's order lines and read their remaining billing capacity, in a stable
+    /// `ORDER BY id` fill order — on the canonical policy basis: `policy_base − billed_qty`, where
+    /// `policy_base` is `delivered_qty` for a delivery-policy line and `quantity` otherwise
+    /// (downpayment lines keep the quantity basis so billing's advances still bound).
     ///
     /// Takes the CALLER'S connection: the `FOR UPDATE` is only meaningful inside the caller's
     /// transaction — it is what serializes concurrent billers and closes the over-bill race. The caller
@@ -262,8 +310,11 @@ impl SalesOrderItemRepository {
         item_id: Uuid,
     ) -> Result<Vec<LineBillingCapacityRow>, sqlx::Error> {
         let rows = sqlx::query(
-            r#"SELECT id, (quantity - billed_qty) AS capacity FROM selling.sales_order_items
-               WHERE order_id=$1 AND item_id=$2 AND (metadata->>'deleted_at') IS NULL ORDER BY id FOR UPDATE"#,
+            r#"SELECT id, (CASE WHEN invoice_policy='delivery' AND NOT is_downpayment
+                                THEN delivered_qty ELSE quantity END) - billed_qty AS capacity
+               FROM selling.sales_order_items
+               WHERE order_id=$1 AND item_id=$2 AND (metadata->>'deleted_at') IS NULL
+               ORDER BY id FOR UPDATE"#,
         )
         .bind(order_id).bind(item_id)
         .fetch_all(conn)
@@ -330,6 +381,98 @@ impl SalesOrderItemRepository {
             .bind(line_id).bind(qty)
             .execute(conn)
             .await?;
+        Ok(())
+    }
+
+    /// Read an order's live lines for the invoice-policy read model (the order invoice-status
+    /// endpoint). ID-only — same scoping as [`Self::list_for_invoice`].
+    pub async fn list_invoice_policy_rows(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<Vec<InvoicePolicyOrderLineRow>, sqlx::Error> {
+        let rows = company_scope::fetch_all_rows_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT id, item_id, invoice_policy::text AS pol, is_downpayment,
+                          quantity, delivered_qty, billed_qty
+                   FROM selling.sales_order_items
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL ORDER BY id"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(rows.iter().map(|r| InvoicePolicyOrderLineRow {
+            id: r.get("id"),
+            item_id: r.get("item_id"),
+            invoice_policy: r.get("pol"),
+            is_downpayment: r.get("is_downpayment"),
+            quantity: r.get("quantity"),
+            delivered_qty: r.get("delivered_qty"),
+            billed_qty: r.get("billed_qty"),
+        }).collect())
+    }
+
+    /// Lock one order line (`FOR UPDATE`) together with its parent order's status — the read behind
+    /// the line-edit freeze. Locking BOTH rows serializes the edit against
+    /// `confirm_sales_order` (which flips the same header) and the watermark writers. Takes the
+    /// CALLER'S connection (the caller binds the company on it).
+    pub async fn lock_line_with_parent_status(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        line_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<Option<LinePatchRow>, sqlx::Error> {
+        let row = sqlx::query(
+            r#"SELECT soi.order_id, soi.company_id, soi.description, soi.item_id,
+                      soi.quantity, soi.unit_price, soi.line_discount, soi.line_amount,
+                      o.status::text AS order_status
+               FROM selling.sales_order_items soi
+               JOIN selling.sales_orders o ON o.id = soi.order_id
+               WHERE soi.id=$1 AND soi.company_id=$2
+                 AND (soi.metadata->>'deleted_at') IS NULL
+               FOR UPDATE OF soi, o"#,
+        )
+        .bind(line_id).bind(company_id)
+        .fetch_optional(conn)
+        .await?;
+        Ok(row.map(|r| LinePatchRow {
+            order_id: r.get("order_id"),
+            company_id: r.get("company_id"),
+            description: r.get("description"),
+            item_id: r.get("item_id"),
+            quantity: r.get("quantity"),
+            unit_price: r.get("unit_price"),
+            line_discount: r.get("line_discount"),
+            line_amount: r.get("line_amount"),
+            order_status: r.get("order_status"),
+        }))
+    }
+
+    /// Write an order line's editable fields (all values effective — patch already applied by the
+    /// service) plus the recomputed `line_amount`. Takes the CALLER'S connection so the edit lands
+    /// in the same transaction that holds the `FOR UPDATE` lock from
+    /// [`Self::lock_line_with_parent_status`].
+    pub async fn update_line_full(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        line_id: Uuid,
+        description: Option<&str>,
+        item_id: Uuid,
+        quantity: Decimal,
+        unit_price: Decimal,
+        line_discount: Decimal,
+        line_amount: Decimal,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"UPDATE selling.sales_order_items
+               SET description=$2, item_id=$3, quantity=$4, unit_price=$5,
+                   line_discount=$6, line_amount=$7
+               WHERE id=$1"#,
+        )
+        .bind(line_id).bind(description).bind(item_id)
+        .bind(quantity).bind(unit_price).bind(line_discount).bind(line_amount)
+        .execute(conn)
+        .await?;
         Ok(())
     }
 }

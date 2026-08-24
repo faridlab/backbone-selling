@@ -1,0 +1,51 @@
+# =============================================================================
+# Domain: Selling
+# Entity: QuotationTemplate
+# Description: A minimal per-company master that stamps new quotations — offer
+# lifetime (validity_days applied as quotation_date + validity_days when the
+# caller supplies no valid_until) and default notes. Per-tenant master data;
+# company_id is a logical FK (ADR-0010 direct-fencing pattern).
+# =============================================================================
+
+models:
+  - name: QuotationTemplate
+    collection: quotation_templates
+    description: "Master that stamps new quotations (validity window + default notes)"
+
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique quotation-template identifier"
+
+      company_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Books owner # logical FK to organization.Company.id"
+
+      name:
+        type: string
+        attributes: ["@required", "@max(120)"]
+        description: "Template name"
+
+      validity_days:
+        type: int
+        attributes: ["@required", "@default(30)"]
+        description: "Offer lifetime in days applied as quotation_date + validity_days when the caller supplies no valid_until"
+
+      default_notes:
+        type: string?
+        attributes: ["@max(1000)"]
+        description: "Notes stamped onto a quotation created from this template when the caller supplies none"
+
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata"
+
+    indexes:
+      - type: unique
+        fields: [company_id, name]
+        where: "deleted_at IS NULL"
+      - type: index
+        fields: [company_id]

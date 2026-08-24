@@ -8,7 +8,7 @@
 //! ## Usage from other modules
 //!
 //! ```text
-//! use selling::exports::{QuotationDto, SellingQueryService};
+//! use selling::exports::{QuotationDto};
 //! ```
 
 mod types;
@@ -33,6 +33,9 @@ pub use events::*;
 /// - `QuotationItemDto` - Data transfer object for QuotationItem
 /// - `QuotationItemSummary` - Summary view of QuotationItem
 /// - `QuotationItemId` - Type-safe ID wrapper
+/// - `QuotationTemplateDto` - Data transfer object for QuotationTemplate
+/// - `QuotationTemplateSummary` - Summary view of QuotationTemplate
+/// - `QuotationTemplateId` - Type-safe ID wrapper
 /// - `SalesOrderDto` - Data transfer object for SalesOrder
 /// - `SalesOrderSummary` - Summary view of SalesOrder
 /// - `SalesOrderId` - Type-safe ID wrapper
@@ -46,9 +49,6 @@ pub use events::*;
 /// - `SalesPersonAllocationSummary` - Summary view of SalesPersonAllocation
 /// - `SalesPersonAllocationId` - Type-safe ID wrapper
 ///
-/// ## Public Services
-/// - `SellingQueryService` - Read-only queries
-///
 /// ## Public Events
 /// - `QuotationCreatedEvent` - Published when Quotation is created
 /// - `QuotationUpdatedEvent` - Published when Quotation is updated
@@ -56,6 +56,9 @@ pub use events::*;
 /// - `QuotationItemCreatedEvent` - Published when QuotationItem is created
 /// - `QuotationItemUpdatedEvent` - Published when QuotationItem is updated
 /// - `QuotationItemDeletedEvent` - Published when QuotationItem is deleted
+/// - `QuotationTemplateCreatedEvent` - Published when QuotationTemplate is created
+/// - `QuotationTemplateUpdatedEvent` - Published when QuotationTemplate is updated
+/// - `QuotationTemplateDeletedEvent` - Published when QuotationTemplate is deleted
 /// - `SalesOrderCreatedEvent` - Published when SalesOrder is created
 /// - `SalesOrderUpdatedEvent` - Published when SalesOrder is updated
 /// - `SalesOrderDeletedEvent` - Published when SalesOrder is deleted

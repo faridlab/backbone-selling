@@ -1,27 +1,24 @@
 //! Validated write path for selling (hand-authored, user-owned).
 //!
-//! Closes the CRUD-bypass: quotations/orders/invoices are transactional documents whose money
-//! must be internally consistent and whose GL post must balance. The generic 12-endpoint CRUD
-//! would let a caller write an invoice with mismatched `total`, no lines, or post it twice. Here
-//! the create paths compute line amounts + document totals server-side (2dp, round-half-up) and
-//! reject an empty document; header+lines are written in ONE transaction; `post_sales_invoice`
-//! builds a balanced revenue `AccountingPostEnvelope` (Dr A/R · Cr Revenue[per income account]
-//! · Cr PPN Output), emits it through the `GlPostSink`, and reconciles the invoice from the ack
-//! — idempotently.
+//! Closes the CRUD-bypass: quotations/orders are transactional documents whose money must be
+//! internally consistent. The generic 12-endpoint CRUD would let a caller write an order with a
+//! mismatched `total` or no lines. Here the create paths compute line amounts + document totals
+//! server-side (2dp, round-half-up) and reject an empty document; header+lines are written in ONE
+//! transaction. (Selling exited the invoice business — ADR-006; the AR invoice + revenue post are
+//! backbone-billing's, reached through the invoice seam.)
 //!
 //! **This file is the hub:** it holds the module's vocabulary (input structs, outcomes, errors),
 //! the money helpers, the document-pricing helper, the repository bag, and the constructors. The
 //! write surface is chunked into focused siblings, each an `impl SellingWriteService` block over
 //! these same types:
 //!
-//! - [`super::selling_quotation`] — `create_quotation`, `accept_quotation` (the quotation
-//!   lifecycle: draft → accepted).
+//! - [`super::selling_quotation`] — `create_quotation` (+ template stamping), `accept_quotation`,
+//!   and the quotation state machine (send / reject / cancel / re-draft).
 //! - [`super::selling_order`] — `create_sales_order`, `create_sales_order_priced` (the promo CART
-//!   seam, ADR-002), `confirm_sales_order`, `convert_quotation_to_order`, `sales_order_ref`.
-//! - [`super::selling_invoice_create`] — `create_sales_invoice`, `create_invoice_from_order`.
-//! - [`super::selling_invoice_post`] — `build_revenue_post`, `post_sales_invoice`; owns the
-//!   billing-watermark advance and the shared `pub(super) recompute_order_status` used by the
-//!   delivery/invoice seams.
+//!   seam, ADR-002), `confirm_sales_order`, `convert_quotation_to_order`, `sales_order_ref`,
+//!   `cancel_sales_order`, `update_order_line` (the order lock).
+//! - [`super::selling_invoice_policy`] — the invoicing-policy engine: the pure per-line
+//!   `qty_to_invoice` / `invoice_status` compute and the two invoice-status read models.
 //! - [`super::selling_delivery_seam`] — `build_delivery_request`, `mark_delivered`.
 //! - [`super::selling_invoice_seam`] — `build_invoice_request`, `mark_invoiced` (order-to-cash
 //!   mirror; capacity-checked `FOR UPDATE` allocation rejects `OverBilled`).
@@ -33,8 +30,10 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::domain::entity::InvoicePolicy;
 use crate::infrastructure::persistence::{
-    QuotationItemRepository, QuotationRepository, SalesOrderItemRepository, SalesOrderRepository,
+    QuotationItemRepository, QuotationRepository, QuotationTemplateRepository,
+    SalesOrderItemRepository, SalesOrderRepository,
 };
 
 use super::selling_events::{LoggingSink, SellingEventSink};
@@ -55,6 +54,12 @@ pub struct NewLine {
     pub quantity: Decimal,
     pub unit_price: Decimal,
     pub line_discount: Decimal,
+    /// When this line's quantity becomes invoiceable (`None` ⇒ `order`). Carried onto the order
+    /// line at conversion; consumed by the policy engine + the billing watermark bound.
+    pub invoice_policy: Option<InvoicePolicy>,
+    /// Downpayment advance line (`None` ⇒ `false`): stays on the quantity basis for billing but is
+    /// excluded from the order invoice-status aggregation.
+    pub is_downpayment: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +73,11 @@ pub struct NewQuotation {
     pub currency: Option<String>,
     pub tax_rate: Decimal,
     pub notes: Option<String>,
+    /// Deal's opportunity this quotation came from (logical link; the host passes it).
+    pub opportunity_id: Option<Uuid>,
+    /// Template whose validity window + default notes stamp this quotation when the caller
+    /// supplied none. Create-time input only — the template itself is not persisted on the quote.
+    pub template_id: Option<Uuid>,
     pub lines: Vec<NewLine>,
 }
 
@@ -135,6 +145,20 @@ pub enum SellingError {
     /// it the rollup's `delivered_qty >= quantity` silently masks an over-delivery as the delivered
     /// band, and `completed` can become true for stock that was never ordered.
     OverDelivered,
+    /// A state-machine verb was called from a state its transition does not allow. The message
+    /// names the verb and the current state so the refusal is loud, not a silent no-op.
+    InvalidTransition { verb: String, current: String },
+    /// Cancelling a quotation that an order was already derived from. A confirmed order must never
+    /// be orphaned by resetting its source quotation.
+    QuotationOrdered(Uuid),
+    /// Cancelling an order with a billed line. Posted invoices are never cancelled — credit notes
+    /// are the correction path.
+    OrderBilled,
+    /// Mutating a frozen field (item/qty/price/discount) of an order line whose order is no longer
+    /// a draft. The order lock: confirmed demand is not silently re-priced.
+    OrderLineFrozen,
+    TemplateNotFound(Uuid),
+    TemplateDuplicate(String),
     PricingRejected { code: String, message: String },
     Db(sqlx::Error),
     Outbox(String),
@@ -152,6 +176,12 @@ impl SellingError {
             SellingError::NotDraft(_) => "not_draft".into(),
             SellingError::OverBilled => "over_billed".into(),
             SellingError::OverDelivered => "over_delivered".into(),
+            SellingError::InvalidTransition { .. } => "invalid_transition".into(),
+            SellingError::QuotationOrdered(_) => "quotation_ordered".into(),
+            SellingError::OrderBilled => "order_billed".into(),
+            SellingError::OrderLineFrozen => "order_line_frozen".into(),
+            SellingError::TemplateNotFound(_) => "template_not_found".into(),
+            SellingError::TemplateDuplicate(_) => "duplicate_template_name".into(),
             SellingError::PricingRejected { code, .. } => code.clone(),
             SellingError::Db(_) => "internal_error".into(),
             SellingError::Outbox(_) => "outbox_error".into(),
@@ -170,6 +200,25 @@ impl SellingError {
 impl std::fmt::Display for SellingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            SellingError::InvalidTransition { verb, current } => write!(
+                f,
+                "{verb}: transition not allowed from current state '{current}'"
+            ),
+            SellingError::QuotationOrdered(_) => write!(
+                f,
+                "an order was derived from this quotation; it cannot be cancelled"
+            ),
+            SellingError::OrderBilled => write!(
+                f,
+                "posted invoices are never cancelled: this order has a billed line"
+            ),
+            SellingError::OrderLineFrozen => write!(
+                f,
+                "order is confirmed: only the description may change on its lines"
+            ),
+            SellingError::TemplateDuplicate(name) => {
+                write!(f, "a quotation template named '{name}' already exists")
+            }
             other => write!(f, "{}", other.code()),
         }
     }
@@ -193,6 +242,8 @@ pub(super) struct PricedLine {
     pub(super) unit_price: Decimal,
     pub(super) line_discount: Decimal,
     pub(super) line_amount: Decimal,
+    pub(super) invoice_policy: InvoicePolicy,
+    pub(super) is_downpayment: bool,
 }
 
 /// Compute `line_amount = money(qty*price) - discount` per line and the document totals
@@ -220,6 +271,8 @@ pub(super) fn price_document(lines: &[NewLine], tax_rate: Decimal) -> Result<(Ve
             unit_price: l.unit_price,
             line_discount: money(l.line_discount),
             line_amount,
+            invoice_policy: l.invoice_policy.unwrap_or(InvoicePolicy::Order),
+            is_downpayment: l.is_downpayment.unwrap_or(false),
         });
     }
     let subtotal = money(subtotal);
@@ -228,14 +281,15 @@ pub(super) fn price_document(lines: &[NewLine], tax_rate: Decimal) -> Result<(Ve
     Ok((priced, subtotal, tax_amount, total))
 }
 
-/// The four document repositories this service orchestrates (quotations + orders, each with line
-/// children). Held behind `Arc` so the service stays `Clone` (the repositories are not `Clone`
-/// themselves) without re-building them per call. (SalesInvoice repositories lived here before
-/// selling exited the invoice business — ADR-006.)
+/// The five repositories this service orchestrates (quotations + orders, each with line children,
+/// plus the quotation-template master). Held behind `Arc` so the service stays `Clone` (the
+/// repositories are not `Clone` themselves) without re-building them per call. (SalesInvoice
+/// repositories lived here before selling exited the invoice business — ADR-006.)
 #[derive(Clone)]
 pub(super) struct SellingRepos {
     pub(super) quotations: Arc<QuotationRepository>,
     pub(super) quotation_items: Arc<QuotationItemRepository>,
+    pub(super) templates: Arc<QuotationTemplateRepository>,
     pub(super) orders: Arc<SalesOrderRepository>,
     pub(super) order_items: Arc<SalesOrderItemRepository>,
 }
@@ -245,6 +299,7 @@ impl SellingRepos {
         Self {
             quotations: Arc::new(QuotationRepository::new(pool.clone())),
             quotation_items: Arc::new(QuotationItemRepository::new(pool.clone())),
+            templates: Arc::new(QuotationTemplateRepository::new(pool.clone())),
             orders: Arc::new(SalesOrderRepository::new(pool.clone())),
             order_items: Arc::new(SalesOrderItemRepository::new(pool.clone())),
         }

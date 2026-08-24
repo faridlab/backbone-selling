@@ -7,6 +7,35 @@ the date the change was applied.
 
 ## [Unreleased]
 
+### Added — the invoicing-policy engine, the quotation machine, and the order's exits ([ADR-007], 2026-08-24)
+
+Odoo `sale.order` semantics, adapted. Per-line invoicing policy (`order` — default — or
+`delivery`), computed invoiceability, downpayment lines, a full quotation state machine, order
+cancel + line-freeze guards, quotation templates, and the opportunity link:
+
+- **Added (schema + migration `20260824000100_selling_invoice_policy_and_templates`):**
+  `invoice_policy` + `is_downpayment` on quotation and order lines, `status_reason` +
+  `opportunity_id` on quotations, the `QuotationTemplate` master (RLS-fenced,
+  unique `(company_id, name)`), the `invoice_policy` enum.
+- **Added (public API):** `SellingWriteService::{send_quotation, reject_quotation,
+  cancel_quotation, redraft_quotation, cancel_sales_order, update_order_line,
+  order_invoice_view, quotation_invoice_view, create_quotation_template,
+  list_quotation_templates}`; the `QuotationSent` / `QuotationRejected` / `QuotationCancelled` /
+  `QuotationReDrafted` / `SalesOrderCancelled` events; the four invoice-status read DTOs.
+- **Added (routes):** `POST /quotations/{send,re-draft,reject,cancel}`,
+  `POST /sales-orders/cancel`, `PATCH /sales-orders/lines/:id`,
+  `GET {/sales-orders,/quotations}/:id/invoice-status`, `POST+GET /quotation-templates` — all
+  tenant-scoped behind `company_auth`.
+- **The single-source invariant:** `qty_to_invoice` / invoice-status / the billing remainder / the
+  billed-watermark bound / the status rollup all consume ONE canonical basis
+  (`delivery ⇒ delivered_qty`, else `quantity`), so delivery-policy orders no longer strand in
+  `to_deliver_and_bill`. `qty_to_invoice` / `invoice_status` are read-time computes — never
+  persisted, not writable.
+- **Breaking (error surface):** the hook spec's invoice-era rules R3/R4/R6/R7 (and the stale
+  SalesInvoice machine + events) are removed per ADR-006's retirement; new stable codes
+  `invalid_transition`, `quotation_ordered`, `order_billed`, `order_line_frozen`,
+  `template_not_found`, `duplicate_template_name` (all 422).
+
 ### Fixed — the migration chain applies cleanly to a fresh database (2026-08-23)
 
 The invoice-business exit ([ADR-006]) removed the `sales_invoices` / `sales_invoice_items` tables

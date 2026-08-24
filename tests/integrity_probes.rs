@@ -215,3 +215,150 @@ async fn body_company_id_cannot_override_the_token_tenant() {
     assert_eq!(persisted, token_company, "tenant must come from the token, not the body");
     assert_ne!(persisted, attacker_company, "the body's companyId must be ignored");
 }
+
+// IGC-6: the quotation-template master is exposed on the guarded surface — create, list, and the
+// per-tenant duplicate-name refusal (422 `duplicate_template_name`, never a silent merge).
+#[tokio::test]
+async fn template_routes_create_list_and_refuse_duplicates() {
+    let pool = pool().await;
+    let m = module(&pool).await;
+    let company = uuid::Uuid::new_v4();
+    let name = uq("Standard offer");
+
+    let (status, body) = req_as(
+        app(&pool, &m), company, "POST", "/quotation-templates",
+        Some(format!(r#"{{"name":"{name}","validityDays":21,"defaultNotes":"Excludes VAT."}}"#)),
+    ).await;
+    assert_eq!(status, StatusCode::CREATED, "template create: {body}");
+    let id: Uuid = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"].as_str().unwrap().parse().unwrap();
+
+    let (status, body) = req_as(app(&pool, &m), company, "GET", "/quotation-templates", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let list: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let found = list.as_array().unwrap().iter().find(|t| t["id"] == id.to_string()).expect("listed");
+    assert_eq!(found["validityDays"], 21);
+    assert_eq!(found["name"], name);
+
+    let (status, body) = req_as(
+        app(&pool, &m), company, "POST", "/quotation-templates",
+        Some(format!(r#"{{"name":"{name}"}}"#)),
+    ).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "duplicate name must refuse 422: {body}");
+    assert!(body.contains("duplicate_template_name"));
+
+    // A template never crosses tenants on the wire.
+    let (status, _) = req_as(
+        app(&pool, &m), uuid::Uuid::new_v4(), "POST", "/quotation-templates",
+        Some(format!(r#"{{"name":"{name}"}}"#)),
+    ).await;
+    assert_eq!(status, StatusCode::CREATED, "the unique index is per company");
+}
+
+// IGC-7: the invoicing-policy read model is served by its guarded route with the computed fields in
+// camelCase — `qtyToInvoice`/`invoiceStatus` are read-time computes; no write route accepts them.
+#[tokio::test]
+async fn invoice_status_route_serves_the_policy_compute() {
+    let pool = pool().await;
+    let m = module(&pool).await;
+    let company = uuid::Uuid::new_v4();
+    let item = uuid::Uuid::new_v4();
+
+    let body = format!(
+        r#"{{"orderNumber":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
+             "lines":[{{"itemId":"{item}","quantity":"10","unitPrice":"1000","invoicePolicy":"delivery"}}]}}"#,
+        uq("SO"), uuid::Uuid::new_v4(),
+    );
+    let (status, created) = req_as(app(&pool, &m), company, "POST", "/sales-orders", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let order_id: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
+    let (status, _) = req_as(
+        app(&pool, &m), company, "POST", "/sales-orders/confirm",
+        Some(format!(r#"{{"orderId":"{order_id}"}}"#)),
+    ).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = req_as(app(&pool, &m), company, "GET", &format!("/sales-orders/{order_id}/invoice-status"), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let view: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(view["invoiceStatus"], "no", "delivery policy with zero delivery: nothing billable");
+    assert_eq!(view["lines"][0]["invoicePolicy"], "delivery");
+    assert_eq!(view["lines"][0]["qtyToInvoice"], "0");
+    assert_eq!(view["lines"][0]["invoiceStatus"], "no");
+}
+
+// IGC-8: the order-line freeze holds through the route — on a confirmed order a priced-field PATCH
+// refuses 422 `order_line_frozen` while a description-only PATCH succeeds.
+#[tokio::test]
+async fn line_freeze_holds_through_the_route() {
+    let pool = pool().await;
+    let m = module(&pool).await;
+    let company = uuid::Uuid::new_v4();
+    let item = uuid::Uuid::new_v4();
+
+    let body = format!(
+        r#"{{"orderNumber":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
+             "lines":[{{"itemId":"{item}","quantity":"10","unitPrice":"1000"}}]}}"#,
+        uq("SO"), uuid::Uuid::new_v4(),
+    );
+    let (status, created) = req_as(app(&pool, &m), company, "POST", "/sales-orders", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let order_id: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
+    req_as(app(&pool, &m), company, "POST", "/sales-orders/confirm",
+        Some(format!(r#"{{"orderId":"{order_id}"}}"#))).await;
+    let line_id: Uuid = sqlx::query_scalar("SELECT id FROM selling.sales_order_items WHERE order_id=$1")
+        .bind(order_id).fetch_one(&pool).await.unwrap();
+
+    let (status, body) = req_as(
+        app(&pool, &m), company, "PATCH", &format!("/sales-orders/lines/{line_id}"),
+        Some(r#"{"quantity":"5"}"#.into()),
+    ).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "frozen field must refuse: {body}");
+    assert!(body.contains("order_line_frozen"));
+
+    let (status, _) = req_as(
+        app(&pool, &m), company, "PATCH", &format!("/sales-orders/lines/{line_id}"),
+        Some(r#"{"description":"relabeled"}"#.into()),
+    ).await;
+    assert_eq!(status, StatusCode::OK, "description stays editable after confirmation");
+}
+
+// IGT-5: the machine verbs are tenant-scoped — a principal of company A cannot move company B's
+// quotation through its lifecycle by knowing the id.
+#[tokio::test]
+async fn a_principal_cannot_send_another_tenants_quotation() {
+    let pool = pool().await;
+    let m = module(&pool).await;
+    let victim = uuid::Uuid::new_v4();
+    let attacker = uuid::Uuid::new_v4();
+
+    let (status, created) = req_as(
+        app(&pool, &m), victim, "POST", "/quotations",
+        Some(format!(
+            r#"{{"quotationNumber":"{}","customerId":"{}","quotationDate":"2026-07-03","taxRate":"0",
+                 "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
+            uq("QUO"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
+        )),
+    ).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let qid: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
+
+    for (uri, body) in [
+        ("/quotations/send", format!(r#"{{"quotationId":"{qid}"}}"#)),
+        ("/quotations/cancel", format!(r#"{{"quotationId":"{qid}"}}"#)),
+        ("/quotations/re-draft", format!(r#"{{"quotationId":"{qid}"}}"#)),
+    ] {
+        let (status, _) = req_as(app(&pool, &m), attacker, "POST", uri, Some(body)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "a foreign machine verb must not find the quotation");
+    }
+    // the victim's quotation is untouched.
+    let st: String = sqlx::query_scalar("SELECT status::text FROM selling.quotations WHERE id=$1")
+        .bind(qid).fetch_one(&pool).await.unwrap();
+    assert_eq!(st, "draft");
+
+    // and the owner's own verb works through the route.
+    let (status, _) = req_as(
+        app(&pool, &m), victim, "POST", "/quotations/send",
+        Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
+    ).await;
+    assert_eq!(status, StatusCode::OK);
+}

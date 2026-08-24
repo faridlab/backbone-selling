@@ -59,7 +59,7 @@ pub struct SalesTeam {
 impl SalesTeam {
     /// Create a builder for SalesTeam
     pub fn builder() -> SalesTeamBuilder {
-        SalesTeamBuilder::default()
+        <SalesTeamBuilder as Default>::default()
     }
 
     /// Create a new SalesTeam with required fields

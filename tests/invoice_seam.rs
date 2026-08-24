@@ -92,7 +92,7 @@ async fn journal_totals(pool: &PgPool, jid: Uuid) -> (Decimal, Decimal) {
     (r.get("total_debit"), r.get("total_credit"))
 }
 fn line(item: Uuid, qty: &str) -> NewLine {
-    NewLine { item_id: item, revenue_account_id: None, description: None, quantity: d(qty), unit_price: d("100000"), line_discount: Decimal::ZERO }
+    NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None, quantity: d(qty), unit_price: d("100000"), line_discount: Decimal::ZERO }
 }
 async fn confirmed_order(selling: &SellingWriteService, company: Uuid, lines: Vec<NewLine>) -> Uuid {
     let order = selling.create_sales_order(NewSalesOrder {
@@ -161,7 +161,7 @@ async fn order_invoiced_across_three_modules() {
     let order = selling.create_sales_order(NewSalesOrder {
         order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None, customer_id: customer,
         order_date: day(), delivery_date: None, currency: None, tax_rate: Decimal::ZERO, notes: None,
-        lines: vec![NewLine { item_id: item, revenue_account_id: None, description: None, quantity: d("10"), unit_price: d("100000"), line_discount: Decimal::ZERO }],
+        lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None, quantity: d("10"), unit_price: d("100000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
     selling.confirm_sales_order(order, company).await.unwrap();
 

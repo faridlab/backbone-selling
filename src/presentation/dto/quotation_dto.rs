@@ -64,6 +64,11 @@ pub struct CreateQuotationDto {
     #[cfg_attr(feature = "validation", validate(length(max = 1000)))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "opportunity_id")]
+    pub opportunity_id: Option<Uuid>,
+    #[cfg_attr(feature = "validation", validate(length(max = 500)))]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "status_reason")]
+    pub status_reason: Option<String>,
 }
 
 // =============================================================================
@@ -109,6 +114,11 @@ pub struct UpdateQuotationDto {
     #[cfg_attr(feature = "validation", validate(length(max = 1000)))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "opportunity_id")]
+    pub opportunity_id: Option<Uuid>,
+    #[cfg_attr(feature = "validation", validate(length(max = 500)))]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "status_reason")]
+    pub status_reason: Option<String>,
 }
 
 // =============================================================================
@@ -158,12 +168,17 @@ pub struct PatchQuotationDto {
     #[cfg_attr(feature = "validation", validate(length(max = 1000)))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "opportunity_id")]
+    pub opportunity_id: Option<Uuid>,
+    #[cfg_attr(feature = "validation", validate(length(max = 500)))]
+    #[serde(skip_serializing_if = "Option::is_none", alias = "status_reason")]
+    pub status_reason: Option<String>,
 }
 
 impl PatchQuotationDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.quotation_number.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.quotation_date.is_some() || self.valid_until.is_some() || self.currency.is_some() || self.subtotal.is_some() || self.tax_rate.is_some() || self.tax_amount.is_some() || self.total.is_some() || self.notes.is_some()
+        self.quotation_number.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.quotation_date.is_some() || self.valid_until.is_some() || self.currency.is_some() || self.subtotal.is_some() || self.tax_rate.is_some() || self.tax_amount.is_some() || self.total.is_some() || self.notes.is_some() || self.opportunity_id.is_some() || self.status_reason.is_some()
     }
 }
 
@@ -199,6 +214,8 @@ pub struct QuotationResponseDto {
     pub tax_amount: Decimal,
     pub total: Decimal,
     pub notes: Option<String>,
+    pub opportunity_id: Option<Uuid>,
+    pub status_reason: Option<String>,
     pub metadata: AuditMetadata,
 }
 
@@ -283,6 +300,8 @@ impl From<Quotation> for QuotationResponseDto {
             tax_amount: entity.tax_amount,
             total: entity.total,
             notes: entity.notes,
+            opportunity_id: entity.opportunity_id,
+            status_reason: entity.status_reason,
             metadata: entity.metadata,
         }
     }
@@ -318,6 +337,8 @@ impl From<CreateQuotationDto> for Quotation {
             tax_amount: dto.tax_amount,
             total: dto.total,
             notes: dto.notes,
+            opportunity_id: dto.opportunity_id,
+            status_reason: dto.status_reason,
             metadata: AuditMetadata::default(),
         }
     }
@@ -340,6 +361,8 @@ impl From<&Quotation> for QuotationResponseDto {
             tax_amount: entity.tax_amount.clone(),
             total: entity.total.clone(),
             notes: entity.notes.clone(),
+            opportunity_id: entity.opportunity_id.clone(),
+            status_reason: entity.status_reason.clone(),
             metadata: entity.metadata.clone(),
         }
     }
@@ -366,6 +389,8 @@ impl backbone_core::ApplyUpdateDto<UpdateQuotationDto> for Quotation {
         self.tax_amount = dto.tax_amount;
         self.total = dto.total;
         self.notes = dto.notes;
+        self.opportunity_id = dto.opportunity_id;
+        self.status_reason = dto.status_reason;
         Ok(self)
     }
 }

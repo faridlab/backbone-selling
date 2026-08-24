@@ -97,6 +97,19 @@ pub struct OrderFulfillmentHeaderRow {
     pub status: String,
 }
 
+/// The post-refusal classification read for `cancel_sales_order`: the order's state plus whether
+/// any live line carries a billed quantity — the two distinct refusal reasons.
+pub struct CancelRefusalRow {
+    pub status: String,
+    pub has_billed: bool,
+}
+
+/// The order header the invoice-status read model aggregates under.
+pub struct InvoiceStatusHeaderRow {
+    pub order_number: String,
+    pub status: String,
+}
+
 /// Hand-written SalesOrder SQL. Lives here (not in the write service) per the module's 4-layer rule:
 /// services orchestrate and own the unit of work, repositories hold the SQL.
 impl SalesOrderRepository {
@@ -250,6 +263,111 @@ impl SalesOrderRepository {
             )
             .bind(order_id).bind(next),
         ).await?;
+        Ok(())
+    }
+
+    /// Cancel an order (draft/to_deliver/to_bill/to_deliver_and_bill → cancelled) in ONE atomic
+    /// statement: the `NOT EXISTS` billed-lines subquery runs inside the same `UPDATE` as the flip,
+    /// so a racing `mark_invoiced` (whose allocation takes `FOR UPDATE` on these same order lines)
+    /// cannot slip a billed quantity between the check and the flip. Posted invoices are never
+    /// cancelled. `Ok(None)` = guard refused (wrong state, wrong tenant, billed, or absent).
+    pub async fn cancel(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<Option<ConfirmedOrderRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"UPDATE selling.sales_orders SET status='cancelled'::sales_order_status
+                   WHERE id=$1 AND company_id=$2
+                     AND status = ANY(ARRAY['draft','to_deliver','to_bill','to_deliver_and_bill']::sales_order_status[])
+                     AND (metadata->>'deleted_at') IS NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM selling.sales_order_items soi
+                       WHERE soi.order_id = $1 AND soi.billed_qty > 0
+                         AND (soi.metadata->>'deleted_at') IS NULL)
+                   RETURNING company_id, customer_id, total, currency"#,
+            )
+            .bind(order_id).bind(company_id),
+        ).await?;
+        Ok(row.map(|r| ConfirmedOrderRow {
+            company_id: r.get("company_id"),
+            customer_id: r.get("customer_id"),
+            total: r.get("total"),
+            currency: r.get("currency"),
+        }))
+    }
+
+    /// Post-refusal classification read for `cancel_sales_order`: current state + whether a live
+    /// line is billed. `Ok(None)` = not found / wrong tenant.
+    pub async fn find_cancel_refusal(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<Option<CancelRefusalRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT o.status::text AS st,
+                          EXISTS(SELECT 1 FROM selling.sales_order_items soi
+                                 WHERE soi.order_id = o.id AND soi.billed_qty > 0
+                                   AND (soi.metadata->>'deleted_at') IS NULL) AS has_billed
+                   FROM selling.sales_orders o
+                   WHERE o.id=$1 AND o.company_id=$2 AND (o.metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(order_id).bind(company_id),
+        ).await?;
+        Ok(row.map(|r| CancelRefusalRow {
+            status: r.get("st"),
+            has_billed: r.get("has_billed"),
+        }))
+    }
+
+    /// Read the header the invoice-status read model aggregates under. ID-only, same scoping as
+    /// [`Self::find_ref`].
+    pub async fn find_invoice_status_header(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<Option<InvoiceStatusHeaderRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT order_number, status::text AS st FROM selling.sales_orders
+                   WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(row.map(|r| InvoiceStatusHeaderRow {
+            order_number: r.get("order_number"),
+            status: r.get("st"),
+        }))
+    }
+
+    /// Recompute the order header's money columns from its live line set (draft-only line edits).
+    /// `line_amount` is per-line money (2dp), so the sum is already 2dp; the tax round mirrors the
+    /// write path's half-away-from-zero money convention.
+    pub async fn recompute_totals_from_lines(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        order_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"UPDATE selling.sales_orders o
+               SET subtotal = s.sub,
+                   tax_amount = round(s.sub * o.tax_rate / 100, 2),
+                   total = s.sub + round(s.sub * o.tax_rate / 100, 2)
+               FROM (SELECT COALESCE(SUM(line_amount), 0) AS sub
+                     FROM selling.sales_order_items
+                     WHERE order_id = $1 AND (metadata->>'deleted_at') IS NULL) s
+               WHERE o.id = $1"#,
+        )
+        .bind(order_id)
+        .execute(conn)
+        .await?;
         Ok(())
     }
 }

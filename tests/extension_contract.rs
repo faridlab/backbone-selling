@@ -33,7 +33,7 @@ async fn make_order(w: &SellingWriteService, company: Uuid, customer: Uuid, tota
         order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None,
         customer_id: customer, order_date: day(2026, 7, 3), delivery_date: None, currency: None,
         tax_rate: Decimal::ZERO, notes: None,
-        lines: vec![NewLine { item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
+        lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
             quantity: d("1"), unit_price: d(total_price), line_discount: Decimal::ZERO }],
     }).await.unwrap()
 }

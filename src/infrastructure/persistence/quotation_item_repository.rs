@@ -43,6 +43,8 @@ impl QuotationItemRepository {
 ///
 /// Mirrors the raw column shape rather than the `QuotationItem` entity: `line_amount` is already
 /// server-computed by the write service's `price_document` and is stored, not re-derived.
+/// `invoice_policy` binds as `&str` with a DB-side `::invoice_policy` cast (hand-written SQL never
+/// decodes/encodes the custom enum in Rust — the fleet's enum-bind lesson).
 pub struct NewQuotationItemRow<'a> {
     pub id: Uuid,
     pub quotation_id: Uuid,
@@ -53,16 +55,31 @@ pub struct NewQuotationItemRow<'a> {
     pub unit_price: Decimal,
     pub line_discount: Decimal,
     pub line_amount: Decimal,
+    pub invoice_policy: &'a str,
+    pub is_downpayment: bool,
 }
 
 /// One quotation line as `convert_quotation_to_order` copies it. `line_amount` is deliberately absent:
 /// the new order re-prices from (qty, price, discount) rather than trusting the quotation's total.
+/// The invoicing policy + downpayment flag ride along — conversion preserves the billing intent.
 pub struct QuotationLineRow {
     pub item_id: Uuid,
     pub description: Option<String>,
     pub quantity: Decimal,
     pub unit_price: Decimal,
     pub line_discount: Decimal,
+    pub invoice_policy: String,
+    pub is_downpayment: bool,
+}
+
+/// One quotation line as the invoice-status read model loads it (policy + flags surfaced for what
+/// conversion will carry onto the order).
+pub struct InvoicePolicyLineRow {
+    pub id: Uuid,
+    pub item_id: Uuid,
+    pub invoice_policy: String,
+    pub is_downpayment: bool,
+    pub quantity: Decimal,
 }
 
 /// Hand-written QuotationItem SQL. Lives here (not in the write service) per the module's 4-layer rule.
@@ -78,11 +95,13 @@ impl QuotationItemRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.quotation_items
-                (id, quotation_id, company_id, item_id, description, quantity, unit_price, line_discount, line_amount)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)"#,
+                (id, quotation_id, company_id, item_id, description, quantity, unit_price,
+                 line_discount, line_amount, invoice_policy, is_downpayment)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::invoice_policy,$11)"#,
         )
         .bind(l.id).bind(l.quotation_id).bind(l.company_id).bind(l.item_id).bind(l.description)
         .bind(l.quantity).bind(l.unit_price).bind(l.line_discount).bind(l.line_amount)
+        .bind(l.invoice_policy).bind(l.is_downpayment)
         .execute(conn)
         .await?;
         Ok(())
@@ -100,7 +119,8 @@ impl QuotationItemRepository {
         let rows = company_scope::fetch_all_rows_scoped(
             pool,
             sqlx::query(
-                r#"SELECT item_id, description, quantity, unit_price, line_discount
+                r#"SELECT item_id, description, quantity, unit_price, line_discount,
+                          invoice_policy::text AS pol, is_downpayment
                    FROM selling.quotation_items WHERE quotation_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
             .bind(quotation_id),
@@ -111,6 +131,34 @@ impl QuotationItemRepository {
             quantity: r.get("quantity"),
             unit_price: r.get("unit_price"),
             line_discount: r.get("line_discount"),
+            invoice_policy: r.get("pol"),
+            is_downpayment: r.get("is_downpayment"),
+        }).collect())
+    }
+
+    /// Read a quotation's lines for the invoice-status read model. Quotation lines carry no
+    /// watermarks — this surfaces the policy + downpayment flags conversion will carry. ID-only,
+    /// same scoping as [`Self::list_for_conversion`].
+    pub async fn list_policy_rows(
+        &self,
+        pool: &PgPool,
+        quotation_id: Uuid,
+    ) -> Result<Vec<InvoicePolicyLineRow>, sqlx::Error> {
+        let rows = company_scope::fetch_all_rows_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT id, item_id, invoice_policy::text AS pol, is_downpayment, quantity
+                   FROM selling.quotation_items
+                   WHERE quotation_id=$1 AND (metadata->>'deleted_at') IS NULL ORDER BY id"#,
+            )
+            .bind(quotation_id),
+        ).await?;
+        Ok(rows.iter().map(|r| InvoicePolicyLineRow {
+            id: r.get("id"),
+            item_id: r.get("item_id"),
+            invoice_policy: r.get("pol"),
+            is_downpayment: r.get("is_downpayment"),
+            quantity: r.get("quantity"),
         }).collect())
     }
 }

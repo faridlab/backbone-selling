@@ -19,6 +19,7 @@ use validator::Validate;
 
 use crate::domain::entity::QuotationItem;
 use crate::domain::entity::AuditMetadata;
+use crate::domain::entity::InvoicePolicy;
 
 // =============================================================================
 // Create DTO
@@ -52,6 +53,11 @@ pub struct CreateQuotationItemDto {
     pub line_discount: Decimal,
     #[serde(alias = "line_amount")]
     pub line_amount: Decimal,
+    #[serde(alias = "invoice_policy")]
+    pub invoice_policy: InvoicePolicy,
+    #[cfg_attr(feature = "openapi", schema(example = true))]
+    #[serde(alias = "is_downpayment")]
+    pub is_downpayment: bool,
 }
 
 // =============================================================================
@@ -86,6 +92,11 @@ pub struct UpdateQuotationItemDto {
     pub line_discount: Decimal,
     #[serde(alias = "line_amount")]
     pub line_amount: Decimal,
+    #[serde(alias = "invoice_policy")]
+    pub invoice_policy: InvoicePolicy,
+    #[cfg_attr(feature = "openapi", schema(example = true))]
+    #[serde(alias = "is_downpayment")]
+    pub is_downpayment: bool,
 }
 
 // =============================================================================
@@ -121,12 +132,17 @@ pub struct PatchQuotationItemDto {
     pub line_discount: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "line_amount")]
     pub line_amount: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "invoice_policy")]
+    pub invoice_policy: Option<InvoicePolicy>,
+    #[cfg_attr(feature = "openapi", schema(example = true))]
+    #[serde(skip_serializing_if = "Option::is_none", alias = "is_downpayment")]
+    pub is_downpayment: Option<bool>,
 }
 
 impl PatchQuotationItemDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.quotation_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some()
+        self.quotation_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.invoice_policy.is_some() || self.is_downpayment.is_some()
     }
 }
 
@@ -155,6 +171,9 @@ pub struct QuotationItemResponseDto {
     pub unit_price: Decimal,
     pub line_discount: Decimal,
     pub line_amount: Decimal,
+    pub invoice_policy: InvoicePolicy,
+    #[cfg_attr(feature = "openapi", schema(example = true))]
+    pub is_downpayment: bool,
     pub metadata: AuditMetadata,
 }
 
@@ -234,6 +253,8 @@ impl From<QuotationItem> for QuotationItemResponseDto {
             unit_price: entity.unit_price,
             line_discount: entity.line_discount,
             line_amount: entity.line_amount,
+            invoice_policy: entity.invoice_policy,
+            is_downpayment: entity.is_downpayment,
             metadata: entity.metadata,
         }
     }
@@ -264,6 +285,8 @@ impl From<CreateQuotationItemDto> for QuotationItem {
             unit_price: dto.unit_price,
             line_discount: dto.line_discount,
             line_amount: dto.line_amount,
+            invoice_policy: dto.invoice_policy,
+            is_downpayment: dto.is_downpayment,
             metadata: AuditMetadata::default(),
         }
     }
@@ -281,6 +304,8 @@ impl From<&QuotationItem> for QuotationItemResponseDto {
             unit_price: entity.unit_price.clone(),
             line_discount: entity.line_discount.clone(),
             line_amount: entity.line_amount.clone(),
+            invoice_policy: entity.invoice_policy.clone(),
+            is_downpayment: entity.is_downpayment.clone(),
             metadata: entity.metadata.clone(),
         }
     }
@@ -302,6 +327,8 @@ impl backbone_core::ApplyUpdateDto<UpdateQuotationItemDto> for QuotationItem {
         self.unit_price = dto.unit_price;
         self.line_discount = dto.line_discount;
         self.line_amount = dto.line_amount;
+        self.invoice_policy = dto.invoice_policy;
+        self.is_downpayment = dto.is_downpayment;
         Ok(self)
     }
 }

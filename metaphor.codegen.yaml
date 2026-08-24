@@ -23,22 +23,22 @@ user_owned:
   # money/price helpers, the repository bag) stays in selling_write_service.rs.
   - "src/application/service/selling_quotation.rs"
   - "src/application/service/selling_order.rs"
-  - "src/application/service/selling_invoice_create.rs"
-  - "src/application/service/selling_invoice_post.rs"
+  - "src/application/service/selling_invoice_policy.rs"
   - "src/application/service/selling_delivery_seam.rs"
   - "src/application/service/selling_invoice_seam.rs"
   - "src/presentation/http/guarded_routes.rs"
 
-  # The four document repositories own the hand-written selling SQL that the write service
+  # The five document repositories own the hand-written selling SQL that the write service
   # orchestrates (the header+lines inserts, the guarded state transitions, the fulfillment
-  # watermarks, the FOR UPDATE billing allocation). Declared here — not renamed with a `_custom`
-  # suffix — so the generator skips them wholesale; this declaration is what makes editing them
-  # legitimate. (The two SalesInvoice repositories were removed when selling exited the invoice
-  # business — ADR-006.)
+  # watermarks, the FOR UPDATE billing allocation, the template master). Declared here — not
+  # renamed with a `_custom` suffix — so the generator skips them wholesale; this declaration is
+  # what makes editing them legitimate. (The two SalesInvoice repositories were removed when
+  # selling exited the invoice business — ADR-006.)
   - "src/infrastructure/persistence/quotation_repository.rs"
   - "src/infrastructure/persistence/quotation_item_repository.rs"
   - "src/infrastructure/persistence/sales_order_repository.rs"
   - "src/infrastructure/persistence/sales_order_item_repository.rs"
+  - "src/infrastructure/persistence/quotation_template_repository.rs"
 
   # Behavior tests (the golden oracle) + route probes + seam + extension-contract round-trip + BDD.
   - "tests/selling_golden_cases.rs"
@@ -49,6 +49,8 @@ user_owned:
   - "tests/delivery_seam.rs"
   - "tests/delivery_outbox_durability.rs"
   - "tests/invoice_seam.rs"
+  - "tests/quotation_machine.rs"
+  - "tests/invoice_policy_compute.rs"
   - "tests/features/**"
 
   # Per-entity CRUD integration harness. Frozen as user_owned so hand cleanups persist across regen.

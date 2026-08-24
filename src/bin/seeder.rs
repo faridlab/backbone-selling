@@ -14,6 +14,7 @@ use std::env;
 // Import seeders
 use backbone_selling::seeders::SeedQuotationSeeder;
 use backbone_selling::seeders::SeedQuotationItemSeeder;
+use backbone_selling::seeders::SeedQuotationTemplateSeeder;
 use backbone_selling::seeders::SeedSalesOrderSeeder;
 use backbone_selling::seeders::SeedSalesOrderItemSeeder;
 use backbone_selling::seeders::SeedSalesTeamSeeder;
@@ -30,7 +31,7 @@ async fn main() -> Result<()> {
         .map(|s| s.as_str());
 
     let database_url = env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
+        .map_err(|e| anyhow::anyhow!("DATABASE_URL must be set: {e}"))?;
 
     println!("Connecting to database...");
 
@@ -48,6 +49,7 @@ async fn main() -> Result<()> {
     let mut seeders: Vec<Box<dyn Seeder + Send + Sync>> = Vec::new();
     seeders.push(Box::new(SeedQuotationSeeder::new()));
     seeders.push(Box::new(SeedQuotationItemSeeder::new()));
+    seeders.push(Box::new(SeedQuotationTemplateSeeder::new()));
     seeders.push(Box::new(SeedSalesOrderSeeder::new()));
     seeders.push(Box::new(SeedSalesOrderItemSeeder::new()));
     seeders.push(Box::new(SeedSalesTeamSeeder::new()));

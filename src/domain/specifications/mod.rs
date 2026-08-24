@@ -8,6 +8,7 @@ pub use backbone_core::{Specification, AndSpecification, OrSpecification, NotSpe
 
 pub mod quotation_specification;
 pub mod quotation_item_specification;
+pub mod quotation_template_specification;
 pub mod sales_order_specification;
 pub mod sales_order_item_specification;
 pub mod sales_team_specification;

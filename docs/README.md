@@ -37,7 +37,7 @@ This handbook is the *narrative*. Reference sets live alongside it — link out,
 
 - **[Schema DSL reference](schema/README.md)** — the exact YAML grammar: [types](schema/TYPES.md), [model rules](schema/RULE_FORMAT_MODELS.md), [generation targets](schema/GENERATION.md), [error codes](schema/ERROR_CODES.md), [examples](schema/EXAMPLES.md). The *Reference* corner of Diátaxis; the handbook explains the *why*.
 - **[Business flows](business-flows/README.md)** — one doc per flow (actors, preconditions, rules, postconditions), plus the [golden-case numeric oracle](business-flows/golden-cases.md), each linked to its executable BDD/test.
-- **Selling-domain ADRs** — [boundary](adr/ADR-001-selling-boundary.md) · [GL seam](adr/ADR-002-gl-posting-seam.md) · [order status](adr/ADR-003-order-status-model.md) · [delivery seam](adr/ADR-004-delivery-seam.md).
+- **Selling-domain ADRs** — [boundary](adr/ADR-001-selling-boundary.md) · [GL seam](adr/ADR-002-gl-posting-seam.md) · [order status](adr/ADR-003-order-status-model.md) · [delivery seam](adr/ADR-004-delivery-seam.md) · [invoice seam](adr/ADR-005-invoice-seam.md) · [invoice exit](adr/ADR-006-selling-exits-invoice-business.md) · [invoicing policy](adr/ADR-007-invoicing-policy-engine.md).
 
 ## Conventions this handbook follows
 

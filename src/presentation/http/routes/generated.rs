@@ -11,6 +11,7 @@ use std::sync::Arc;
 use super::{
     quotation_handler::create_quotation_routes,
     quotation_item_handler::create_quotation_item_routes,
+    quotation_template_handler::create_quotation_template_routes,
     sales_order_handler::create_sales_order_routes,
     sales_order_item_handler::create_sales_order_item_routes,
     sales_team_handler::create_sales_team_routes,
@@ -20,6 +21,7 @@ use super::{
 use crate::application::service::{
     QuotationService,
     QuotationItemService,
+    QuotationTemplateService,
     SalesOrderService,
     SalesOrderItemService,
     SalesTeamService,
@@ -30,6 +32,7 @@ use crate::application::service::{
 pub struct HttpServices {
     pub quotation: Arc<QuotationService>,
     pub quotation_item: Arc<QuotationItemService>,
+    pub quotation_template: Arc<QuotationTemplateService>,
     pub sales_order: Arc<SalesOrderService>,
     pub sales_order_item: Arc<SalesOrderItemService>,
     pub sales_team: Arc<SalesTeamService>,
@@ -57,6 +60,8 @@ pub fn configure_routes(services: HttpServices) -> Router {
         .merge(create_quotation_routes(services.quotation))
         // QuotationItem routes (12 Backbone endpoints)
         .merge(create_quotation_item_routes(services.quotation_item))
+        // QuotationTemplate routes (12 Backbone endpoints)
+        .merge(create_quotation_template_routes(services.quotation_template))
         // SalesOrder routes (12 Backbone endpoints)
         .merge(create_sales_order_routes(services.sales_order))
         // SalesOrderItem routes (12 Backbone endpoints)
@@ -77,6 +82,10 @@ pub mod individual {
 
     pub fn quotation_item_routes(service: Arc<QuotationItemService>) -> Router {
         create_quotation_item_routes(service)
+    }
+
+    pub fn quotation_template_routes(service: Arc<QuotationTemplateService>) -> Router {
+        create_quotation_template_routes(service)
     }
 
     pub fn sales_order_routes(service: Arc<SalesOrderService>) -> Router {

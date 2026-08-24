@@ -4,11 +4,13 @@
 
 pub mod quotation;
 pub mod quotation_item;
+pub mod quotation_template;
 pub mod sales_order;
 pub mod sales_order_item;
 pub mod sales_team;
 pub mod sales_person_allocation;
 pub mod quotation_status;
+pub mod invoice_policy;
 pub mod sales_order_status;
 
 // Re-exports
@@ -18,6 +20,9 @@ pub use quotation::QuotationId;
 pub use quotation_item::QuotationItem;
 pub use quotation_item::QuotationItemBuilder;
 pub use quotation_item::QuotationItemId;
+pub use quotation_template::QuotationTemplate;
+pub use quotation_template::QuotationTemplateBuilder;
+pub use quotation_template::QuotationTemplateId;
 pub use sales_order::SalesOrder;
 pub use sales_order::SalesOrderBuilder;
 pub use sales_order::SalesOrderId;
@@ -31,6 +36,7 @@ pub use sales_person_allocation::SalesPersonAllocation;
 pub use sales_person_allocation::SalesPersonAllocationBuilder;
 pub use sales_person_allocation::SalesPersonAllocationId;
 pub use quotation_status::QuotationStatus;
+pub use invoice_policy::InvoicePolicy;
 pub use sales_order_status::SalesOrderStatus;
 
 // ==========================================================================

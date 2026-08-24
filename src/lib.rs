@@ -23,6 +23,7 @@ pub mod infrastructure;
 pub mod application;
 pub mod presentation;
 pub mod seeders;
+pub mod exports;
 
 // Re-exports for convenience - Domain entities
 pub use domain::entity::*;
@@ -33,6 +34,7 @@ pub use infrastructure::persistence::*;
 // Re-exports - Application services
 pub use application::service::QuotationService;
 pub use application::service::QuotationItemService;
+pub use application::service::QuotationTemplateService;
 pub use application::service::SalesOrderService;
 pub use application::service::SalesOrderItemService;
 pub use application::service::SalesTeamService;
@@ -60,10 +62,13 @@ use sqlx::PgPool;
 pub struct SellingModule {
     pub(crate) quotation_service: Arc<QuotationService>,
     pub(crate) quotation_item_service: Arc<QuotationItemService>,
+    pub(crate) quotation_template_service: Arc<QuotationTemplateService>,
     pub(crate) sales_order_service: Arc<SalesOrderService>,
     pub(crate) sales_order_item_service: Arc<SalesOrderItemService>,
     pub(crate) sales_team_service: Arc<SalesTeamService>,
     pub(crate) sales_person_allocation_service: Arc<SalesPersonAllocationService>,
+    // <<< CUSTOM FIELDS
+    // END CUSTOM
 }
 
 impl SellingModule {
@@ -81,6 +86,7 @@ impl SellingModule {
         use presentation::http::{
             create_quotation_routes,
             create_quotation_item_routes,
+            create_quotation_template_routes,
             create_sales_order_routes,
             create_sales_order_item_routes,
             create_sales_team_routes,
@@ -90,6 +96,7 @@ impl SellingModule {
         Router::new()
             .merge(create_quotation_routes(self.quotation_service.clone()))
             .merge(create_quotation_item_routes(self.quotation_item_service.clone()))
+            .merge(create_quotation_template_routes(self.quotation_template_service.clone()))
             .merge(create_sales_order_routes(self.sales_order_service.clone()))
             .merge(create_sales_order_item_routes(self.sales_order_item_service.clone()))
             .merge(create_sales_team_routes(self.sales_team_service.clone()))
@@ -101,10 +108,39 @@ impl SellingModule {
     /// mount exposes unguarded writes. Compose a guarded router (read + validated
     /// writes) for production, or call `all_crud_routes()` to opt into the full
     /// unguarded surface explicitly.
-    #[deprecated(note = "mounts unvalidated generic CRUD on every entity; compose a guarded router for production, or call all_crud_routes() for the intentional full/unguarded surface")]
+    #[deprecated(note = "mounts unvalidated generic CRUD; prefer readonly_routes() + validated writes, or all_crud_routes() for the full/unguarded surface")]
     pub fn routes(&self) -> Router {
         self.all_crud_routes()
     }
+
+    /// Read-only routes for every entity (GET endpoints only) — the safe base.
+    ///
+    /// Generic mutation can't reach here, so this surface cannot bypass a
+    /// validated write service's invariants. Use this as the production base and
+    /// merge validated write routes (or a write service's HTTP layer) onto it.
+    pub fn readonly_routes(&self) -> Router {
+        use presentation::http::{
+            create_quotation_read_routes,
+            create_quotation_item_read_routes,
+            create_quotation_template_read_routes,
+            create_sales_order_read_routes,
+            create_sales_order_item_read_routes,
+            create_sales_team_read_routes,
+            create_sales_person_allocation_read_routes,
+        };
+
+        Router::new()
+            .merge(create_quotation_read_routes(self.quotation_service.clone()))
+            .merge(create_quotation_item_read_routes(self.quotation_item_service.clone()))
+            .merge(create_quotation_template_read_routes(self.quotation_template_service.clone()))
+            .merge(create_sales_order_read_routes(self.sales_order_service.clone()))
+            .merge(create_sales_order_item_read_routes(self.sales_order_item_service.clone()))
+            .merge(create_sales_team_read_routes(self.sales_team_service.clone()))
+            .merge(create_sales_person_allocation_read_routes(self.sales_person_allocation_service.clone()))
+    }
+
+    // <<< CUSTOM METHODS
+    // END CUSTOM
 }
 
 /// Builder for SellingModule
@@ -142,6 +178,10 @@ impl SellingModuleBuilder {
         let quotation_item_repository = Arc::new(QuotationItemRepository::new(db_pool.clone()));
         let quotation_item_service = Arc::new(QuotationItemService::with_repository(quotation_item_repository.clone()));
 
+        // QuotationTemplate service
+        let quotation_template_repository = Arc::new(QuotationTemplateRepository::new(db_pool.clone()));
+        let quotation_template_service = Arc::new(QuotationTemplateService::with_repository(quotation_template_repository.clone()));
+
         // SalesOrder service
         let sales_order_repository = Arc::new(SalesOrderRepository::new(db_pool.clone()));
         let sales_order_service = Arc::new(SalesOrderService::with_repository(sales_order_repository.clone()));
@@ -164,6 +204,7 @@ impl SellingModuleBuilder {
         Ok(SellingModule {
             quotation_service,
             quotation_item_service,
+            quotation_template_service,
             sales_order_service,
             sales_order_item_service,
             sales_team_service,

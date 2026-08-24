@@ -29,7 +29,7 @@ async fn dod1_delivery_request_is_durably_staged() {
         order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None,
         customer_id: Uuid::new_v4(), order_date: day(), delivery_date: None, currency: None,
         tax_rate: d("0"), notes: None,
-        lines: vec![NewLine { item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
+        lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
     selling.confirm_sales_order(oid, company).await.unwrap();

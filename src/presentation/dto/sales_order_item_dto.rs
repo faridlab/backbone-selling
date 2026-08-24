@@ -19,6 +19,7 @@ use validator::Validate;
 
 use crate::domain::entity::SalesOrderItem;
 use crate::domain::entity::AuditMetadata;
+use crate::domain::entity::InvoicePolicy;
 
 // =============================================================================
 // Create DTO
@@ -56,6 +57,11 @@ pub struct CreateSalesOrderItemDto {
     pub billed_qty: Decimal,
     #[serde(alias = "delivered_qty")]
     pub delivered_qty: Decimal,
+    #[serde(alias = "invoice_policy")]
+    pub invoice_policy: InvoicePolicy,
+    #[cfg_attr(feature = "openapi", schema(example = true))]
+    #[serde(alias = "is_downpayment")]
+    pub is_downpayment: bool,
 }
 
 // =============================================================================
@@ -94,6 +100,11 @@ pub struct UpdateSalesOrderItemDto {
     pub billed_qty: Decimal,
     #[serde(alias = "delivered_qty")]
     pub delivered_qty: Decimal,
+    #[serde(alias = "invoice_policy")]
+    pub invoice_policy: InvoicePolicy,
+    #[cfg_attr(feature = "openapi", schema(example = true))]
+    #[serde(alias = "is_downpayment")]
+    pub is_downpayment: bool,
 }
 
 // =============================================================================
@@ -133,12 +144,17 @@ pub struct PatchSalesOrderItemDto {
     pub billed_qty: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "delivered_qty")]
     pub delivered_qty: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "invoice_policy")]
+    pub invoice_policy: Option<InvoicePolicy>,
+    #[cfg_attr(feature = "openapi", schema(example = true))]
+    #[serde(skip_serializing_if = "Option::is_none", alias = "is_downpayment")]
+    pub is_downpayment: Option<bool>,
 }
 
 impl PatchSalesOrderItemDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.order_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some()
+        self.order_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some() || self.invoice_policy.is_some() || self.is_downpayment.is_some()
     }
 }
 
@@ -169,6 +185,9 @@ pub struct SalesOrderItemResponseDto {
     pub line_amount: Decimal,
     pub billed_qty: Decimal,
     pub delivered_qty: Decimal,
+    pub invoice_policy: InvoicePolicy,
+    #[cfg_attr(feature = "openapi", schema(example = true))]
+    pub is_downpayment: bool,
     pub metadata: AuditMetadata,
 }
 
@@ -250,6 +269,8 @@ impl From<SalesOrderItem> for SalesOrderItemResponseDto {
             line_amount: entity.line_amount,
             billed_qty: entity.billed_qty,
             delivered_qty: entity.delivered_qty,
+            invoice_policy: entity.invoice_policy,
+            is_downpayment: entity.is_downpayment,
             metadata: entity.metadata,
         }
     }
@@ -282,6 +303,8 @@ impl From<CreateSalesOrderItemDto> for SalesOrderItem {
             line_amount: dto.line_amount,
             billed_qty: dto.billed_qty,
             delivered_qty: dto.delivered_qty,
+            invoice_policy: dto.invoice_policy,
+            is_downpayment: dto.is_downpayment,
             metadata: AuditMetadata::default(),
         }
     }
@@ -301,6 +324,8 @@ impl From<&SalesOrderItem> for SalesOrderItemResponseDto {
             line_amount: entity.line_amount.clone(),
             billed_qty: entity.billed_qty.clone(),
             delivered_qty: entity.delivered_qty.clone(),
+            invoice_policy: entity.invoice_policy.clone(),
+            is_downpayment: entity.is_downpayment.clone(),
             metadata: entity.metadata.clone(),
         }
     }
@@ -324,6 +349,8 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderItemDto> for SalesOrderItem {
         self.line_amount = dto.line_amount;
         self.billed_qty = dto.billed_qty;
         self.delivered_qty = dto.delivered_qty;
+        self.invoice_policy = dto.invoice_policy;
+        self.is_downpayment = dto.is_downpayment;
         Ok(self)
     }
 }

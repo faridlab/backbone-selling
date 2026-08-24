@@ -7,26 +7,24 @@
 
 pub mod quotation_handler;
 pub mod quotation_item_handler;
+pub mod quotation_template_handler;
 pub mod sales_order_handler;
 pub mod sales_order_item_handler;
-// <<< CUSTOM
-pub mod guarded_routes;
-// END CUSTOM
 pub mod sales_team_handler;
 pub mod sales_person_allocation_handler;
 
 // <<< CUSTOM
+pub mod guarded_routes;
 // END CUSTOM
 
 // Re-exports
 pub use quotation_handler::{create_quotation_routes, create_quotation_read_routes, create_quotation_write_routes};
 pub use quotation_item_handler::{create_quotation_item_routes, create_quotation_item_read_routes, create_quotation_item_write_routes};
+pub use quotation_template_handler::{create_quotation_template_routes, create_quotation_template_read_routes, create_quotation_template_write_routes};
 pub use sales_order_handler::{create_sales_order_routes, create_sales_order_read_routes, create_sales_order_write_routes};
 pub use sales_order_item_handler::{create_sales_order_item_routes, create_sales_order_item_read_routes, create_sales_order_item_write_routes};
-// <<< CUSTOM
-pub use guarded_routes::create_guarded_selling_routes;
-// END CUSTOM
 pub use sales_team_handler::{create_sales_team_routes, create_sales_team_read_routes, create_sales_team_write_routes};
 pub use sales_person_allocation_handler::{create_sales_person_allocation_routes, create_sales_person_allocation_read_routes, create_sales_person_allocation_write_routes};
 // <<< CUSTOM
+pub use guarded_routes::create_guarded_selling_routes;
 // END CUSTOM

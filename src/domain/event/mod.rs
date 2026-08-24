@@ -6,6 +6,8 @@ pub mod quotation_events;
 pub mod quotation_event_handlers;
 pub mod quotation_item_events;
 pub mod quotation_item_event_handlers;
+pub mod quotation_template_events;
+pub mod quotation_template_event_handlers;
 pub mod sales_order_events;
 pub mod sales_order_event_handlers;
 pub mod sales_order_item_events;
@@ -19,6 +21,8 @@ pub use quotation_events::{QuotationEvent, QuotationEventPublisher, NoopQuotatio
 pub use quotation_event_handlers::QuotationEventHandler;
 pub use quotation_item_events::{QuotationItemEvent, QuotationItemEventPublisher, NoopQuotationItemEventPublisher};
 pub use quotation_item_event_handlers::QuotationItemEventHandler;
+pub use quotation_template_events::{QuotationTemplateEvent, QuotationTemplateEventPublisher, NoopQuotationTemplateEventPublisher};
+pub use quotation_template_event_handlers::QuotationTemplateEventHandler;
 pub use sales_order_events::{SalesOrderEvent, SalesOrderEventPublisher, NoopSalesOrderEventPublisher};
 pub use sales_order_event_handlers::SalesOrderEventHandler;
 pub use sales_order_item_events::{SalesOrderItemEvent, SalesOrderItemEventPublisher, NoopSalesOrderItemEventPublisher};

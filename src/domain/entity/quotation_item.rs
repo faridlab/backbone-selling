@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 use rust_decimal::Decimal;
+
+use super::InvoicePolicy;
 use super::AuditMetadata;
 
 /// Strongly-typed ID for QuotationItem
@@ -57,6 +59,8 @@ pub struct QuotationItem {
     pub unit_price: Decimal,
     pub line_discount: Decimal,
     pub line_amount: Decimal,
+    pub invoice_policy: InvoicePolicy,
+    pub is_downpayment: bool,
     #[serde(default)]
     #[sqlx(json)]
     pub metadata: AuditMetadata,
@@ -65,11 +69,11 @@ pub struct QuotationItem {
 impl QuotationItem {
     /// Create a builder for QuotationItem
     pub fn builder() -> QuotationItemBuilder {
-        QuotationItemBuilder::default()
+        <QuotationItemBuilder as Default>::default()
     }
 
     /// Create a new QuotationItem with required fields
-    pub fn new(quotation_id: Uuid, company_id: Uuid, item_id: Uuid, quantity: Decimal, unit_price: Decimal, line_discount: Decimal, line_amount: Decimal) -> Self {
+    pub fn new(quotation_id: Uuid, company_id: Uuid, item_id: Uuid, quantity: Decimal, unit_price: Decimal, line_discount: Decimal, line_amount: Decimal, invoice_policy: InvoicePolicy, is_downpayment: bool) -> Self {
         Self {
             id: Uuid::new_v4(),
             quotation_id,
@@ -80,6 +84,8 @@ impl QuotationItem {
             unit_price,
             line_discount,
             line_amount,
+            invoice_policy,
+            is_downpayment,
             metadata: AuditMetadata::default(),
         }
     }
@@ -177,6 +183,12 @@ impl QuotationItem {
                 "line_amount" => {
                     if let Ok(v) = serde_json::from_value(value) { self.line_amount = v; }
                 }
+                "invoice_policy" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.invoice_policy = v; }
+                }
+                "is_downpayment" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.is_downpayment = v; }
+                }
                 _ => {} // ignore unknown fields
             }
         }
@@ -234,6 +246,7 @@ impl backbone_orm::EntityRepoMeta for QuotationItem {
         m.insert("quotation_id".to_string(), "uuid".to_string());
         m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("item_id".to_string(), "uuid".to_string());
+        m.insert("invoice_policy".to_string(), "invoice_policy".to_string());
         m
     }
     fn search_fields() -> &'static [&'static str] {
@@ -261,6 +274,8 @@ pub struct QuotationItemBuilder {
     unit_price: Option<Decimal>,
     line_discount: Option<Decimal>,
     line_amount: Option<Decimal>,
+    invoice_policy: Option<InvoicePolicy>,
+    is_downpayment: Option<bool>,
 }
 
 impl QuotationItemBuilder {
@@ -312,6 +327,18 @@ impl QuotationItemBuilder {
         self
     }
 
+    /// Set the invoice_policy field (default: `InvoicePolicy::default()`)
+    pub fn invoice_policy(mut self, value: InvoicePolicy) -> Self {
+        self.invoice_policy = Some(value);
+        self
+    }
+
+    /// Set the is_downpayment field (default: `false`)
+    pub fn is_downpayment(mut self, value: bool) -> Self {
+        self.is_downpayment = Some(value);
+        self
+    }
+
     /// Build the QuotationItem entity
     ///
     /// Returns Err if any required field without a default is missing.
@@ -332,6 +359,8 @@ impl QuotationItemBuilder {
             unit_price,
             line_discount: self.line_discount.unwrap_or(Decimal::from(0)),
             line_amount: self.line_amount.unwrap_or(Decimal::from(0)),
+            invoice_policy: self.invoice_policy.unwrap_or_default(),
+            is_downpayment: self.is_downpayment.unwrap_or(false),
             metadata: AuditMetadata::default(),
         })
     }

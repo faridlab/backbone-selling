@@ -19,6 +19,47 @@ pub struct QuotationAccepted {
     pub customer_id: Uuid,
 }
 
+/// A quotation was issued to the customer (draft → sent).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuotationSent {
+    pub quotation_id: Uuid,
+    pub company_id: Uuid,
+}
+
+/// A sent quotation was declined by the customer (sent → rejected). `reason` is optional.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuotationRejected {
+    pub quotation_id: Uuid,
+    pub company_id: Uuid,
+    pub reason: Option<String>,
+}
+
+/// A quotation was withdrawn (draft/sent/accepted → cancelled). Refused once `ordered` — an order
+/// was derived from it. `reason` is optional.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuotationCancelled {
+    pub quotation_id: Uuid,
+    pub company_id: Uuid,
+    pub reason: Option<String>,
+}
+
+/// A sent/cancelled/rejected quotation was returned to draft for re-editing. Never possible from
+/// `ordered` — a confirmed order must never be reset.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuotationReDrafted {
+    pub quotation_id: Uuid,
+    pub company_id: Uuid,
+}
+
+/// A sales order was cancelled. Refused when any line carries a billed quantity (posted invoices
+/// are never cancelled) — so a consumer seeing this knows no revenue can be outstanding against it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SalesOrderCancelled {
+    pub order_id: Uuid,
+    pub company_id: Uuid,
+    pub customer_id: Uuid,
+}
+
 /// A sales order was confirmed (the demand commitment). Carries the totals a consumer needs
 /// (e.g. credit-limit evaluation, fulfillment planning) without a call back into selling.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,7 +122,12 @@ pub struct InvoiceRequestEnvelope {
 #[serde(tag = "type")]
 pub enum SellingEvent {
     QuotationAccepted(QuotationAccepted),
+    QuotationSent(QuotationSent),
+    QuotationRejected(QuotationRejected),
+    QuotationCancelled(QuotationCancelled),
+    QuotationReDrafted(QuotationReDrafted),
     SalesOrderConfirmed(SalesOrderConfirmed),
+    SalesOrderCancelled(SalesOrderCancelled),
     DeliveryRequested(DeliveryRequestEnvelope),
     OrderInvoiced(InvoiceRequestEnvelope),
 }

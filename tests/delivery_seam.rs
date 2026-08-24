@@ -131,7 +131,7 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
         order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None,
         customer_id: customer, order_date: day(), delivery_date: None, currency: None,
         tax_rate: d("11"), notes: None,
-        lines: vec![NewLine { item_id: item, revenue_account_id: None, description: None,
+        lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
     selling.confirm_sales_order(oid, company).await.unwrap();
@@ -181,7 +181,7 @@ async fn journal_totals(pool: &PgPool, jid: Uuid) -> (Decimal, Decimal) {
 //    helpers). These exercise selling alone — no inventory/accounting — so they need only the
 //    selling schema + RLS at DATABASE_URL. ─────────────────────────────────────────────────────
 fn dline(item: Uuid, qty: &str) -> NewLine {
-    NewLine {
+    NewLine { invoice_policy: None, is_downpayment: None,
         item_id: item, revenue_account_id: None, description: None,
         quantity: d(qty), unit_price: d("150000"), line_discount: Decimal::ZERO,
     }

@@ -11,6 +11,7 @@ use std::sync::Arc;
 // Import all services
 use crate::application::service::QuotationService;
 use crate::application::service::QuotationItemService;
+use crate::application::service::QuotationTemplateService;
 use crate::application::service::SalesOrderService;
 use crate::application::service::SalesOrderItemService;
 use crate::application::service::SalesTeamService;
@@ -38,6 +39,8 @@ pub struct AppState {
     pub quotation_service: Arc<QuotationService>,
     /// QuotationItem service
     pub quotation_item_service: Arc<QuotationItemService>,
+    /// QuotationTemplate service
+    pub quotation_template_service: Arc<QuotationTemplateService>,
     /// SalesOrder service
     pub sales_order_service: Arc<SalesOrderService>,
     /// SalesOrderItem service
@@ -53,6 +56,7 @@ impl AppState {
     pub fn new(
         quotation_service: Arc<QuotationService>,
         quotation_item_service: Arc<QuotationItemService>,
+        quotation_template_service: Arc<QuotationTemplateService>,
         sales_order_service: Arc<SalesOrderService>,
         sales_order_item_service: Arc<SalesOrderItemService>,
         sales_team_service: Arc<SalesTeamService>,
@@ -61,6 +65,7 @@ impl AppState {
         Self {
             quotation_service,
             quotation_item_service,
+            quotation_template_service,
             sales_order_service,
             sales_order_item_service,
             sales_team_service,
@@ -73,6 +78,7 @@ impl AppState {
         Self {
             quotation_service: module.quotation_service.clone(),
             quotation_item_service: module.quotation_item_service.clone(),
+            quotation_template_service: module.quotation_template_service.clone(),
             sales_order_service: module.sales_order_service.clone(),
             sales_order_item_service: module.sales_order_item_service.clone(),
             sales_team_service: module.sales_team_service.clone(),
@@ -88,6 +94,7 @@ impl AppState {
 pub struct AppStateBuilder {
     quotation_service: Option<Arc<QuotationService>>,
     quotation_item_service: Option<Arc<QuotationItemService>>,
+    quotation_template_service: Option<Arc<QuotationTemplateService>>,
     sales_order_service: Option<Arc<SalesOrderService>>,
     sales_order_item_service: Option<Arc<SalesOrderItemService>>,
     sales_team_service: Option<Arc<SalesTeamService>>,
@@ -109,6 +116,12 @@ impl AppStateBuilder {
     /// Set the QuotationItem service.
     pub fn with_quotation_item_service(mut self, service: Arc<QuotationItemService>) -> Self {
         self.quotation_item_service = Some(service);
+        self
+    }
+
+    /// Set the QuotationTemplate service.
+    pub fn with_quotation_template_service(mut self, service: Arc<QuotationTemplateService>) -> Self {
+        self.quotation_template_service = Some(service);
         self
     }
 
@@ -145,6 +158,7 @@ impl AppStateBuilder {
         AppState {
             quotation_service: self.quotation_service.expect("quotation_service is required"),
             quotation_item_service: self.quotation_item_service.expect("quotation_item_service is required"),
+            quotation_template_service: self.quotation_template_service.expect("quotation_template_service is required"),
             sales_order_service: self.sales_order_service.expect("sales_order_service is required"),
             sales_order_item_service: self.sales_order_item_service.expect("sales_order_item_service is required"),
             sales_team_service: self.sales_team_service.expect("sales_team_service is required"),

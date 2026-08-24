@@ -1,5 +1,5 @@
-//! Sales orders: create (direct + cart-priced), confirm, convert-from-quotation, ref lookup
-//! (hand-authored, user-owned).
+//! Sales orders: create (direct + cart-priced), confirm, convert-from-quotation, cancel,
+//! line edits under the order lock, ref lookup (hand-authored, user-owned).
 //!
 //! An `impl SellingWriteService` chunk over the vocabulary in [`super::selling_write_service`].
 //! `create_sales_order` prices the basket server-side (2dp half-up) and writes header + lines as
@@ -8,7 +8,10 @@
 //! `(unit_price, line_discount)` so the order's own `price_document` reproduces the cart total
 //! exactly. Zero normal Cargo edge to promo. `confirm_sales_order` is the gated
 //! draft → `to_deliver_and_bill` flip (council 2026-07-05; ADR-003); `convert_quotation_to_order`
-//! is the quote→order step that copies header + lines and links back to the quotation;
+//! is the quote→order step that copies header + lines (including each line's invoicing policy and
+//! downpayment flag) and links back to the quotation; `cancel_sales_order` is the one-way exit —
+//! refused the moment any line carries a billed quantity (posted invoices are never cancelled);
+//! `update_order_line` is the order lock — frozen fields refuse once the order is confirmed;
 //! `sales_order_ref` loads the cross-module DTO.
 //!
 //! Per the module's 4-layer rule this file holds no SQL — the statements live on
@@ -22,11 +25,29 @@ use uuid::Uuid;
 use crate::infrastructure::persistence::{NewSalesOrderItemRow, NewSalesOrderRow};
 
 use super::selling_cart_pricing::{CartPriceLine, CartPriceRequest, CartPricingPort};
-use super::selling_events::{SalesOrderConfirmed, SalesOrderRef, SellingEvent};
+use super::selling_events::{SalesOrderCancelled, SalesOrderConfirmed, SalesOrderRef, SellingEvent};
 use super::selling_write_service::{
     is_dup, money, price_document, NewCartSalesOrder, NewLine, NewSalesOrder, SellingError,
     SellingWriteService,
 };
+
+/// One order-line edit. All-`None` = a no-op; `description` alone stays allowed on a confirmed
+/// order (the label, not the commitment); any of item/qty/price/discount on a non-draft order is
+/// the frozen-field refusal — confirmed demand is not silently re-priced.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateOrderLinePatch {
+    pub description: Option<String>,
+    pub item_id: Option<Uuid>,
+    pub quantity: Option<Decimal>,
+    pub unit_price: Option<Decimal>,
+    pub line_discount: Option<Decimal>,
+}
+
+impl UpdateOrderLinePatch {
+    fn touches_frozen_fields(&self) -> bool {
+        self.item_id.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some()
+    }
+}
 
 impl SellingWriteService {
     pub async fn create_sales_order(&self, o: NewSalesOrder) -> Result<Uuid, SellingError> {
@@ -66,6 +87,8 @@ impl SellingWriteService {
                 unit_price: p.unit_price,
                 line_discount: p.line_discount,
                 line_amount: p.line_amount,
+                invoice_policy: &p.invoice_policy.to_string(),
+                is_downpayment: p.is_downpayment,
             }).await?;
         }
         tx.commit().await?;
@@ -131,6 +154,8 @@ impl SellingWriteService {
                 quantity: l.quantity,
                 unit_price: pl.unit_price,
                 line_discount,
+                invoice_policy: None,
+                is_downpayment: None,
             });
         }
         // Buy-X-get-Y: append the free goods as zero-priced lines (they don't change the subtotal).
@@ -142,6 +167,8 @@ impl SellingWriteService {
                 quantity: rl.quantity,
                 unit_price: Decimal::ZERO,
                 line_discount: Decimal::ZERO,
+                invoice_policy: None,
+                is_downpayment: None,
             });
         }
 
@@ -219,6 +246,10 @@ impl SellingWriteService {
             quantity: l.quantity,
             unit_price: l.unit_price,
             line_discount: l.line_discount,
+            // The quotation line's invoicing policy + downpayment flag are preserved verbatim —
+            // conversion must never change the billing intent the offer committed to.
+            invoice_policy: l.invoice_policy.parse().ok(),
+            is_downpayment: Some(l.is_downpayment),
         }).collect();
 
         let order_id = self.create_sales_order(NewSalesOrder {
@@ -251,5 +282,116 @@ impl SellingWriteService {
             grand_total: row.total,
             currency: row.currency,
         })
+    }
+
+    /// Cancel a sales order (draft/to_deliver/to_bill/to_deliver_and_bill → cancelled); emits
+    /// `SalesOrderCancelled`. Refused — loudly — when any live line carries a billed quantity
+    /// (`order_billed`): posted invoices are never cancelled, credit notes are the correction
+    /// path. The billed check and the flip are ONE atomic statement, so a racing `mark_invoiced`
+    /// cannot slip a billed quantity between check and flip. A delivered-but-unbilled order CAN be
+    /// cancelled (only billed guards; delivery reversal is inventory's lane).
+    pub async fn cancel_sales_order(
+        &self,
+        order_id: Uuid,
+        company_id: Uuid,
+    ) -> Result<(), SellingError> {
+        let row = company_scope::with_company_scope(
+            Some(company_id),
+            self.repos.orders.cancel(&self.db_pool, order_id, company_id),
+        ).await?;
+        let row = match row {
+            Some(r) => r,
+            None => {
+                // The guard refused — classify why (only after a refusal; the guarded statement
+                // itself never leaks whether the id exists).
+                let why = company_scope::with_company_scope(
+                    Some(company_id),
+                    self.repos.orders.find_cancel_refusal(&self.db_pool, order_id, company_id),
+                ).await?;
+                return Err(match why {
+                    None => SellingError::OrderNotFound(order_id),
+                    // A terminal order refuses because it is terminal; an in-flight order with a
+                    // billed line refuses because posted invoices are never cancelled.
+                    Some(r) if matches!(r.status.as_str(), "completed" | "closed" | "cancelled") => {
+                        SellingError::InvalidTransition { verb: "cancel".into(), current: r.status }
+                    }
+                    Some(r) if r.has_billed => SellingError::OrderBilled,
+                    Some(r) => SellingError::InvalidTransition {
+                        verb: "cancel".into(),
+                        current: r.status,
+                    },
+                });
+            }
+        };
+        self.sink.publish(SellingEvent::SalesOrderCancelled(SalesOrderCancelled {
+            order_id,
+            company_id: row.company_id,
+            customer_id: row.customer_id,
+        }));
+        Ok(())
+    }
+
+    /// Edit one order line under the ORDER LOCK. Once the order's status is anything other than
+    /// `draft`, the frozen fields (item, quantity, unit price, discount) refuse with
+    /// `order_line_frozen` — only the description may still change. On a draft, a priced-field
+    /// edit re-prices the line (`money(qty*price) − money(discount)`) and re-derives the header's
+    /// subtotal/tax/total from the full live line set in the SAME transaction. An all-`None` patch
+    /// is a no-op. The line + its parent header are read under `FOR UPDATE`, so the freeze check
+    /// cannot race a concurrent `confirm_sales_order`.
+    pub async fn update_order_line(
+        &self,
+        line_id: Uuid,
+        company_id: Uuid,
+        patch: UpdateOrderLinePatch,
+    ) -> Result<(), SellingError> {
+        if patch.description.is_none() && !patch.touches_frozen_fields() {
+            return Ok(()); // nothing asked, nothing changed
+        }
+        let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_company_on(&mut tx, company_id).await?;
+        let line = self.repos.order_items
+            .lock_line_with_parent_status(&mut tx, line_id, company_id).await?
+            .ok_or(SellingError::OrderNotFound(line_id))?;
+
+        if line.order_status != "draft" && patch.touches_frozen_fields() {
+            return Err(SellingError::OrderLineFrozen);
+        }
+
+        let quantity = patch.quantity.unwrap_or(line.quantity);
+        let unit_price = patch.unit_price.unwrap_or(line.unit_price);
+        let line_discount = patch.line_discount.unwrap_or(line.line_discount);
+        let priced_changed = patch.quantity.is_some() || patch.unit_price.is_some() || patch.line_discount.is_some();
+
+        let line_amount = if priced_changed {
+            if quantity < Decimal::ZERO || unit_price < Decimal::ZERO || line_discount < Decimal::ZERO {
+                return Err(SellingError::NegativeQuantity);
+            }
+            let gross = money(quantity * unit_price);
+            let amount = gross - money(line_discount);
+            if amount < Decimal::ZERO {
+                return Err(SellingError::NegativeQuantity);
+            }
+            amount
+        } else {
+            // description-only edit: keep the stored amount untouched
+            line.line_amount
+        };
+
+        self.repos.order_items.update_line_full(
+            &mut tx,
+            line_id,
+            patch.description.as_deref().or(line.description.as_deref()),
+            patch.item_id.unwrap_or(line.item_id),
+            quantity,
+            unit_price,
+            line_discount,
+            line_amount,
+        ).await?;
+
+        if priced_changed {
+            self.repos.orders.recompute_totals_from_lines(&mut tx, line.order_id).await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 }

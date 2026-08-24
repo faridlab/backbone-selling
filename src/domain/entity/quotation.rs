@@ -64,6 +64,8 @@ pub struct Quotation {
     pub tax_amount: Decimal,
     pub total: Decimal,
     pub notes: Option<String>,
+    pub opportunity_id: Option<Uuid>,
+    pub status_reason: Option<String>,
     #[serde(default)]
     #[sqlx(json)]
     pub metadata: AuditMetadata,
@@ -72,7 +74,7 @@ pub struct Quotation {
 impl Quotation {
     /// Create a builder for Quotation
     pub fn builder() -> QuotationBuilder {
-        QuotationBuilder::default()
+        <QuotationBuilder as Default>::default()
     }
 
     /// Create a new Quotation with required fields
@@ -92,6 +94,8 @@ impl Quotation {
             tax_amount,
             total,
             notes: None,
+            opportunity_id: None,
+            status_reason: None,
             metadata: AuditMetadata::default(),
         }
     }
@@ -174,6 +178,18 @@ impl Quotation {
         self
     }
 
+    /// Set the opportunity_id field (chainable)
+    pub fn with_opportunity_id(mut self, value: Uuid) -> Self {
+        self.opportunity_id = Some(value);
+        self
+    }
+
+    /// Set the status_reason field (chainable)
+    pub fn with_status_reason(mut self, value: String) -> Self {
+        self.status_reason = Some(value);
+        self
+    }
+
     // ==========================================================
     // Partial Update
     // ==========================================================
@@ -220,6 +236,12 @@ impl Quotation {
                 }
                 "notes" => {
                     if let Ok(v) = serde_json::from_value(value) { self.notes = v; }
+                }
+                "opportunity_id" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.opportunity_id = v; }
+                }
+                "status_reason" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.status_reason = v; }
                 }
                 _ => {} // ignore unknown fields
             }
@@ -278,6 +300,7 @@ impl backbone_orm::EntityRepoMeta for Quotation {
         m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("branch_id".to_string(), "uuid".to_string());
         m.insert("customer_id".to_string(), "uuid".to_string());
+        m.insert("opportunity_id".to_string(), "uuid".to_string());
         m.insert("status".to_string(), "quotation_status".to_string());
         m
     }
@@ -308,6 +331,8 @@ pub struct QuotationBuilder {
     tax_amount: Option<Decimal>,
     total: Option<Decimal>,
     notes: Option<String>,
+    opportunity_id: Option<Uuid>,
+    status_reason: Option<String>,
 }
 
 impl QuotationBuilder {
@@ -389,6 +414,18 @@ impl QuotationBuilder {
         self
     }
 
+    /// Set the opportunity_id field (optional)
+    pub fn opportunity_id(mut self, value: Uuid) -> Self {
+        self.opportunity_id = Some(value);
+        self
+    }
+
+    /// Set the status_reason field (optional)
+    pub fn status_reason(mut self, value: String) -> Self {
+        self.status_reason = Some(value);
+        self
+    }
+
     /// Build the Quotation entity
     ///
     /// Returns Err if any required field without a default is missing.
@@ -404,7 +441,7 @@ impl QuotationBuilder {
             company_id,
             branch_id: self.branch_id,
             customer_id,
-            status: self.status.unwrap_or(QuotationStatus::default()),
+            status: self.status.unwrap_or_default(),
             quotation_date,
             valid_until: self.valid_until,
             currency: self.currency.unwrap_or("IDR".to_string()),
@@ -413,6 +450,8 @@ impl QuotationBuilder {
             tax_amount: self.tax_amount.unwrap_or(Decimal::from(0)),
             total: self.total.unwrap_or(Decimal::from(0)),
             notes: self.notes,
+            opportunity_id: self.opportunity_id,
+            status_reason: self.status_reason,
             metadata: AuditMetadata::default(),
         })
     }
