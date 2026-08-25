@@ -15,7 +15,7 @@
 //! | verb     | from                       | to        | refused with                |
 //! |----------|----------------------------|-----------|-----------------------------|
 //! | send     | draft                      | sent      | `invalid_transition`        |
-//! | accept   | draft, sent                | accepted  | `not_draft` (existing)      |
+//! | accept   | draft, sent                | accepted  | `invalid_transition`        |
 //! | reject   | sent                       | rejected  | `invalid_transition`        |
 //! | cancel   | draft, sent, accepted      | cancelled | `invalid_transition`; from `ordered` → `quotation_ordered` |
 //! | re_draft | sent, cancelled, rejected  | draft     | `invalid_transition` (never from `ordered`) |
@@ -121,7 +121,14 @@ impl SellingWriteService {
             Some(company_id),
             self.repos.quotations.accept(&self.db_pool, quotation_id, company_id),
         ).await?;
-        let row = row.ok_or_else(|| SellingError::NotDraft(quotation_id.to_string()))?;
+        // A refused guard is wrong-state OR wrong-tenant OR absent — classify only after the
+        // refusal, exactly like the other machine verbs: the scoped re-read decides between
+        // `invalid_transition` (422, the quotation is ours but not acceptable) and
+        // `quotation_not_found` (404, a foreign or unknown id).
+        let row = match row {
+            Some(r) => r,
+            None => return Err(self.refuse_quotation_transition("accept", quotation_id, company_id).await),
+        };
         self.sink.publish(SellingEvent::QuotationAccepted(QuotationAccepted {
             quotation_id,
             company_id: row.company_id,

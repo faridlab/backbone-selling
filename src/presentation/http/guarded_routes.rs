@@ -257,6 +257,41 @@ async fn cancel_quotation(
         Err(e) => err_response(e),
     }
 }
+async fn accept_quotation(
+    State(svc): State<Arc<SellingWriteService>>,
+    tenant: CompanyContext,
+    Json(b): Json<QuotationVerbBody>,
+) -> axum::response::Response {
+    match svc.accept_quotation(b.quotation_id, tenant.company_id).await {
+        Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.quotation_id })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvertQuotationBody {
+    quotation_id: Uuid,
+    order_number: String,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvertQuotationResponse {
+    order_id: Uuid,
+    quotation_id: Uuid,
+}
+async fn convert_quotation_to_order(
+    State(svc): State<Arc<SellingWriteService>>,
+    Json(b): Json<ConvertQuotationBody>,
+) -> axum::response::Response {
+    match svc.convert_quotation_to_order(b.quotation_id, b.order_number).await {
+        Ok(order_id) => (StatusCode::CREATED, Json(ConvertQuotationResponse {
+            order_id,
+            quotation_id: b.quotation_id,
+        })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
 
 // ── order machine: cancel + line edits ───────────────────────────────────────
 #[derive(Debug, Deserialize)]
@@ -397,12 +432,14 @@ async fn list_quotation_templates(
 fn create_selling_write_routes(svc: Arc<SellingWriteService>, verifier: CompanyVerifier) -> Router {
     Router::new()
         .route("/quotations", post(create_quotation))
-        // Quotation state machine: send → reject → re-draft round trips, cancel is the exit.
+        // Quotation state machine: send → accept → reject → re-draft round trips, cancel is the exit.
         // Refusals are loud 422s (`invalid_transition` / `quotation_ordered`), never silent no-ops.
         .route("/quotations/send", post(send_quotation))
+        .route("/quotations/accept", post(accept_quotation))
         .route("/quotations/re-draft", post(redraft_quotation))
         .route("/quotations/reject", post(reject_quotation))
         .route("/quotations/cancel", post(cancel_quotation))
+        .route("/quotations/convert-to-order", post(convert_quotation_to_order))
         .route("/quotations/:id/invoice-status", get(quotation_invoice_status))
         .route("/quotation-templates", post(create_quotation_template).get(list_quotation_templates))
         .route("/sales-orders", post(create_sales_order))

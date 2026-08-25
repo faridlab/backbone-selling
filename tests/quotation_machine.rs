@@ -253,6 +253,7 @@ async fn unknown_or_foreign_quotation_is_not_found() {
     let stranger = draft_quotation(&w, Uuid::new_v4()).await; // another tenant's quotation
     for e in [
         w.send_quotation(stranger, company).await.unwrap_err(),
+        w.accept_quotation(stranger, company).await.unwrap_err(),
         w.reject_quotation(stranger, company, None).await.unwrap_err(),
         w.cancel_quotation(stranger, company, None).await.unwrap_err(),
         w.redraft_quotation(stranger, company).await.unwrap_err(),
