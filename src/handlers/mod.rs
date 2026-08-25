@@ -9,6 +9,8 @@
 use std::sync::Arc;
 
 // Import all services
+use crate::application::service::DeliveryCarrierService;
+use crate::application::service::ExpenseReinvoiceLinkService;
 use crate::application::service::QuotationService;
 use crate::application::service::QuotationItemService;
 use crate::application::service::QuotationTemplateService;
@@ -35,6 +37,10 @@ use crate::application::service::SalesPersonAllocationService;
 /// ```
 #[derive(Clone)]
 pub struct AppState {
+    /// DeliveryCarrier service
+    pub delivery_carrier_service: Arc<DeliveryCarrierService>,
+    /// ExpenseReinvoiceLink service
+    pub expense_reinvoice_link_service: Arc<ExpenseReinvoiceLinkService>,
     /// Quotation service
     pub quotation_service: Arc<QuotationService>,
     /// QuotationItem service
@@ -54,6 +60,8 @@ pub struct AppState {
 impl AppState {
     /// Create a new AppState with all services.
     pub fn new(
+        delivery_carrier_service: Arc<DeliveryCarrierService>,
+        expense_reinvoice_link_service: Arc<ExpenseReinvoiceLinkService>,
         quotation_service: Arc<QuotationService>,
         quotation_item_service: Arc<QuotationItemService>,
         quotation_template_service: Arc<QuotationTemplateService>,
@@ -63,6 +71,8 @@ impl AppState {
         sales_person_allocation_service: Arc<SalesPersonAllocationService>
     ) -> Self {
         Self {
+            delivery_carrier_service,
+            expense_reinvoice_link_service,
             quotation_service,
             quotation_item_service,
             quotation_template_service,
@@ -76,6 +86,8 @@ impl AppState {
     /// Create AppState from module instance.
     pub fn from_module(module: &crate::SellingModule) -> Self {
         Self {
+            delivery_carrier_service: module.delivery_carrier_service.clone(),
+            expense_reinvoice_link_service: module.expense_reinvoice_link_service.clone(),
             quotation_service: module.quotation_service.clone(),
             quotation_item_service: module.quotation_item_service.clone(),
             quotation_template_service: module.quotation_template_service.clone(),
@@ -92,6 +104,8 @@ impl AppState {
 /// Allows incremental construction of AppState.
 #[derive(Default)]
 pub struct AppStateBuilder {
+    delivery_carrier_service: Option<Arc<DeliveryCarrierService>>,
+    expense_reinvoice_link_service: Option<Arc<ExpenseReinvoiceLinkService>>,
     quotation_service: Option<Arc<QuotationService>>,
     quotation_item_service: Option<Arc<QuotationItemService>>,
     quotation_template_service: Option<Arc<QuotationTemplateService>>,
@@ -105,6 +119,18 @@ impl AppStateBuilder {
     /// Create a new builder.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the DeliveryCarrier service.
+    pub fn with_delivery_carrier_service(mut self, service: Arc<DeliveryCarrierService>) -> Self {
+        self.delivery_carrier_service = Some(service);
+        self
+    }
+
+    /// Set the ExpenseReinvoiceLink service.
+    pub fn with_expense_reinvoice_link_service(mut self, service: Arc<ExpenseReinvoiceLinkService>) -> Self {
+        self.expense_reinvoice_link_service = Some(service);
+        self
     }
 
     /// Set the Quotation service.
@@ -156,6 +182,8 @@ impl AppStateBuilder {
     /// Panics if any required service is not set.
     pub fn build(self) -> AppState {
         AppState {
+            delivery_carrier_service: self.delivery_carrier_service.expect("delivery_carrier_service is required"),
+            expense_reinvoice_link_service: self.expense_reinvoice_link_service.expect("expense_reinvoice_link_service is required"),
             quotation_service: self.quotation_service.expect("quotation_service is required"),
             quotation_item_service: self.quotation_item_service.expect("quotation_item_service is required"),
             quotation_template_service: self.quotation_template_service.expect("quotation_template_service is required"),

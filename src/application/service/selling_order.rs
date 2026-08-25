@@ -26,6 +26,7 @@ use crate::infrastructure::persistence::{NewSalesOrderItemRow, NewSalesOrderRow}
 
 use super::selling_cart_pricing::{CartPriceLine, CartPriceRequest, CartPricingPort};
 use super::selling_events::{SalesOrderCancelled, SalesOrderConfirmed, SalesOrderRef, SellingEvent};
+use super::selling_unit_cost::{ItemUnitCost, UnitCostPort, UnitCostRequest};
 use super::selling_write_service::{
     is_dup, money, price_document, NewCartSalesOrder, NewLine, NewSalesOrder, SellingError,
     SellingWriteService,
@@ -52,6 +53,11 @@ impl UpdateOrderLinePatch {
 impl SellingWriteService {
     pub async fn create_sales_order(&self, o: NewSalesOrder) -> Result<Uuid, SellingError> {
         let (priced, subtotal, tax_amount, total) = price_document(&o.lines, o.tax_rate)?;
+        // A create-time carrier choice must name one of THIS company's carriers (a clean 404,
+        // never the FK violation's 500) — validated before the transaction opens.
+        let delivery_carrier_id = self
+            .carrier_id_or_refuse(&o.company_id, o.delivery_carrier_id)
+            .await?;
         let id = Uuid::new_v4();
         let currency = o.currency.unwrap_or_else(|| "IDR".into());
         // RLS scope (ADR-0008): bind the order's company onto the header+lines transaction.
@@ -61,6 +67,7 @@ impl SellingWriteService {
             id,
             order_number: &o.order_number,
             quotation_id: o.quotation_id,
+            delivery_carrier_id,
             company_id: o.company_id,
             branch_id: o.branch_id,
             customer_id: o.customer_id,
@@ -175,6 +182,7 @@ impl SellingWriteService {
         self.create_sales_order(NewSalesOrder {
             order_number: o.order_number,
             quotation_id: None,
+            delivery_carrier_id: None,
             company_id: o.company_id,
             branch_id: o.branch_id,
             customer_id: o.customer_id,
@@ -191,25 +199,93 @@ impl SellingWriteService {
     /// Confirm a draft order → `to_deliver_and_bill` (awaiting both delivery and billing now that
     /// inventory is live; ADR-003). Reaches `completed` only when fully billed AND fully delivered.
     /// Emits `SalesOrderConfirmed`.
-    /// Confirm a draft sales order (draft → to_deliver_and_bill); emits `SalesOrderConfirmed`.
     ///
-    /// `company_id` scopes the lookup, so a principal of company A cannot confirm company B's order
-    /// by knowing its id — proving *who* the caller is is not enough, the row must be theirs. A
-    /// mismatched tenant is indistinguishable from a missing order (`NotDraft`), so this does not
-    /// leak whether the id exists.
+    /// Confirm a draft sales order (draft → to_deliver_and_bill); emits `SalesOrderConfirmed`.
+    /// Since the unit-cost margin snapshot landed, confirm also STAMPS each live line's
+    /// `unit_cost` from the `costs` port (the confirm-time snapshot — no later edit and no later
+    /// catalog standard_cost change can rewrite it; the stamp statement is the only writer).
+    ///
+    /// Flow: (1) read the order's live (line id, item id) pairs on the request scope; (2) ask the
+    /// port for the DISTINCT items' costs — BEFORE any transaction, so no network call runs inside
+    /// the DB tx and draft lines are not locked across the port call; (3) in ONE transaction
+    /// (company bound on it): stamp the snapshots, then run the UNCHANGED draft→confirmed guard.
+    /// The guard losing (0 rows) rolls the stamp back with it — a loser of two concurrent confirms
+    /// never leaves a cost on a non-confirmed order.
+    ///
+    /// Port-failure rule (explicit, tested): a port `Err`, a requested item MISSING from the
+    /// response, or a NEGATIVE cost each REFUSE the confirm with `CostRejected` — the order stays
+    /// draft, no event fires. A confirm is a commitment; an unknown-cost confirm corrupts margin
+    /// analytics silently. A NULL cost for an item PROCEEDS (that line snapshots NULL — margin
+    /// reads NULL, never zero). The refusal is not sticky: a retried confirm with a healthy port
+    /// succeeds.
+    ///
+    /// Race note: a draft line ADDED between the (1) read and the (3) stamp is not in the stamp's
+    /// unnest table and stays NULL — honest absence, never a WRONG cost, only a missing one
+    /// (tightening would need `FOR UPDATE` line reads inside the tx; deliberately not taken in
+    /// this release). The line-edit path's `FOR UPDATE` serializes its writes against the stamp.
+    ///
+    /// `company_id` scopes everything, so a principal of company A cannot confirm company B's
+    /// order by knowing its id — a mismatched tenant reads no lines and loses the guard, which is
+    /// indistinguishable from a missing order (`NotDraft`), so this does not leak whether the id
+    /// exists.
     pub async fn confirm_sales_order(
         &self,
         order_id: Uuid,
         company_id: Uuid,
+        costs: &dyn UnitCostPort,
     ) -> Result<(), SellingError> {
-        // RLS scope (ADR-0008): company on the parameter — scope the guarded update so it runs with
-        // `app.company_id` set. The repository holds the statement (and its `company_id=$2`
-        // defense-in-depth filter); the scope wrapper stays here, in the service.
-        let row = company_scope::with_company_scope(
+        // (1) live (line, item) pairs — ID-only, company-scoped through the caller's fence; a
+        // wrong-tenant order simply reads [] and the guard below refuses with NotDraft.
+        let lines = company_scope::with_company_scope(
             Some(company_id),
-            self.repos.orders.confirm(&self.db_pool, order_id, company_id),
+            self.repos.order_items.list_cost_stamp_lines(&self.db_pool, order_id),
         ).await?;
-        let row = row.ok_or_else(|| SellingError::NotDraft(order_id.to_string()))?;
+
+        // (2) resolve the DISTINCT items' costs outside any transaction.
+        let mut stamps: Vec<(Uuid, Option<Decimal>)> = Vec::with_capacity(lines.len());
+        if !lines.is_empty() {
+            let mut item_ids: Vec<Uuid> = lines.iter().map(|l| l.item_id).collect();
+            item_ids.sort_unstable();
+            item_ids.dedup();
+            let resolved = costs
+                .resolve_unit_costs(&UnitCostRequest { company_id, item_ids })
+                .await
+                .map_err(|e| SellingError::CostRejected { code: e.code, message: e.message })?;
+
+            let cost_of = |item_id: Uuid| -> Result<Option<Decimal>, SellingError> {
+                let entry: &ItemUnitCost = resolved
+                    .iter()
+                    .find(|c| c.item_id == item_id)
+                    .ok_or_else(|| SellingError::CostRejected {
+                        code: "unit_cost_line_missing".into(),
+                        message: "cost source omitted an item".into(),
+                    })?;
+                match entry.unit_cost {
+                    Some(c) if c < Decimal::ZERO => Err(SellingError::CostRejected {
+                        code: "unit_cost_negative".into(),
+                        message: "cost source returned a negative unit cost".into(),
+                    }),
+                    other => Ok(other),
+                }
+            };
+            for l in &lines {
+                stamps.push((l.id, cost_of(l.item_id)?));
+            }
+        }
+
+        // (3) stamp + guard as ONE unit of work; a losing guard rolls the stamp back.
+        let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_company_on(&mut tx, company_id).await?;
+        if !stamps.is_empty() {
+            self.repos.order_items.stamp_unit_costs(&mut tx, order_id, &stamps).await?;
+        }
+        let row = self.repos.orders.confirm_tx(&mut tx, order_id, company_id).await?;
+        let Some(row) = row else {
+            // Refusal typing is byte-identical to the pre-snapshot era: wrong tenant, absent id,
+            // and non-draft are ALL `NotDraft` — no existence leak.
+            return Err(SellingError::NotDraft(order_id.to_string()));
+        };
+        tx.commit().await?;
         self.sink.publish(SellingEvent::SalesOrderConfirmed(SalesOrderConfirmed {
             order_id,
             company_id: row.company_id,
@@ -255,6 +331,7 @@ impl SellingWriteService {
         let order_id = self.create_sales_order(NewSalesOrder {
             order_number,
             quotation_id: Some(quotation_id),
+            delivery_carrier_id: None,
             company_id: q.company_id,
             branch_id: q.branch_id,
             customer_id: q.customer_id,

@@ -7,6 +7,8 @@
 pub mod error;
 pub use error::{ServiceError, ServiceResult};
 
+pub mod delivery_carrier_service;
+pub mod expense_reinvoice_link_service;
 pub mod quotation_service;
 pub mod quotation_item_service;
 pub mod quotation_template_service;
@@ -31,10 +33,20 @@ pub mod selling_delivery_seam;
 pub mod selling_invoice_seam;
 // The invoicing-policy engine: pure compute (qty_to_invoice / invoice_status) + the read models.
 pub mod selling_invoice_policy;
+// The unit-cost port (catalog standard-cost seam) + the margin engine (pure compute over the
+// confirm-time snapshots + the order margin read model).
+pub mod selling_unit_cost;
+pub mod selling_margin;
+// The delivery-carrier registry (master + the order carrier/tracking verb).
+pub mod selling_carrier;
+// The expense-reinvoice link verbs (attach / list / mark-invoiced) the host billing adapter drives.
+pub mod selling_reinvoice;
 // Reference consumer extension (extension-contract §5, second half) — a downstream rule on events.
 pub mod consumer_credit_rule_custom;
 // END CUSTOM
 
+pub use delivery_carrier_service::DeliveryCarrierService;
+pub use expense_reinvoice_link_service::ExpenseReinvoiceLinkService;
 pub use quotation_service::QuotationService;
 pub use quotation_item_service::QuotationItemService;
 pub use quotation_template_service::QuotationTemplateService;
@@ -57,6 +69,10 @@ pub use selling_cart_pricing::{
     CartPriceLine, CartPriceRequest, CartPricingError, CartPricingPort, PricedCart, PricedCartLine,
     PricedRewardLine,
 };
+pub use selling_unit_cost::{ItemUnitCost, NoUnitCostPort, UnitCostError, UnitCostPort, UnitCostRequest};
+pub use selling_margin::{SalesOrderMarginDto, SalesOrderMarginLineDto};
+pub use selling_carrier::{CarrierDto, UpdateCarrierPatch};
+pub use selling_reinvoice::ExpenseReinvoiceDto;
 pub use selling_write_service::{
     CartOrderLine, NewCartSalesOrder, NewLine, NewQuotation, NewSalesOrder, SellingError,
     SellingWriteService,

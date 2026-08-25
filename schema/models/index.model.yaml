@@ -14,6 +14,10 @@ version: 2
 schema: selling
 description: "Selling: Quotation -> Sales Order -> Sales Invoice. Owns order-to-cash intent; the sales invoice emits a revenue AccountingPost (Dr A/R - Cr Revenue - Cr PPN Output) into backbone-accounting via the GL-posting contract."
 
+# ADR-0014 company fence: every selling table is per-company RLS-fenced with a
+# NOT NULL company_id — no shared-blank or shared-tree rows exist in this module.
+company_fence: strict
+
 config:
   database: postgresql
   soft_delete: true
@@ -64,6 +68,8 @@ shared_types:
 # Import each entity model (parents before children).
 imports:
   - quotation.model.yaml
+  - delivery_carrier.model.yaml
   - sales_order.model.yaml
   - quotation_template.model.yaml
   - sales_team.model.yaml
+  - expense_reinvoice.model.yaml

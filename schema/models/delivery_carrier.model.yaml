@@ -1,0 +1,51 @@
+# =============================================================================
+# Domain: Selling
+# Entity: DeliveryCarrier
+# Description: Delivery-carrier master — registry only. No rates, no labels, no
+# carrier API surface (a later wave may add them; this pass is the name book +
+# the order link). Per-tenant master data; company_id is a logical FK
+# (ADR-0010 direct-fencing pattern).
+# =============================================================================
+
+models:
+  - name: DeliveryCarrier
+    collection: delivery_carriers
+    description: "Delivery carrier master (registry only — no rates, no labels, no carrier API surface)"
+
+    fields:
+      id:
+        type: uuid
+        attributes: ["@id", "@default(uuid)"]
+        description: "Unique delivery-carrier identifier"
+
+      company_id:
+        type: uuid
+        attributes: ["@required", "@exclude_from_foreign_key_check"]
+        description: "Books owner # logical FK organization.Company.id (direct fencing, ADR-0010)"
+
+      name:
+        type: string
+        attributes: ["@required", "@max(120)"]
+        description: "Carrier display name"
+
+      active:
+        type: bool
+        attributes: ["@default(true)"]
+        description: "Soft retirement flag (deactivate instead of delete — orders reference the carrier)"
+
+      tracking_url_template:
+        type: string?
+        attributes: ["@max(500)"]
+        description: "URL template with a {tracking_ref} placeholder; null = no tracking page"
+
+      metadata:
+        type: Metadata
+        attributes: ["@audit_metadata"]
+        description: "Audit metadata"
+
+    indexes:
+      - type: unique
+        fields: [company_id, name]
+        where: "deleted_at IS NULL"
+      - type: index
+        fields: [company_id]

@@ -28,6 +28,16 @@ models:
         attributes: ["@foreign_key(Quotation.id)"]
         description: "Source quotation (intra-module link; null for direct orders)"
 
+      delivery_carrier_id:
+        type: uuid?
+        attributes: ["@foreign_key(DeliveryCarrier.id)"]
+        description: "Chosen carrier (intra-module FK like quotation_id; null = none yet)"
+
+      tracking_ref:
+        type: string?
+        attributes: ["@max(120)"]
+        description: "Carrier tracking number (set when shipped; fulfillment metadata, not frozen money — writable after confirm)"
+
       company_id:
         type: uuid
         attributes: ["@required", "@exclude_from_foreign_key_check"]
@@ -157,6 +167,11 @@ models:
         type: decimal
         attributes: ["@default(0)", "@precision(18,2)", "@non_negative"]
         description: "quantity * unit_price - line_discount (computed by write path)"
+
+      unit_cost:
+        type: decimal?
+        attributes: ["@precision(18,6)", "@non_negative"]
+        description: "Confirm-time cost-per-unit snapshot from catalog standard_cost via UnitCostPort (Odoo purchase_price shape). Written ONLY by the confirm stamp; NULL ⇒ margin reads NULL, never zero. (18,6) mirrors catalog Item.standard_cost."
 
       billed_qty:
         type: decimal

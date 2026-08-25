@@ -12,6 +12,8 @@ pub mod sales_order_api_test;
 pub mod sales_order_item_api_test;
 pub mod sales_team_api_test;
 pub mod sales_person_allocation_api_test;
+pub mod delivery_carrier_api_test;
+pub mod expense_reinvoice_link_api_test;
 
 // Re-exports for convenience
 pub use quotation_api_test::*;
@@ -20,3 +22,5 @@ pub use sales_order_api_test::*;
 pub use sales_order_item_api_test::*;
 pub use sales_team_api_test::*;
 pub use sales_person_allocation_api_test::*;
+pub use delivery_carrier_api_test::*;
+pub use expense_reinvoice_link_api_test::*;

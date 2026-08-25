@@ -9,6 +9,8 @@ use axum::Router;
 use std::sync::Arc;
 
 use super::{
+    delivery_carrier_handler::create_delivery_carrier_routes,
+    expense_reinvoice_link_handler::create_expense_reinvoice_link_routes,
     quotation_handler::create_quotation_routes,
     quotation_item_handler::create_quotation_item_routes,
     quotation_template_handler::create_quotation_template_routes,
@@ -19,6 +21,8 @@ use super::{
 };
 
 use crate::application::service::{
+    DeliveryCarrierService,
+    ExpenseReinvoiceLinkService,
     QuotationService,
     QuotationItemService,
     QuotationTemplateService,
@@ -30,6 +34,8 @@ use crate::application::service::{
 
 /// Services collection for all CRUD endpoints
 pub struct HttpServices {
+    pub delivery_carrier: Arc<DeliveryCarrierService>,
+    pub expense_reinvoice_link: Arc<ExpenseReinvoiceLinkService>,
     pub quotation: Arc<QuotationService>,
     pub quotation_item: Arc<QuotationItemService>,
     pub quotation_template: Arc<QuotationTemplateService>,
@@ -56,6 +62,10 @@ pub struct HttpServices {
 /// 12. GET /api/v1/{collection}/:id/deleted - Get deleted by ID
 pub fn configure_routes(services: HttpServices) -> Router {
     Router::new()
+        // DeliveryCarrier routes (12 Backbone endpoints)
+        .merge(create_delivery_carrier_routes(services.delivery_carrier))
+        // ExpenseReinvoiceLink routes (12 Backbone endpoints)
+        .merge(create_expense_reinvoice_link_routes(services.expense_reinvoice_link))
         // Quotation routes (12 Backbone endpoints)
         .merge(create_quotation_routes(services.quotation))
         // QuotationItem routes (12 Backbone endpoints)
@@ -75,6 +85,14 @@ pub fn configure_routes(services: HttpServices) -> Router {
 /// Create an individual entity's routes (for modular configuration)
 pub mod individual {
     use super::*;
+
+    pub fn delivery_carrier_routes(service: Arc<DeliveryCarrierService>) -> Router {
+        create_delivery_carrier_routes(service)
+    }
+
+    pub fn expense_reinvoice_link_routes(service: Arc<ExpenseReinvoiceLinkService>) -> Router {
+        create_expense_reinvoice_link_routes(service)
+    }
 
     pub fn quotation_routes(service: Arc<QuotationService>) -> Router {
         create_quotation_routes(service)

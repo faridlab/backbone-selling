@@ -11,6 +11,10 @@ servers:
     description: Development server
 
 tags:
+  - name: DeliveryCarriers
+    description: DeliveryCarrier management endpoints
+  - name: ExpenseReinvoiceLinks
+    description: ExpenseReinvoiceLink management endpoints
   - name: Quotations
     description: Quotation management endpoints
   - name: QuotationItems
@@ -27,6 +31,738 @@ tags:
     description: SalesPersonAllocation management endpoints
 
 paths:
+  /api/v1/delivery_carriers:
+    get:
+      tags:
+        - DeliveryCarriers
+      summary: List DeliveryCarriers
+      description: Get a paginated list of DeliveryCarriers with optional filtering and sorting
+      operationId: listDeliveryCarriers
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrierList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - DeliveryCarriers
+      summary: Create DeliveryCarrier
+      description: Create a new DeliveryCarrier
+      operationId: createDeliveryCarrier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeliveryCarrierRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrier'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/delivery_carriers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+
+    get:
+      tags:
+        - DeliveryCarriers
+      summary: Get DeliveryCarrier by ID
+      operationId: getDeliveryCarrier
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrier'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - DeliveryCarriers
+      summary: Update DeliveryCarrier (full)
+      operationId: updateDeliveryCarrier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeliveryCarrierRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrier'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags:
+        - DeliveryCarriers
+      summary: Update DeliveryCarrier (partial)
+      operationId: patchDeliveryCarrier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchDeliveryCarrierRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrier'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - DeliveryCarriers
+      summary: Delete DeliveryCarrier (soft)
+      operationId: deleteDeliveryCarrier
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/delivery_carriers/bulk:
+    post:
+      tags:
+        - DeliveryCarriers
+      summary: Bulk create DeliveryCarriers
+      operationId: bulkCreateDeliveryCarriers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/CreateDeliveryCarrierRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeliveryCarrier'
+    put:
+      tags:
+        - DeliveryCarriers
+      summary: Bulk update DeliveryCarriers (full, atomic)
+      operationId: bulkUpdateDeliveryCarriers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                allOf:
+                  - type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                  - $ref: '#/components/schemas/UpdateDeliveryCarrierRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrierBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    patch:
+      tags:
+        - DeliveryCarriers
+      summary: Bulk partial-update DeliveryCarriers (atomic)
+      operationId: bulkPatchDeliveryCarriers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [ids, patch]
+                  properties:
+                    ids:
+                      type: array
+                      items: { type: string }
+                    patch:
+                      type: object
+                      additionalProperties: true
+                - type: object
+                  required: [items]
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        required: [id, patch]
+                        properties:
+                          id: { type: string }
+                          patch: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrierBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/delivery_carriers/upsert:
+    post:
+      tags:
+        - DeliveryCarriers
+      summary: Upsert DeliveryCarrier
+      operationId: upsertDeliveryCarrier
+      parameters:
+        - name: key_field
+          in: query
+          schema:
+            type: string
+        - name: key_value
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeliveryCarrierRequest'
+      responses:
+        '200':
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrier'
+
+  /api/v1/delivery_carriers/trash:
+    get:
+      tags:
+        - DeliveryCarriers
+      summary: List deleted DeliveryCarriers
+      operationId: listDeletedDeliveryCarriers
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrierList'
+
+  /api/v1/delivery_carriers/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    post:
+      tags:
+        - DeliveryCarriers
+      summary: Restore deleted DeliveryCarrier
+      operationId: restoreDeliveryCarrier
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrier'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/delivery_carriers/empty:
+    delete:
+      tags:
+        - DeliveryCarriers
+      summary: Empty trash for DeliveryCarriers
+      operationId: emptyTrashDeliveryCarriers
+      responses:
+        '200':
+          description: Trash emptied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted_count:
+                    type: integer
+
+  /api/v1/delivery_carriers/delete/bulk:
+    post:
+      tags:
+        - DeliveryCarriers
+      summary: Bulk soft-delete DeliveryCarriers by ids (atomic)
+      operationId: bulkDeleteDeliveryCarriers
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Soft-deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  soft_deleted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/delivery_carriers/restore/bulk:
+    post:
+      tags:
+        - DeliveryCarriers
+      summary: Bulk restore DeliveryCarriers by ids (atomic)
+      operationId: bulkRestoreDeliveryCarriers
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryCarrierBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/delivery_carriers/restore/all:
+    post:
+      tags:
+        - DeliveryCarriers
+      summary: Restore all soft-deleted DeliveryCarriers
+      operationId: restoreAllDeliveryCarriers
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restored: { type: integer }
+
+  /api/v1/delivery_carriers/trash/bulk:
+    delete:
+      tags:
+        - DeliveryCarriers
+      summary: Bulk permanently-delete DeliveryCarriers from trash by ids (atomic)
+      operationId: bulkPermanentDeleteDeliveryCarriers
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Permanently deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permanently_deleted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/expense_reinvoice_links:
+    get:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: List ExpenseReinvoiceLinks
+      description: Get a paginated list of ExpenseReinvoiceLinks with optional filtering and sorting
+      operationId: listExpenseReinvoiceLinks
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+        - $ref: '#/components/parameters/SortByParam'
+        - $ref: '#/components/parameters/SortOrderParam'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLinkList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Create ExpenseReinvoiceLink
+      description: Create a new ExpenseReinvoiceLink
+      operationId: createExpenseReinvoiceLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExpenseReinvoiceLinkRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLink'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/expense_reinvoice_links/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+
+    get:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Get ExpenseReinvoiceLink by ID
+      operationId: getExpenseReinvoiceLink
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLink'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Update ExpenseReinvoiceLink (full)
+      operationId: updateExpenseReinvoiceLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateExpenseReinvoiceLinkRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLink'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Update ExpenseReinvoiceLink (partial)
+      operationId: patchExpenseReinvoiceLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchExpenseReinvoiceLinkRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLink'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Delete ExpenseReinvoiceLink (soft)
+      operationId: deleteExpenseReinvoiceLink
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/expense_reinvoice_links/bulk:
+    post:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Bulk create ExpenseReinvoiceLinks
+      operationId: bulkCreateExpenseReinvoiceLinks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/CreateExpenseReinvoiceLinkRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExpenseReinvoiceLink'
+    put:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Bulk update ExpenseReinvoiceLinks (full, atomic)
+      operationId: bulkUpdateExpenseReinvoiceLinks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                allOf:
+                  - type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                  - $ref: '#/components/schemas/UpdateExpenseReinvoiceLinkRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLinkBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    patch:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Bulk partial-update ExpenseReinvoiceLinks (atomic)
+      operationId: bulkPatchExpenseReinvoiceLinks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [ids, patch]
+                  properties:
+                    ids:
+                      type: array
+                      items: { type: string }
+                    patch:
+                      type: object
+                      additionalProperties: true
+                - type: object
+                  required: [items]
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        required: [id, patch]
+                        properties:
+                          id: { type: string }
+                          patch: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLinkBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/expense_reinvoice_links/upsert:
+    post:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Upsert ExpenseReinvoiceLink
+      operationId: upsertExpenseReinvoiceLink
+      parameters:
+        - name: key_field
+          in: query
+          schema:
+            type: string
+        - name: key_value
+          in: query
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateExpenseReinvoiceLinkRequest'
+      responses:
+        '200':
+          description: Upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLink'
+
+  /api/v1/expense_reinvoice_links/trash:
+    get:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: List deleted ExpenseReinvoiceLinks
+      operationId: listDeletedExpenseReinvoiceLinks
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PerPageParam'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLinkList'
+
+  /api/v1/expense_reinvoice_links/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    post:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Restore deleted ExpenseReinvoiceLink
+      operationId: restoreExpenseReinvoiceLink
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLink'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/expense_reinvoice_links/empty:
+    delete:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Empty trash for ExpenseReinvoiceLinks
+      operationId: emptyTrashExpenseReinvoiceLinks
+      responses:
+        '200':
+          description: Trash emptied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted_count:
+                    type: integer
+
+  /api/v1/expense_reinvoice_links/delete/bulk:
+    post:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Bulk soft-delete ExpenseReinvoiceLinks by ids (atomic)
+      operationId: bulkDeleteExpenseReinvoiceLinks
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Soft-deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  soft_deleted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/expense_reinvoice_links/restore/bulk:
+    post:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Bulk restore ExpenseReinvoiceLinks by ids (atomic)
+      operationId: bulkRestoreExpenseReinvoiceLinks
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpenseReinvoiceLinkBulkResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/expense_reinvoice_links/restore/all:
+    post:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Restore all soft-deleted ExpenseReinvoiceLinks
+      operationId: restoreAllExpenseReinvoiceLinks
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restored: { type: integer }
+
+  /api/v1/expense_reinvoice_links/trash/bulk:
+    delete:
+      tags:
+        - ExpenseReinvoiceLinks
+      summary: Bulk permanently-delete ExpenseReinvoiceLinks from trash by ids (atomic)
+      operationId: bulkPermanentDeleteExpenseReinvoiceLinks
+      requestBody:
+        $ref: '#/components/requestBodies/BatchIds'
+      responses:
+        '200':
+          description: Permanently deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permanently_deleted: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
   /api/v1/quotations:
     get:
       tags:
@@ -2591,6 +3327,244 @@ paths:
 
 components:
   schemas:
+    DeliveryCarrier:
+      type: object
+      required:
+        - id
+        - company_id
+        - name
+        - active
+        - metadata
+      properties:
+        id:
+          type: string
+          format: uuid
+        company_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        active:
+          type: boolean
+        tracking_url_template:
+          nullable: true
+          type: string
+          maxLength: 500
+        metadata:
+          type: object
+
+    DeliveryCarrierBulkResult:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryCarrier'
+        total: { type: integer }
+        failed: { type: integer }
+        errors:
+          type: array
+          items: { type: string }
+
+    CreateDeliveryCarrierRequest:
+      type: object
+      required:
+        - company_id
+        - name
+        - active
+        - metadata
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        active:
+          type: boolean
+        tracking_url_template:
+          nullable: true
+          type: string
+          maxLength: 500
+        metadata:
+          type: object
+
+    UpdateDeliveryCarrierRequest:
+      type: object
+      required:
+        - company_id
+        - name
+        - active
+        - metadata
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        active:
+          type: boolean
+        tracking_url_template:
+          nullable: true
+          type: string
+          maxLength: 500
+        metadata:
+          type: object
+
+    PatchDeliveryCarrierRequest:
+      type: object
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 120
+        active:
+          type: boolean
+        tracking_url_template:
+          nullable: true
+          type: string
+          maxLength: 500
+        metadata:
+          type: object
+
+    DeliveryCarrierList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryCarrier'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    ExpenseReinvoiceLink:
+      type: object
+      required:
+        - id
+        - company_id
+        - order_id
+        - expense_id
+        - amount
+        - state
+        - metadata
+      properties:
+        id:
+          type: string
+          format: uuid
+        company_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        expense_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        state:
+          type: string
+        metadata:
+          type: object
+
+    ExpenseReinvoiceLinkBulkResult:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExpenseReinvoiceLink'
+        total: { type: integer }
+        failed: { type: integer }
+        errors:
+          type: array
+          items: { type: string }
+
+    CreateExpenseReinvoiceLinkRequest:
+      type: object
+      required:
+        - company_id
+        - order_id
+        - expense_id
+        - amount
+        - state
+        - metadata
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        expense_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        state:
+          type: string
+        metadata:
+          type: object
+
+    UpdateExpenseReinvoiceLinkRequest:
+      type: object
+      required:
+        - company_id
+        - order_id
+        - expense_id
+        - amount
+        - state
+        - metadata
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        expense_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        state:
+          type: string
+        metadata:
+          type: object
+
+    PatchExpenseReinvoiceLinkRequest:
+      type: object
+      properties:
+        company_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        expense_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        state:
+          type: string
+        metadata:
+          type: object
+
+    ExpenseReinvoiceLinkList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExpenseReinvoiceLink'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
     Quotation:
       type: object
       required:
@@ -3186,6 +4160,14 @@ components:
           nullable: true
           type: string
           format: uuid
+        delivery_carrier_id:
+          nullable: true
+          type: string
+          format: uuid
+        tracking_ref:
+          nullable: true
+          type: string
+          maxLength: 120
         company_id:
           type: string
           format: uuid
@@ -3258,6 +4240,14 @@ components:
           nullable: true
           type: string
           format: uuid
+        delivery_carrier_id:
+          nullable: true
+          type: string
+          format: uuid
+        tracking_ref:
+          nullable: true
+          type: string
+          maxLength: 120
         company_id:
           type: string
           format: uuid
@@ -3317,6 +4307,14 @@ components:
           nullable: true
           type: string
           format: uuid
+        delivery_carrier_id:
+          nullable: true
+          type: string
+          format: uuid
+        tracking_ref:
+          nullable: true
+          type: string
+          maxLength: 120
         company_id:
           type: string
           format: uuid
@@ -3364,6 +4362,14 @@ components:
           nullable: true
           type: string
           format: uuid
+        delivery_carrier_id:
+          nullable: true
+          type: string
+          format: uuid
+        tracking_ref:
+          nullable: true
+          type: string
+          maxLength: 120
         company_id:
           type: string
           format: uuid
@@ -3452,6 +4458,9 @@ components:
           type: string
         line_amount:
           type: string
+        unit_cost:
+          nullable: true
+          type: string
         billed_qty:
           type: string
         delivered_qty:
@@ -3513,6 +4522,9 @@ components:
           type: string
         line_amount:
           type: string
+        unit_cost:
+          nullable: true
+          type: string
         billed_qty:
           type: string
         delivered_qty:
@@ -3561,6 +4573,9 @@ components:
           type: string
         line_amount:
           type: string
+        unit_cost:
+          nullable: true
+          type: string
         billed_qty:
           type: string
         delivered_qty:
@@ -3595,6 +4610,9 @@ components:
         line_discount:
           type: string
         line_amount:
+          type: string
+        unit_cost:
+          nullable: true
           type: string
         billed_qty:
           type: string

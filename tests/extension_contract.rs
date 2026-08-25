@@ -15,6 +15,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use backbone_selling::application::service::consumer_credit_rule_custom::CreditWatchConsumer;
+use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewSalesOrder, SellingWriteService,
 };
@@ -30,7 +31,7 @@ async fn pool() -> PgPool {
 
 async fn make_order(w: &SellingWriteService, company: Uuid, customer: Uuid, total_price: &str) -> Uuid {
     w.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None,
         customer_id: customer, order_date: day(2026, 7, 3), delivery_date: None, currency: None,
         tax_rate: Decimal::ZERO, notes: None,
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
@@ -52,12 +53,12 @@ async fn consumer_rule_rides_domain_event() {
 
     // Under the limit → confirmed, no breach recorded.
     let ok_order = make_order(&w, company, customer, "1000000").await;
-    w.confirm_sales_order(ok_order, company).await.unwrap();
+    w.confirm_sales_order(ok_order, company, &NoUnitCostPort).await.unwrap();
     assert_eq!(breaches.lock().unwrap().len(), 0, "under-limit order does not breach");
 
     // Over the limit → confirmed, consumer records a breach (its own concept, not selling's).
     let big_order = make_order(&w, company, customer, "9000000").await;
-    w.confirm_sales_order(big_order, company).await.unwrap();
+    w.confirm_sales_order(big_order, company, &NoUnitCostPort).await.unwrap();
     let recorded = breaches.lock().unwrap();
     assert_eq!(recorded.len(), 1, "over-limit order breaches");
     assert_eq!(recorded[0].order_id, big_order);
@@ -73,7 +74,7 @@ async fn selling_works_without_any_consumer() {
     let (company, customer) = (Uuid::new_v4(), Uuid::new_v4());
     let w = SellingWriteService::new(pool.clone()); // default LoggingSink, no consumer
     let order = make_order(&w, company, customer, "9000000").await;
-    w.confirm_sales_order(order, company).await.unwrap();
+    w.confirm_sales_order(order, company, &NoUnitCostPort).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order).fetch_one(&pool).await.unwrap();
     assert_eq!(st, "to_deliver_and_bill");

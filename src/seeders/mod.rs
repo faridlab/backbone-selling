@@ -9,6 +9,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::PgPool;
 
+mod delivery_carrier_seeder;
+mod expense_reinvoice_link_seeder;
 mod quotation_seeder;
 mod quotation_item_seeder;
 mod quotation_template_seeder;
@@ -17,6 +19,8 @@ mod sales_order_item_seeder;
 mod sales_team_seeder;
 mod sales_person_allocation_seeder;
 
+pub use delivery_carrier_seeder::SeedDeliveryCarrierSeeder;
+pub use expense_reinvoice_link_seeder::SeedExpenseReinvoiceLinkSeeder;
 pub use quotation_seeder::SeedQuotationSeeder;
 pub use quotation_item_seeder::SeedQuotationItemSeeder;
 pub use quotation_template_seeder::SeedQuotationTemplateSeeder;

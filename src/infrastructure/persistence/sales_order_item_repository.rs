@@ -135,6 +135,36 @@ pub struct LineDeliveryCapacityRow {
     pub capacity: Decimal,
 }
 
+/// One live order line as the confirm-time cost stamp reads it: just enough to ask the
+/// `UnitCostPort` for the DISTINCT item costs and map results back onto lines.
+pub struct CostStampLineRow {
+    pub id: Uuid,
+    pub item_id: Uuid,
+}
+
+/// One live order line as the margin read model loads it. `unit_cost` is the confirm-time
+/// snapshot (NULL = never stamped / no cost maintained — margin reads NULL, never zero).
+pub struct MarginLineRow {
+    pub id: Uuid,
+    pub item_id: Uuid,
+    pub quantity: Decimal,
+    pub unit_price: Decimal,
+    pub line_discount: Decimal,
+    pub line_amount: Decimal,
+    pub unit_cost: Option<Decimal>,
+}
+
+/// The order-wide margin rollup (SQL mirror of the margin expression in
+/// `selling_margin.rs`): the sum over COSTED lines only, plus the coverage counters that make
+/// partial-coverage orders visible. `margin_sum` / `amount_sum_costed` are NULL when no line
+/// carries a cost snapshot.
+pub struct MarginRollupRow {
+    pub costed_lines: i64,
+    pub total_lines: i64,
+    pub margin_sum: Option<Decimal>,
+    pub amount_sum_costed: Option<Decimal>,
+}
+
 /// Hand-written SalesOrderItem SQL. Lives here (not in the write service) per the module's 4-layer
 /// rule: services orchestrate and own the unit of work, repositories hold the SQL.
 impl SalesOrderItemRepository {
@@ -452,6 +482,10 @@ impl SalesOrderItemRepository {
     /// service) plus the recomputed `line_amount`. Takes the CALLER'S connection so the edit lands
     /// in the same transaction that holds the `FOR UPDATE` lock from
     /// [`Self::lock_line_with_parent_status`].
+    ///
+    /// `unit_cost` is DELIBERATELY absent from the column list: the confirm stamp
+    /// ([`Self::stamp_unit_costs`]) is the single writer, so no later edit — and no later catalog
+    /// standard_cost change — can rewrite a confirmed order's cost snapshot. Keep it excluded.
     pub async fn update_line_full(
         &self,
         conn: &mut sqlx::PgConnection,
@@ -474,6 +508,125 @@ impl SalesOrderItemRepository {
         .execute(conn)
         .await?;
         Ok(())
+    }
+
+    /// Read an order's live line (id, item_id) pairs for the confirm-time cost stamp. ID-only:
+    /// rides the caller's scoped connection (RLS fences it — a wrong-tenant order reads [],
+    /// the same non-leaking posture as `find_ref` on the header repository). The caller then
+    /// resolves the DISTINCT item costs through the `UnitCostPort` BEFORE opening the stamp
+    /// transaction.
+    pub async fn list_cost_stamp_lines(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<Vec<CostStampLineRow>, sqlx::Error> {
+        let rows = company_scope::fetch_all_rows_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT id, item_id FROM selling.sales_order_items
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(rows.iter().map(|r| CostStampLineRow {
+            id: r.get("id"),
+            item_id: r.get("item_id"),
+        }).collect())
+    }
+
+    /// Stamp the confirm-time unit-cost snapshot onto an order's live lines, ONE statement via an
+    /// unnest join. Takes the CALLER'S connection: this runs INSIDE the confirm transaction, right
+    /// before the draft→confirmed guard, so a losing concurrent confirm rolls its stamp back.
+    ///
+    /// A NULL cost stamps NULL — indistinguishable in the column from never-stamped, which is
+    /// deliberate: both mean "no cost maintained" and margin treats them identically (NULL, never
+    /// zero). No marker column exists for "stamped NULL" — a non-goal, documented in
+    /// `selling_margin.rs`.
+    ///
+    /// A line id in `stamps` that no longer belongs to the order (or is soft-deleted) is simply
+    /// not matched — the stamp for a stale line set is a no-op for that id. A line ADDED to the
+    /// draft between the [`Self::list_cost_stamp_lines`] read and this stamp is not in the unnest
+    /// table and stays NULL: honest absence, never a WRONG cost (the line-edit `FOR UPDATE` in
+    /// `lock_line_with_parent_status` serializes against this statement's row writes).
+    pub async fn stamp_unit_costs(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        order_id: Uuid,
+        stamps: &[(Uuid, Option<Decimal>)],
+    ) -> Result<(), sqlx::Error> {
+        let line_ids: Vec<Uuid> = stamps.iter().map(|(id, _)| *id).collect();
+        let costs: Vec<Option<Decimal>> = stamps.iter().map(|(_, c)| *c).collect();
+        sqlx::query(
+            r#"UPDATE selling.sales_order_items soi SET unit_cost = v.cost
+               FROM (SELECT * FROM unnest($2::uuid[], $3::numeric[])) AS v(line_id, cost)
+               WHERE soi.id = v.line_id AND soi.order_id = $1
+                 AND (soi.metadata->>'deleted_at') IS NULL"#,
+        )
+        .bind(order_id).bind(line_ids).bind(costs)
+        .execute(conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Read an order's live lines for the margin read model (the per-line snapshot figures the
+    /// pure compute in `selling_margin.rs` turns into margin / margin_percent). ID-only — same
+    /// scoping as [`Self::list_cost_stamp_lines`].
+    pub async fn list_margin_rows(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<Vec<MarginLineRow>, sqlx::Error> {
+        let rows = company_scope::fetch_all_rows_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT id, item_id, quantity, unit_price, line_discount, line_amount, unit_cost
+                   FROM selling.sales_order_items
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL ORDER BY id"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(rows.iter().map(|r| MarginLineRow {
+            id: r.get("id"),
+            item_id: r.get("item_id"),
+            quantity: r.get("quantity"),
+            unit_price: r.get("unit_price"),
+            line_discount: r.get("line_discount"),
+            line_amount: r.get("line_amount"),
+            unit_cost: r.get("unit_cost"),
+        }).collect())
+    }
+
+    /// The order-wide margin rollup — the SQL MIRROR of the margin expression documented in
+    /// `selling_margin.rs` (`line_amount − unit_cost·quantity`, over COSTED lines only):
+    /// `margin_sum` = `SUM(line_amount − unit_cost*quantity) FILTER (WHERE unit_cost IS NOT NULL)`
+    /// (NULL when no costed line exists), `amount_sum_costed` = the line-amount sum over the same
+    /// costed subset, plus the coverage counters. The Rust read model must agree with this
+    /// expression — drift here makes the order rollup and the per-line computes contradict each
+    /// other. ID-only — same scoping as [`Self::list_cost_stamp_lines`].
+    pub async fn margin_rollup(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<MarginRollupRow, sqlx::Error> {
+        let row = company_scope::fetch_one_row_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT COUNT(*) FILTER (WHERE unit_cost IS NOT NULL) AS costed_lines,
+                          COUNT(*) AS total_lines,
+                          SUM(line_amount - unit_cost * quantity)
+                              FILTER (WHERE unit_cost IS NOT NULL) AS margin_sum,
+                          SUM(line_amount) FILTER (WHERE unit_cost IS NOT NULL) AS amount_sum_costed
+                   FROM selling.sales_order_items
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(MarginRollupRow {
+            costed_lines: row.get("costed_lines"),
+            total_lines: row.get("total_lines"),
+            margin_sum: row.get("margin_sum"),
+            amount_sum_costed: row.get("amount_sum_costed"),
+        })
     }
 }
 

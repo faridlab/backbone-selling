@@ -59,6 +59,7 @@ pub struct SalesOrderItem {
     pub unit_price: Decimal,
     pub line_discount: Decimal,
     pub line_amount: Decimal,
+    pub unit_cost: Option<Decimal>,
     pub billed_qty: Decimal,
     pub delivered_qty: Decimal,
     pub invoice_policy: InvoicePolicy,
@@ -86,6 +87,7 @@ impl SalesOrderItem {
             unit_price,
             line_discount,
             line_amount,
+            unit_cost: None,
             billed_qty,
             delivered_qty,
             invoice_policy,
@@ -155,6 +157,12 @@ impl SalesOrderItem {
         self
     }
 
+    /// Set the unit_cost field (chainable)
+    pub fn with_unit_cost(mut self, value: Decimal) -> Self {
+        self.unit_cost = Some(value);
+        self
+    }
+
     // ==========================================================
     // Partial Update
     // ==========================================================
@@ -186,6 +194,9 @@ impl SalesOrderItem {
                 }
                 "line_amount" => {
                     if let Ok(v) = serde_json::from_value(value) { self.line_amount = v; }
+                }
+                "unit_cost" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.unit_cost = v; }
                 }
                 "billed_qty" => {
                     if let Ok(v) = serde_json::from_value(value) { self.billed_qty = v; }
@@ -284,6 +295,7 @@ pub struct SalesOrderItemBuilder {
     unit_price: Option<Decimal>,
     line_discount: Option<Decimal>,
     line_amount: Option<Decimal>,
+    unit_cost: Option<Decimal>,
     billed_qty: Option<Decimal>,
     delivered_qty: Option<Decimal>,
     invoice_policy: Option<InvoicePolicy>,
@@ -339,6 +351,12 @@ impl SalesOrderItemBuilder {
         self
     }
 
+    /// Set the unit_cost field (optional)
+    pub fn unit_cost(mut self, value: Decimal) -> Self {
+        self.unit_cost = Some(value);
+        self
+    }
+
     /// Set the billed_qty field (default: `Decimal::from(0)`)
     pub fn billed_qty(mut self, value: Decimal) -> Self {
         self.billed_qty = Some(value);
@@ -383,6 +401,7 @@ impl SalesOrderItemBuilder {
             unit_price,
             line_discount: self.line_discount.unwrap_or(Decimal::from(0)),
             line_amount: self.line_amount.unwrap_or(Decimal::from(0)),
+            unit_cost: self.unit_cost,
             billed_qty: self.billed_qty.unwrap_or(Decimal::from(0)),
             delivered_qty: self.delivered_qty.unwrap_or(Decimal::from(0)),
             invoice_policy: self.invoice_policy.unwrap_or_default(),

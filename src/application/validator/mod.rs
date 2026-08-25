@@ -5,6 +5,8 @@
 pub mod shared_types;
 pub use shared_types::{ValidationError, ValidationErrors, ValidationResult, EntityValidator};
 
+pub mod delivery_carrier_validator;
+pub mod expense_reinvoice_link_validator;
 pub mod quotation_validator;
 pub mod quotation_item_validator;
 pub mod quotation_template_validator;
@@ -13,6 +15,8 @@ pub mod sales_order_item_validator;
 pub mod sales_team_validator;
 pub mod sales_person_allocation_validator;
 
+pub use delivery_carrier_validator::{DeliveryCarrierValidator, delivery_carrier_validator};
+pub use expense_reinvoice_link_validator::{ExpenseReinvoiceLinkValidator, expense_reinvoice_link_validator};
 pub use quotation_validator::{QuotationValidator, quotation_validator};
 pub use quotation_item_validator::{QuotationItemValidator, quotation_item_validator};
 pub use quotation_template_validator::{QuotationTemplateValidator, quotation_template_validator};

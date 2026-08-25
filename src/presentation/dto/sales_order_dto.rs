@@ -40,6 +40,11 @@ pub struct CreateSalesOrderDto {
     pub order_number: String,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "quotation_id")]
     pub quotation_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "delivery_carrier_id")]
+    pub delivery_carrier_id: Option<Uuid>,
+    #[cfg_attr(feature = "validation", validate(length(max = 120)))]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "tracking_ref")]
+    pub tracking_ref: Option<String>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "company_id")]
     pub company_id: Uuid,
@@ -87,6 +92,11 @@ pub struct UpdateSalesOrderDto {
     pub order_number: String,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "quotation_id")]
     pub quotation_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "delivery_carrier_id")]
+    pub delivery_carrier_id: Option<Uuid>,
+    #[cfg_attr(feature = "validation", validate(length(max = 120)))]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "tracking_ref")]
+    pub tracking_ref: Option<String>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "company_id")]
     pub company_id: Uuid,
@@ -134,6 +144,11 @@ pub struct PatchSalesOrderDto {
     pub order_number: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "quotation_id")]
     pub quotation_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "delivery_carrier_id")]
+    pub delivery_carrier_id: Option<Uuid>,
+    #[cfg_attr(feature = "validation", validate(length(max = 120)))]
+    #[serde(skip_serializing_if = "Option::is_none", alias = "tracking_ref")]
+    pub tracking_ref: Option<String>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
     pub company_id: Option<Uuid>,
@@ -169,7 +184,7 @@ pub struct PatchSalesOrderDto {
 impl PatchSalesOrderDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.order_number.is_some() || self.quotation_id.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.order_date.is_some() || self.delivery_date.is_some() || self.currency.is_some() || self.subtotal.is_some() || self.tax_rate.is_some() || self.tax_amount.is_some() || self.total.is_some() || self.notes.is_some()
+        self.order_number.is_some() || self.quotation_id.is_some() || self.delivery_carrier_id.is_some() || self.tracking_ref.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.order_date.is_some() || self.delivery_date.is_some() || self.currency.is_some() || self.subtotal.is_some() || self.tax_rate.is_some() || self.tax_amount.is_some() || self.total.is_some() || self.notes.is_some()
     }
 }
 
@@ -190,6 +205,8 @@ pub struct SalesOrderResponseDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub order_number: String,
     pub quotation_id: Option<Uuid>,
+    pub delivery_carrier_id: Option<Uuid>,
+    pub tracking_ref: Option<String>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
@@ -265,7 +282,7 @@ pub struct SalesOrderSummaryDto {
     pub id: Uuid,
     pub order_number: String,
     pub quotation_id: Option<Uuid>,
-    pub company_id: Uuid,
+    pub delivery_carrier_id: Option<Uuid>,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -279,6 +296,8 @@ impl From<SalesOrder> for SalesOrderResponseDto {
             id: entity.id,
             order_number: entity.order_number,
             quotation_id: entity.quotation_id,
+            delivery_carrier_id: entity.delivery_carrier_id,
+            tracking_ref: entity.tracking_ref,
             company_id: entity.company_id,
             branch_id: entity.branch_id,
             customer_id: entity.customer_id,
@@ -303,7 +322,7 @@ impl From<SalesOrder> for SalesOrderSummaryDto {
             id: entity.id,
             order_number: entity.order_number,
             quotation_id: entity.quotation_id,
-            company_id: entity.company_id,
+            delivery_carrier_id: entity.delivery_carrier_id,
             created_at,
         }
     }
@@ -315,6 +334,8 @@ impl From<CreateSalesOrderDto> for SalesOrder {
             id: Uuid::new_v4(),
             order_number: dto.order_number,
             quotation_id: dto.quotation_id,
+            delivery_carrier_id: dto.delivery_carrier_id,
+            tracking_ref: dto.tracking_ref,
             company_id: dto.company_id,
             branch_id: dto.branch_id,
             customer_id: dto.customer_id,
@@ -338,6 +359,8 @@ impl From<&SalesOrder> for SalesOrderResponseDto {
             id: entity.id.clone(),
             order_number: entity.order_number.clone(),
             quotation_id: entity.quotation_id.clone(),
+            delivery_carrier_id: entity.delivery_carrier_id.clone(),
+            tracking_ref: entity.tracking_ref.clone(),
             company_id: entity.company_id.clone(),
             branch_id: entity.branch_id.clone(),
             customer_id: entity.customer_id.clone(),
@@ -365,6 +388,8 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderDto> for SalesOrder {
     fn apply_update(mut self, dto: UpdateSalesOrderDto) -> backbone_core::ServiceResult<Self> {
         self.order_number = dto.order_number;
         self.quotation_id = dto.quotation_id;
+        self.delivery_carrier_id = dto.delivery_carrier_id;
+        self.tracking_ref = dto.tracking_ref;
         self.company_id = dto.company_id;
         self.branch_id = dto.branch_id;
         self.customer_id = dto.customer_id;

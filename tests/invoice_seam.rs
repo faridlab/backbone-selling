@@ -17,6 +17,7 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use backbone_selling::application::service::selling_events::{InvoiceRequestEnvelope, SellingEvent, SellingEventSink};
+use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{NewLine, NewSalesOrder, SellingError, SellingWriteService};
 
 use backbone_billing::application::service::billing_events::{BillingEvent, BillingEventSink};
@@ -96,10 +97,10 @@ fn line(item: Uuid, qty: &str) -> NewLine {
 }
 async fn confirmed_order(selling: &SellingWriteService, company: Uuid, lines: Vec<NewLine>) -> Uuid {
     let order = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
         order_date: day(), delivery_date: None, currency: None, tax_rate: Decimal::ZERO, notes: None, lines,
     }).await.unwrap();
-    selling.confirm_sales_order(order, company).await.unwrap();
+    selling.confirm_sales_order(order, company, &NoUnitCostPort).await.unwrap();
     order
 }
 async fn billed_total(pool: &PgPool, order: Uuid) -> Decimal {
@@ -159,11 +160,11 @@ async fn order_invoiced_across_three_modules() {
 
     // 1) selling: create + confirm a Sales Order — 10 @ 100,000 (no tax).
     let order = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None, customer_id: customer,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None, customer_id: customer,
         order_date: day(), delivery_date: None, currency: None, tax_rate: Decimal::ZERO, notes: None,
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None, quantity: d("10"), unit_price: d("100000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(order, company).await.unwrap();
+    selling.confirm_sales_order(order, company, &NoUnitCostPort).await.unwrap();
 
     // 2) selling emits the invoice request (un-invoiced remainder = 10).
     let req: InvoiceRequestEnvelope = selling.build_invoice_request(order).await.unwrap();

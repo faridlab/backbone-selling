@@ -5,6 +5,8 @@
 //! This module provides DTOs for the presentation layer,
 //! with validation and OpenAPI schema support.
 
+pub mod delivery_carrier_dto;
+pub mod expense_reinvoice_link_dto;
 pub mod quotation_dto;
 pub mod quotation_item_dto;
 pub mod quotation_template_dto;
@@ -14,6 +16,22 @@ pub mod sales_team_dto;
 pub mod sales_person_allocation_dto;
 
 // Re-exports
+pub use delivery_carrier_dto::{
+    CreateDeliveryCarrierDto,
+    UpdateDeliveryCarrierDto,
+    PatchDeliveryCarrierDto,
+    DeliveryCarrierResponseDto,
+    DeliveryCarrierListResponseDto,
+    DeliveryCarrierSummaryDto,
+};
+pub use expense_reinvoice_link_dto::{
+    CreateExpenseReinvoiceLinkDto,
+    UpdateExpenseReinvoiceLinkDto,
+    PatchExpenseReinvoiceLinkDto,
+    ExpenseReinvoiceLinkResponseDto,
+    ExpenseReinvoiceLinkListResponseDto,
+    ExpenseReinvoiceLinkSummaryDto,
+};
 pub use quotation_dto::{
     CreateQuotationDto,
     UpdateQuotationDto,

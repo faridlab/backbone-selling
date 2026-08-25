@@ -7,6 +7,47 @@ the date the change was applied.
 
 ## [Unreleased]
 
+### Added — the unit-cost margin snapshot, the expense-reinvoice link, and the delivery-carrier registry ([ADR-008], 2026-08-25)
+
+Odoo `sale.order.line.purchase_price` semantics, adapted. Confirm stamps each live order line's
+`unit_cost` from a host-supplied cost source; margin is a read-time compute over those snapshots
+(never persisted, never writable). Selling also gains the rebill-expenses-to-the-customer link
+(the host billing adapter's pull surface) and a registry-only delivery-carrier master:
+
+- **Added (schema + migration `20260825000100_selling_margin_delivery_reinvoice`):**
+  `unit_cost NUMERIC(18,6)` on `sales_order_items` (confirm-only writer), the
+  `ExpenseReinvoiceLink` table (`state` pending/invoiced, partial unique `(order_id, expense_id)`
+  over live rows — the double-bill guard), the `DeliveryCarrier` registry, and
+  `delivery_carrier_id` + `tracking_ref` on `sales_orders`. CHECK constraints land NOT VALID then
+  VALIDATE; no backfill.
+- **Added (port):** `UnitCostPort` / `UnitCostRequest` / `ItemUnitCost` / `UnitCostError` — the
+  catalog standard-cost seam (DTOs as the wire contract, zero cargo edge), plus the
+  all-NULL `NoUnitCostPort` for compositions that never confirm orders.
+- **Breaking (public API):** `confirm_sales_order(order_id, company_id, costs: &dyn UnitCostPort)`
+  now takes the cost port as a third argument, and `create_guarded_selling_routes` takes
+  `unit_cost: Arc<dyn UnitCostPort>` as a fourth REQUIRED argument. The port runs BEFORE the
+  transaction; the stamp + the unchanged draft-guard run as one unit of work, so a losing confirm
+  rolls its stamp back. Port `Err`, an omitted item, or a negative cost each REFUSE the confirm
+  (`cost_rejected`, 422); a NULL cost PROCEEDS and reads as honest absence.
+- **Added (public API):** `order_margin_view` (per-line `margin` / `marginPercent` + the costed-
+  subset rollup with coverage counters; `line_margin = line_amount − unit_cost·qty` —
+  `unit_cost` NULL ⇒ margin NULL, never zero; negative margins are legal),
+  `attach_expense_reinvoice` / `list_expense_reinvoices` / `mark_expense_reinvoice_invoiced`
+  (a double mark is a LOUD refusal; `expense_id` is taken on faith — the host validates the
+  expense), and the carrier verbs `create_delivery_carrier` / `update_delivery_carrier` /
+  `list_delivery_carriers` / `set_order_delivery` (deactivate-not-delete; carrier/tracking are
+  fulfillment metadata — writable on draft AND confirmed orders, refused on cancelled).
+- **Added (routes):** `GET /sales-orders/:id/margin`,
+  `GET+POST /sales-orders/:id/expense-reinvoices`, `POST /expense-reinvoices/:id/mark-invoiced`,
+  `POST+GET /delivery-carriers`, `PATCH /delivery-carriers/:id`,
+  `POST /sales-orders/set-delivery`; `CreateSalesOrderBody.deliveryCarrierId`; the generic
+  read routers for the two registry entities mount at their framework paths.
+- **New stable error codes (422/404):** `cost_rejected` (carries the port's code verbatim),
+  `carrier_not_found`, `duplicate_carrier_name`, `reinvoice_not_found`, `duplicate_reinvoice`,
+  `invalid_reinvoice_amount`.
+- **No new events:** the stamp rides `SalesOrderConfirmed`; the reinvoice link is a pull model
+  (no outbox, no push) — the billing adapter pulls the pending list and marks after its post acks.
+
 ### Added — the invoicing-policy engine, the quotation machine, and the order's exits ([ADR-007], 2026-08-24)
 
 Odoo `sale.order` semantics, adapted. Per-line invoicing policy (`order` — default — or
@@ -143,3 +184,7 @@ a balanced posting into `backbone-accounting`.
 [ADR-002]: docs/adr/ADR-002-gl-posting-seam.md
 [ADR-003]: docs/adr/ADR-003-order-status-model.md
 [ADR-004]: docs/adr/ADR-004-delivery-seam.md
+[ADR-005]: docs/adr/ADR-005-invoice-seam.md
+[ADR-006]: docs/adr/ADR-006-selling-exits-invoice-business.md
+[ADR-007]: docs/adr/ADR-007-invoicing-policy-engine.md
+[ADR-008]: docs/adr/ADR-008-margin-and-registry.md

@@ -7,6 +7,7 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{NewLine, NewSalesOrder, SellingWriteService};
 
 fn d(s: &str) -> Decimal { Decimal::from_str_exact(s).unwrap() }
@@ -26,13 +27,13 @@ async fn dod1_delivery_request_is_durably_staged() {
     let selling = SellingWriteService::new(pool.clone()); // default LoggingSink → in-proc publish is dropped
 
     let oid = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None,
         customer_id: Uuid::new_v4(), order_date: day(), delivery_date: None, currency: None,
         tax_rate: d("0"), notes: None,
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(oid, company).await.unwrap();
+    selling.confirm_sales_order(oid, company, &NoUnitCostPort).await.unwrap();
 
     selling.build_delivery_request(oid).await.unwrap();
 

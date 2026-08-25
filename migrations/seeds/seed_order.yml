@@ -20,3 +20,7 @@
 
 # Newly added seeds (preserve manual order above):
 - quotation_template_seed
+
+# Newly added seeds (preserve manual order above):
+- expense_reinvoice_link_seed
+- delivery_carrier_seed

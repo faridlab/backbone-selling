@@ -94,3 +94,31 @@ async fn test_sales_person_allocation_api() {
     }
 }
 
+
+#[tokio::test]
+async fn test_delivery_carrier_api() {
+    let mut test = DeliveryCarrierApiTest::new();
+    let results = test.run_all().await;
+
+    let failed: Vec<_> = results.iter().filter(|r| !r.success).collect();
+    if !failed.is_empty() {
+        for f in &failed {
+            eprintln!("FAILED: {} - {}", f.test_name, f.details);
+        }
+        panic!("{} tests failed", failed.len());
+    }
+}
+
+#[tokio::test]
+async fn test_expense_reinvoice_link_api() {
+    let mut test = ExpenseReinvoiceLinkApiTest::new();
+    let results = test.run_all().await;
+
+    let failed: Vec<_> = results.iter().filter(|r| !r.success).collect();
+    if !failed.is_empty() {
+        for f in &failed {
+            eprintln!("FAILED: {} - {}", f.test_name, f.details);
+        }
+        panic!("{} tests failed", failed.len());
+    }
+}

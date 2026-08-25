@@ -23,6 +23,7 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewSalesOrder, SellingError, SellingWriteService,
 };
@@ -128,13 +129,13 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
 
     // 2) selling: create + confirm a Sales Order for 10 of that item.
     let oid = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None,
         customer_id: customer, order_date: day(), delivery_date: None, currency: None,
         tax_rate: d("11"), notes: None,
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(oid, company).await.unwrap();
+    selling.confirm_sales_order(oid, company, &NoUnitCostPort).await.unwrap();
     assert_eq!(order_status(&pool, oid).await, "to_deliver_and_bill");
 
     // 3) selling emits a delivery request; ACL maps it into inventory's DeliveryRequested.
@@ -190,11 +191,11 @@ async fn confirmed_deliverable_order(
     selling: &SellingWriteService, company: Uuid, lines: Vec<NewLine>,
 ) -> Uuid {
     let order = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, company_id: company, branch_id: None,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None,
         customer_id: Uuid::new_v4(), order_date: day(), delivery_date: None, currency: None,
         tax_rate: Decimal::ZERO, notes: None, lines,
     }).await.unwrap();
-    selling.confirm_sales_order(order, company).await.unwrap();
+    selling.confirm_sales_order(order, company, &NoUnitCostPort).await.unwrap();
     order
 }
 async fn delivered_total(pool: &PgPool, order: Uuid) -> Decimal {

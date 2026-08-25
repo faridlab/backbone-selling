@@ -32,6 +32,8 @@ pub use domain::entity::*;
 pub use infrastructure::persistence::*;
 
 // Re-exports - Application services
+pub use application::service::DeliveryCarrierService;
+pub use application::service::ExpenseReinvoiceLinkService;
 pub use application::service::QuotationService;
 pub use application::service::QuotationItemService;
 pub use application::service::QuotationTemplateService;
@@ -60,6 +62,8 @@ use sqlx::PgPool;
 /// let router = selling.all_crud_routes();
 /// ```
 pub struct SellingModule {
+    pub(crate) delivery_carrier_service: Arc<DeliveryCarrierService>,
+    pub(crate) expense_reinvoice_link_service: Arc<ExpenseReinvoiceLinkService>,
     pub(crate) quotation_service: Arc<QuotationService>,
     pub(crate) quotation_item_service: Arc<QuotationItemService>,
     pub(crate) quotation_template_service: Arc<QuotationTemplateService>,
@@ -84,6 +88,8 @@ impl SellingModule {
     /// real deployment; use this only in trusted/admin/seeding contexts.
     pub fn all_crud_routes(&self) -> Router {
         use presentation::http::{
+            create_delivery_carrier_routes,
+            create_expense_reinvoice_link_routes,
             create_quotation_routes,
             create_quotation_item_routes,
             create_quotation_template_routes,
@@ -94,6 +100,8 @@ impl SellingModule {
         };
 
         Router::new()
+            .merge(create_delivery_carrier_routes(self.delivery_carrier_service.clone()))
+            .merge(create_expense_reinvoice_link_routes(self.expense_reinvoice_link_service.clone()))
             .merge(create_quotation_routes(self.quotation_service.clone()))
             .merge(create_quotation_item_routes(self.quotation_item_service.clone()))
             .merge(create_quotation_template_routes(self.quotation_template_service.clone()))
@@ -120,6 +128,8 @@ impl SellingModule {
     /// merge validated write routes (or a write service's HTTP layer) onto it.
     pub fn readonly_routes(&self) -> Router {
         use presentation::http::{
+            create_delivery_carrier_read_routes,
+            create_expense_reinvoice_link_read_routes,
             create_quotation_read_routes,
             create_quotation_item_read_routes,
             create_quotation_template_read_routes,
@@ -130,6 +140,8 @@ impl SellingModule {
         };
 
         Router::new()
+            .merge(create_delivery_carrier_read_routes(self.delivery_carrier_service.clone()))
+            .merge(create_expense_reinvoice_link_read_routes(self.expense_reinvoice_link_service.clone()))
             .merge(create_quotation_read_routes(self.quotation_service.clone()))
             .merge(create_quotation_item_read_routes(self.quotation_item_service.clone()))
             .merge(create_quotation_template_read_routes(self.quotation_template_service.clone()))
@@ -170,6 +182,14 @@ impl SellingModuleBuilder {
         let db_pool = self.db_pool
             .ok_or_else(|| anyhow::anyhow!("Database pool not configured"))?;
 
+        // DeliveryCarrier service
+        let delivery_carrier_repository = Arc::new(DeliveryCarrierRepository::new(db_pool.clone()));
+        let delivery_carrier_service = Arc::new(DeliveryCarrierService::with_repository(delivery_carrier_repository.clone()));
+
+        // ExpenseReinvoiceLink service
+        let expense_reinvoice_link_repository = Arc::new(ExpenseReinvoiceLinkRepository::new(db_pool.clone()));
+        let expense_reinvoice_link_service = Arc::new(ExpenseReinvoiceLinkService::with_repository(expense_reinvoice_link_repository.clone()));
+
         // Quotation service
         let quotation_repository = Arc::new(QuotationRepository::new(db_pool.clone()));
         let quotation_service = Arc::new(QuotationService::with_repository(quotation_repository.clone()));
@@ -202,6 +222,8 @@ impl SellingModuleBuilder {
         // END CUSTOM
 
         Ok(SellingModule {
+            delivery_carrier_service,
+            expense_reinvoice_link_service,
             quotation_service,
             quotation_item_service,
             quotation_template_service,

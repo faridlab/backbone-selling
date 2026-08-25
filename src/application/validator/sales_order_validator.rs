@@ -16,6 +16,7 @@ pub type SalesOrderValidator = EntityValidator<SalesOrder>;
 pub fn sales_order_validator() -> SalesOrderValidator {
     EntityValidator::new()
         .rule(RequiredString::new("order_number", |e: &SalesOrder| &e.order_number))
+        .rule(OptionalNotBlank::new("tracking_ref", |e: &SalesOrder| e.tracking_ref.as_deref()))
         .rule(RequiredString::new("currency", |e: &SalesOrder| &e.currency))
         .rule(OptionalNotBlank::new("notes", |e: &SalesOrder| e.notes.as_deref()))
     // <<< CUSTOM RULES

@@ -49,6 +49,7 @@ pub struct NewSalesOrderRow<'a> {
     pub id: Uuid,
     pub order_number: &'a str,
     pub quotation_id: Option<Uuid>,
+    pub delivery_carrier_id: Option<Uuid>,
     pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
@@ -128,11 +129,13 @@ impl SalesOrderRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.sales_orders
-                (id, order_number, quotation_id, company_id, branch_id, customer_id, status,
-                 order_date, delivery_date, currency, subtotal, tax_rate, tax_amount, total, notes)
-               VALUES ($1,$2,$3,$4,$5,$6,'draft'::sales_order_status,$7,$8,$9,$10,$11,$12,$13,$14)"#,
+                (id, order_number, quotation_id, delivery_carrier_id, company_id, branch_id,
+                 customer_id, status, order_date, delivery_date, currency, subtotal, tax_rate,
+                 tax_amount, total, notes)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,'draft'::sales_order_status,$8,$9,$10,$11,$12,$13,$14,$15)"#,
         )
-        .bind(o.id).bind(o.order_number).bind(o.quotation_id).bind(o.company_id).bind(o.branch_id)
+        .bind(o.id).bind(o.order_number).bind(o.quotation_id).bind(o.delivery_carrier_id)
+        .bind(o.company_id).bind(o.branch_id)
         .bind(o.customer_id).bind(o.order_date).bind(o.delivery_date).bind(o.currency)
         .bind(o.subtotal).bind(o.tax_rate).bind(o.tax_amount).bind(o.total).bind(o.notes)
         .execute(conn)
@@ -144,30 +147,69 @@ impl SalesOrderRepository {
     /// = no draft order of this company with that id, which is also how a wrong-tenant id looks — so
     /// this does not leak whether the id exists.
     ///
-    /// A write outside any transaction: takes the pool and runs `fetch_optional_row_scoped` so the RLS
-    /// fence (ADR-0008) applies. The caller wraps this in `with_company_scope(Some(company_id))` — the
-    /// company is on the parameter. The explicit `company_id=$2` filter stays as defense-in-depth.
-    pub async fn confirm(
+    /// Takes the CALLER'S connection: since the confirm-time unit-cost stamp landed, confirm is a
+    /// multi-statement unit of work (stamp + guard in ONE transaction), so this runs inside the
+    /// caller's tx — the caller binds the company on it (`bind_company_on`) before calling, and the
+    /// explicit `company_id=$2` filter stays as defense-in-depth behind the RLS fence. The guard
+    /// statement itself is UNCHANGED from the single-statement era: one guarded
+    /// `UPDATE ... WHERE status='draft' ... RETURNING`.
+    pub async fn confirm_tx(
         &self,
-        pool: &PgPool,
+        conn: &mut sqlx::PgConnection,
         order_id: Uuid,
         company_id: Uuid,
     ) -> Result<Option<ConfirmedOrderRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
-            pool,
-            sqlx::query(
-                r#"UPDATE selling.sales_orders SET status='to_deliver_and_bill'::sales_order_status
-                   WHERE id=$1 AND company_id=$2 AND status='draft'::sales_order_status AND (metadata->>'deleted_at') IS NULL
-                   RETURNING company_id, customer_id, total, currency"#,
-            )
-            .bind(order_id).bind(company_id),
-        ).await?;
+        let row = sqlx::query(
+            r#"UPDATE selling.sales_orders SET status='to_deliver_and_bill'::sales_order_status
+               WHERE id=$1 AND company_id=$2 AND status='draft'::sales_order_status AND (metadata->>'deleted_at') IS NULL
+               RETURNING company_id, customer_id, total, currency"#,
+        )
+        .bind(order_id).bind(company_id)
+        .fetch_optional(conn)
+        .await?;
         Ok(row.map(|r| ConfirmedOrderRow {
             company_id: r.get("company_id"),
             customer_id: r.get("customer_id"),
             total: r.get("total"),
             currency: r.get("currency"),
         }))
+    }
+
+    /// Set an order's delivery metadata (carrier choice + tracking number) in one guarded
+    /// statement: refused only on `cancelled` (carrier/tracking are fulfillment metadata, NOT
+    /// frozen money — writable on draft AND confirmed orders; tracking typically arrives after
+    /// ship). `Ok(None)` = guard refused (wrong tenant, absent, soft-deleted, or cancelled).
+    /// The caller classifies the refusal afterwards (via [`Self::find_cancel_refusal`]).
+    ///
+    /// Each field is a (asked, value) pair — the patch convention that distinguishes KEEP from
+    /// CLEAR: `asked=false` leaves the stored value untouched, `asked=true` writes `value`
+    /// (which may be NULL to clear).
+    pub async fn set_order_delivery(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        order_id: Uuid,
+        company_id: Uuid,
+        set_carrier: bool,
+        delivery_carrier_id: Option<Uuid>,
+        set_ref: bool,
+        tracking_ref: Option<&str>,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(
+            r#"UPDATE selling.sales_orders SET
+                   delivery_carrier_id = CASE WHEN $3 THEN $4::uuid
+                                               ELSE selling.sales_orders.delivery_carrier_id END,
+                   tracking_ref = CASE WHEN $5 THEN $6::text
+                                       ELSE selling.sales_orders.tracking_ref END
+               WHERE id=$1 AND company_id=$2
+                 AND status <> 'cancelled'::sales_order_status
+                 AND (metadata->>'deleted_at') IS NULL"#,
+        )
+        .bind(order_id).bind(company_id)
+        .bind(set_carrier).bind(delivery_carrier_id)
+        .bind(set_ref).bind(tracking_ref)
+        .execute(conn)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     /// Read the exported `SalesOrderRef`'s columns.

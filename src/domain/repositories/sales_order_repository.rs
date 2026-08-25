@@ -46,6 +46,8 @@ pub struct SalesOrderPaginatedResult {
 pub struct SalesOrderFilter {
     pub order_number: Option<String>,
     pub quotation_id: Option<Uuid>,
+    pub delivery_carrier_id: Option<Uuid>,
+    pub tracking_ref: Option<String>,
     pub company_id: Option<Uuid>,
     pub branch_id: Option<Uuid>,
     pub customer_id: Option<Uuid>,
@@ -57,7 +59,7 @@ pub struct SalesOrderFilter {
 impl SalesOrderFilter {
     /// Check if any filter is set
     pub fn has_filters(&self) -> bool {
-        self.order_number.is_some() || self.quotation_id.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.currency.is_some() || self.notes.is_some()
+        self.order_number.is_some() || self.quotation_id.is_some() || self.delivery_carrier_id.is_some() || self.tracking_ref.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.currency.is_some() || self.notes.is_some()
     }
 }
 

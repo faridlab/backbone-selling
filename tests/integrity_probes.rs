@@ -45,7 +45,15 @@ async fn module(pool: &PgPool) -> SellingModule {
     SellingModule::builder().with_database(pool.clone()).build().unwrap()
 }
 fn app(pool: &PgPool, m: &SellingModule) -> axum::Router {
-    create_guarded_selling_routes(m, pool.clone(), CompanyVerifier::hs256(SECRET))
+    create_guarded_selling_routes(
+        m,
+        pool.clone(),
+        CompanyVerifier::hs256(SECRET),
+        // No cost source in the probe app: resolves every cost to NULL, which confirm treats as
+        // honest absence — good enough for the route-level probes here (the margin snapshot's own
+        // port behaviors are proven in tests/margin_compute.rs with a scripted port).
+        std::sync::Arc::new(backbone_selling::application::service::selling_unit_cost::NoUnitCostPort),
+    )
 }
 
 /// Send a request with an optional bearer token.

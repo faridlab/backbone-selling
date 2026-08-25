@@ -12,6 +12,122 @@ use rust_decimal::Decimal;
 use crate::domain::entity::*;
 
 // ============================================================================
+// DELIVERYCARRIER TYPES
+// ============================================================================
+
+/// Type-safe ID for DeliveryCarrier
+///
+/// Use this instead of raw Uuid for type safety across modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DeliveryCarrierId(pub Uuid);
+
+impl DeliveryCarrierId {
+    pub fn new(id: Uuid) -> Self {
+        Self(id)
+    }
+
+    pub fn into_inner(self) -> Uuid {
+        self.0
+    }
+}
+
+impl From<Uuid> for DeliveryCarrierId {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
+impl From<DeliveryCarrierId> for Uuid {
+    fn from(id: DeliveryCarrierId) -> Self {
+        id.0
+    }
+}
+
+/// Data transfer object for DeliveryCarrier
+///
+/// This is the public representation of DeliveryCarrier for other modules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryCarrierDto {
+    pub id: DeliveryCarrierId,
+    pub company_id: Uuid,
+    pub name: String,
+    pub active: bool,
+    pub tracking_url_template: Option<String>,
+    pub metadata: serde_json::Value,
+}
+
+/// Summary view of DeliveryCarrier for list displays
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryCarrierSummary {
+    pub id: DeliveryCarrierId,
+    pub name: String,
+}
+
+/// Reference to DeliveryCarrier for foreign key relationships
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryCarrierRef {
+    pub id: DeliveryCarrierId,
+}
+
+// ============================================================================
+// EXPENSEREINVOICELINK TYPES
+// ============================================================================
+
+/// Type-safe ID for ExpenseReinvoiceLink
+///
+/// Use this instead of raw Uuid for type safety across modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExpenseReinvoiceLinkId(pub Uuid);
+
+impl ExpenseReinvoiceLinkId {
+    pub fn new(id: Uuid) -> Self {
+        Self(id)
+    }
+
+    pub fn into_inner(self) -> Uuid {
+        self.0
+    }
+}
+
+impl From<Uuid> for ExpenseReinvoiceLinkId {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
+impl From<ExpenseReinvoiceLinkId> for Uuid {
+    fn from(id: ExpenseReinvoiceLinkId) -> Self {
+        id.0
+    }
+}
+
+/// Data transfer object for ExpenseReinvoiceLink
+///
+/// This is the public representation of ExpenseReinvoiceLink for other modules.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpenseReinvoiceLinkDto {
+    pub id: ExpenseReinvoiceLinkId,
+    pub company_id: Uuid,
+    pub order_id: Uuid,
+    pub expense_id: Uuid,
+    pub amount: Decimal,
+    pub state: ExpenseReinvoiceState,
+    pub metadata: serde_json::Value,
+}
+
+/// Summary view of ExpenseReinvoiceLink for list displays
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpenseReinvoiceLinkSummary {
+    pub id: ExpenseReinvoiceLinkId,
+}
+
+/// Reference to ExpenseReinvoiceLink for foreign key relationships
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpenseReinvoiceLinkRef {
+    pub id: ExpenseReinvoiceLinkId,
+}
+
+// ============================================================================
 // QUOTATION TYPES
 // ============================================================================
 
@@ -241,6 +357,8 @@ pub struct SalesOrderDto {
     pub id: SalesOrderId,
     pub order_number: String,
     pub quotation_id: Option<Uuid>,
+    pub delivery_carrier_id: Option<Uuid>,
+    pub tracking_ref: Option<String>,
     pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
@@ -315,6 +433,7 @@ pub struct SalesOrderItemDto {
     pub unit_price: Decimal,
     pub line_discount: Decimal,
     pub line_amount: Decimal,
+    pub unit_cost: Option<Decimal>,
     pub billed_qty: Decimal,
     pub delivered_qty: Decimal,
     pub invoice_policy: InvoicePolicy,

@@ -6,6 +6,8 @@
 //! Implementations should be in the infrastructure layer.
 
 
+pub mod delivery_carrier_repository;
+pub mod expense_reinvoice_link_repository;
 pub mod quotation_repository;
 pub mod quotation_item_repository;
 pub mod quotation_template_repository;
@@ -15,6 +17,18 @@ pub mod sales_team_repository;
 pub mod sales_person_allocation_repository;
 
 // Re-exports
+pub use delivery_carrier_repository::{
+    DeliveryCarrierRepository,
+    DeliveryCarrierPaginationParams,
+    DeliveryCarrierPaginatedResult,
+    DeliveryCarrierFilter,
+};
+pub use expense_reinvoice_link_repository::{
+    ExpenseReinvoiceLinkRepository,
+    ExpenseReinvoiceLinkPaginationParams,
+    ExpenseReinvoiceLinkPaginatedResult,
+    ExpenseReinvoiceLinkFilter,
+};
 pub use quotation_repository::{
     QuotationRepository,
     QuotationPaginationParams,

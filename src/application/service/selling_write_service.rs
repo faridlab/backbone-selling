@@ -15,10 +15,17 @@
 //! - [`super::selling_quotation`] — `create_quotation` (+ template stamping), `accept_quotation`,
 //!   and the quotation state machine (send / reject / cancel / re-draft).
 //! - [`super::selling_order`] — `create_sales_order`, `create_sales_order_priced` (the promo CART
-//!   seam, ADR-002), `confirm_sales_order`, `convert_quotation_to_order`, `sales_order_ref`,
-//!   `cancel_sales_order`, `update_order_line` (the order lock).
+//!   seam, ADR-002), `confirm_sales_order` (with the confirm-time unit-cost stamp through the
+//!   `UnitCostPort`), `convert_quotation_to_order`, `sales_order_ref`, `cancel_sales_order`,
+//!   `update_order_line` (the order lock).
 //! - [`super::selling_invoice_policy`] — the invoicing-policy engine: the pure per-line
 //!   `qty_to_invoice` / `invoice_status` compute and the two invoice-status read models.
+//! - [`super::selling_margin`] — the margin engine: the pure per-line margin computes and the
+//!   order margin read model over the confirm-time unit-cost snapshots.
+//! - [`super::selling_carrier`] — the delivery-carrier registry (create/update/list) and the
+//!   order's carrier/tracking metadata verb.
+//! - [`super::selling_reinvoice`] — the expense-reinvoice link verbs (attach / list /
+//!   mark-invoiced) the host billing adapter drives.
 //! - [`super::selling_delivery_seam`] — `build_delivery_request`, `mark_delivered`.
 //! - [`super::selling_invoice_seam`] — `build_invoice_request`, `mark_invoiced` (order-to-cash
 //!   mirror; capacity-checked `FOR UPDATE` allocation rejects `OverBilled`).
@@ -32,8 +39,9 @@ use uuid::Uuid;
 
 use crate::domain::entity::InvoicePolicy;
 use crate::infrastructure::persistence::{
-    QuotationItemRepository, QuotationRepository, QuotationTemplateRepository,
-    SalesOrderItemRepository, SalesOrderRepository,
+    DeliveryCarrierRepository, ExpenseReinvoiceLinkRepository, QuotationItemRepository,
+    QuotationRepository, QuotationTemplateRepository, SalesOrderItemRepository,
+    SalesOrderRepository,
 };
 
 use super::selling_events::{LoggingSink, SellingEventSink};
@@ -85,6 +93,9 @@ pub struct NewQuotation {
 pub struct NewSalesOrder {
     pub order_number: String,
     pub quotation_id: Option<Uuid>,
+    /// Carrier chosen at create time (validated against the company's carrier registry before
+    /// the insert; the tracking number is verb-only — `set_order_delivery`).
+    pub delivery_carrier_id: Option<Uuid>,
     pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
@@ -160,6 +171,23 @@ pub enum SellingError {
     TemplateNotFound(Uuid),
     TemplateDuplicate(String),
     PricingRejected { code: String, message: String },
+    /// The unit-cost source refused the confirm (transport failure, a missing item, or a
+    /// negative cost). A confirm is a commitment — an unknown-cost confirm corrupts margin
+    /// analytics silently, so the order stays draft. Carries the port's own `code` verbatim
+    /// so the host can distinguish and retry.
+    CostRejected { code: String, message: String },
+    /// Unknown or cross-tenant delivery-carrier id (create-with-carrier / set-delivery /
+    /// carrier update). Never surfaced via the FK violation's 500 — a company-scoped pre-read
+    /// classifies it.
+    CarrierNotFound(Uuid),
+    /// A live carrier of this name already exists for the company (mirrors `TemplateDuplicate`).
+    CarrierDuplicate(String),
+    /// Unknown, wrong-tenant, or soft-deleted expense-reinvoice link.
+    ReinvoiceNotFound(Uuid),
+    /// This expense is already rebilled on this order (a live link exists — the double-bill guard).
+    DuplicateReinvoice,
+    /// The rebill amount must be positive (0 or negative refused).
+    InvalidReinvoiceAmount,
     Db(sqlx::Error),
     Outbox(String),
 }
@@ -183,6 +211,12 @@ impl SellingError {
             SellingError::TemplateNotFound(_) => "template_not_found".into(),
             SellingError::TemplateDuplicate(_) => "duplicate_template_name".into(),
             SellingError::PricingRejected { code, .. } => code.clone(),
+            SellingError::CostRejected { code, .. } => code.clone(),
+            SellingError::CarrierNotFound(_) => "carrier_not_found".into(),
+            SellingError::CarrierDuplicate(_) => "duplicate_carrier_name".into(),
+            SellingError::ReinvoiceNotFound(_) => "reinvoice_not_found".into(),
+            SellingError::DuplicateReinvoice => "duplicate_reinvoice".into(),
+            SellingError::InvalidReinvoiceAmount => "invalid_reinvoice_amount".into(),
             SellingError::Db(_) => "internal_error".into(),
             SellingError::Outbox(_) => "outbox_error".into(),
         }
@@ -190,7 +224,9 @@ impl SellingError {
     pub fn http_status(&self) -> u16 {
         match self {
             SellingError::QuotationNotFound(_)
-            | SellingError::OrderNotFound(_) => 404,
+            | SellingError::OrderNotFound(_)
+            | SellingError::CarrierNotFound(_)
+            | SellingError::ReinvoiceNotFound(_) => 404,
             SellingError::Db(_) | SellingError::Outbox(_) => 500,
             _ => 422,
         }
@@ -218,6 +254,18 @@ impl std::fmt::Display for SellingError {
             ),
             SellingError::TemplateDuplicate(name) => {
                 write!(f, "a quotation template named '{name}' already exists")
+            }
+            SellingError::CostRejected { message, .. } => {
+                write!(f, "cost source rejected the confirm: {message}")
+            }
+            SellingError::CarrierDuplicate(name) => {
+                write!(f, "a delivery carrier named '{name}' already exists")
+            }
+            SellingError::DuplicateReinvoice => {
+                write!(f, "this expense is already rebilled on this order")
+            }
+            SellingError::InvalidReinvoiceAmount => {
+                write!(f, "the rebill amount must be greater than zero")
             }
             other => write!(f, "{}", other.code()),
         }
@@ -281,10 +329,11 @@ pub(super) fn price_document(lines: &[NewLine], tax_rate: Decimal) -> Result<(Ve
     Ok((priced, subtotal, tax_amount, total))
 }
 
-/// The five repositories this service orchestrates (quotations + orders, each with line children,
-/// plus the quotation-template master). Held behind `Arc` so the service stays `Clone` (the
-/// repositories are not `Clone` themselves) without re-building them per call. (SalesInvoice
-/// repositories lived here before selling exited the invoice business — ADR-006.)
+/// The repositories this service orchestrates (quotations + orders, each with line children,
+/// the quotation-template master, the delivery-carrier registry, and the expense-reinvoice
+/// links). Held behind `Arc` so the service stays `Clone` (the repositories are not `Clone`
+/// themselves) without re-building them per call. (SalesInvoice repositories lived here before
+/// selling exited the invoice business — ADR-006.)
 #[derive(Clone)]
 pub(super) struct SellingRepos {
     pub(super) quotations: Arc<QuotationRepository>,
@@ -292,6 +341,8 @@ pub(super) struct SellingRepos {
     pub(super) templates: Arc<QuotationTemplateRepository>,
     pub(super) orders: Arc<SalesOrderRepository>,
     pub(super) order_items: Arc<SalesOrderItemRepository>,
+    pub(super) carriers: Arc<DeliveryCarrierRepository>,
+    pub(super) reinvoices: Arc<ExpenseReinvoiceLinkRepository>,
 }
 
 impl SellingRepos {
@@ -302,6 +353,8 @@ impl SellingRepos {
             templates: Arc::new(QuotationTemplateRepository::new(pool.clone())),
             orders: Arc::new(SalesOrderRepository::new(pool.clone())),
             order_items: Arc::new(SalesOrderItemRepository::new(pool.clone())),
+            carriers: Arc::new(DeliveryCarrierRepository::new(pool.clone())),
+            reinvoices: Arc::new(ExpenseReinvoiceLinkRepository::new(pool.clone())),
         }
     }
 }

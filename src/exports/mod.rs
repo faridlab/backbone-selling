@@ -8,7 +8,7 @@
 //! ## Usage from other modules
 //!
 //! ```text
-//! use selling::exports::{QuotationDto};
+//! use selling::exports::{DeliveryCarrierDto};
 //! ```
 
 mod types;
@@ -27,6 +27,12 @@ pub use events::*;
 /// Summary of what this module exports
 ///
 /// ## Public Types
+/// - `DeliveryCarrierDto` - Data transfer object for DeliveryCarrier
+/// - `DeliveryCarrierSummary` - Summary view of DeliveryCarrier
+/// - `DeliveryCarrierId` - Type-safe ID wrapper
+/// - `ExpenseReinvoiceLinkDto` - Data transfer object for ExpenseReinvoiceLink
+/// - `ExpenseReinvoiceLinkSummary` - Summary view of ExpenseReinvoiceLink
+/// - `ExpenseReinvoiceLinkId` - Type-safe ID wrapper
 /// - `QuotationDto` - Data transfer object for Quotation
 /// - `QuotationSummary` - Summary view of Quotation
 /// - `QuotationId` - Type-safe ID wrapper
@@ -50,6 +56,12 @@ pub use events::*;
 /// - `SalesPersonAllocationId` - Type-safe ID wrapper
 ///
 /// ## Public Events
+/// - `DeliveryCarrierCreatedEvent` - Published when DeliveryCarrier is created
+/// - `DeliveryCarrierUpdatedEvent` - Published when DeliveryCarrier is updated
+/// - `DeliveryCarrierDeletedEvent` - Published when DeliveryCarrier is deleted
+/// - `ExpenseReinvoiceLinkCreatedEvent` - Published when ExpenseReinvoiceLink is created
+/// - `ExpenseReinvoiceLinkUpdatedEvent` - Published when ExpenseReinvoiceLink is updated
+/// - `ExpenseReinvoiceLinkDeletedEvent` - Published when ExpenseReinvoiceLink is deleted
 /// - `QuotationCreatedEvent` - Published when Quotation is created
 /// - `QuotationUpdatedEvent` - Published when Quotation is updated
 /// - `QuotationDeletedEvent` - Published when Quotation is deleted

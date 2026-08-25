@@ -6,6 +6,8 @@
 
 pub use backbone_core::{Specification, AndSpecification, OrSpecification, NotSpecification};
 
+pub mod delivery_carrier_specification;
+pub mod expense_reinvoice_link_specification;
 pub mod quotation_specification;
 pub mod quotation_item_specification;
 pub mod quotation_template_specification;

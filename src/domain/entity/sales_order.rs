@@ -53,6 +53,8 @@ pub struct SalesOrder {
     pub id: Uuid,
     pub order_number: String,
     pub quotation_id: Option<Uuid>,
+    pub delivery_carrier_id: Option<Uuid>,
+    pub tracking_ref: Option<String>,
     pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
@@ -82,6 +84,8 @@ impl SalesOrder {
             id: Uuid::new_v4(),
             order_number,
             quotation_id: None,
+            delivery_carrier_id: None,
+            tracking_ref: None,
             company_id,
             branch_id: None,
             customer_id,
@@ -164,6 +168,18 @@ impl SalesOrder {
         self
     }
 
+    /// Set the delivery_carrier_id field (chainable)
+    pub fn with_delivery_carrier_id(mut self, value: Uuid) -> Self {
+        self.delivery_carrier_id = Some(value);
+        self
+    }
+
+    /// Set the tracking_ref field (chainable)
+    pub fn with_tracking_ref(mut self, value: String) -> Self {
+        self.tracking_ref = Some(value);
+        self
+    }
+
     /// Set the branch_id field (chainable)
     pub fn with_branch_id(mut self, value: Uuid) -> Self {
         self.branch_id = Some(value);
@@ -195,6 +211,12 @@ impl SalesOrder {
                 }
                 "quotation_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.quotation_id = v; }
+                }
+                "delivery_carrier_id" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.delivery_carrier_id = v; }
+                }
+                "tracking_ref" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.tracking_ref = v; }
                 }
                 "company_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.company_id = v; }
@@ -287,6 +309,7 @@ impl backbone_orm::EntityRepoMeta for SalesOrder {
         let mut m = std::collections::HashMap::new();
         m.insert("id".to_string(), "uuid".to_string());
         m.insert("quotation_id".to_string(), "uuid".to_string());
+        m.insert("delivery_carrier_id".to_string(), "uuid".to_string());
         m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("branch_id".to_string(), "uuid".to_string());
         m.insert("customer_id".to_string(), "uuid".to_string());
@@ -309,6 +332,8 @@ impl backbone_orm::EntityRepoMeta for SalesOrder {
 pub struct SalesOrderBuilder {
     order_number: Option<String>,
     quotation_id: Option<Uuid>,
+    delivery_carrier_id: Option<Uuid>,
+    tracking_ref: Option<String>,
     company_id: Option<Uuid>,
     branch_id: Option<Uuid>,
     customer_id: Option<Uuid>,
@@ -333,6 +358,18 @@ impl SalesOrderBuilder {
     /// Set the quotation_id field (optional)
     pub fn quotation_id(mut self, value: Uuid) -> Self {
         self.quotation_id = Some(value);
+        self
+    }
+
+    /// Set the delivery_carrier_id field (optional)
+    pub fn delivery_carrier_id(mut self, value: Uuid) -> Self {
+        self.delivery_carrier_id = Some(value);
+        self
+    }
+
+    /// Set the tracking_ref field (optional)
+    pub fn tracking_ref(mut self, value: String) -> Self {
+        self.tracking_ref = Some(value);
         self
     }
 
@@ -421,6 +458,8 @@ impl SalesOrderBuilder {
             id: Uuid::new_v4(),
             order_number,
             quotation_id: self.quotation_id,
+            delivery_carrier_id: self.delivery_carrier_id,
+            tracking_ref: self.tracking_ref,
             company_id,
             branch_id: self.branch_id,
             customer_id,

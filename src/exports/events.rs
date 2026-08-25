@@ -11,6 +11,60 @@ use chrono::{DateTime, Utc};
 use super::types::*;
 
 // ============================================================================
+// DELIVERYCARRIER EVENTS
+// ============================================================================
+
+/// Event published when a DeliveryCarrier is created
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryCarrierCreatedEvent {
+    pub id: DeliveryCarrierId,
+    pub data: DeliveryCarrierDto,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Event published when a DeliveryCarrier is updated
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryCarrierUpdatedEvent {
+    pub id: DeliveryCarrierId,
+    pub data: DeliveryCarrierDto,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Event published when a DeliveryCarrier is deleted
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryCarrierDeletedEvent {
+    pub id: DeliveryCarrierId,
+    pub occurred_at: DateTime<Utc>,
+}
+
+// ============================================================================
+// EXPENSEREINVOICELINK EVENTS
+// ============================================================================
+
+/// Event published when a ExpenseReinvoiceLink is created
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpenseReinvoiceLinkCreatedEvent {
+    pub id: ExpenseReinvoiceLinkId,
+    pub data: ExpenseReinvoiceLinkDto,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Event published when a ExpenseReinvoiceLink is updated
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpenseReinvoiceLinkUpdatedEvent {
+    pub id: ExpenseReinvoiceLinkId,
+    pub data: ExpenseReinvoiceLinkDto,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Event published when a ExpenseReinvoiceLink is deleted
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpenseReinvoiceLinkDeletedEvent {
+    pub id: ExpenseReinvoiceLinkId,
+    pub occurred_at: DateTime<Utc>,
+}
+
+// ============================================================================
 // QUOTATION EVENTS
 // ============================================================================
 
@@ -207,6 +261,12 @@ pub struct SalesPersonAllocationDeletedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SellingEvent {
+    DeliveryCarrierCreated(DeliveryCarrierCreatedEvent),
+    DeliveryCarrierUpdated(DeliveryCarrierUpdatedEvent),
+    DeliveryCarrierDeleted(DeliveryCarrierDeletedEvent),
+    ExpenseReinvoiceLinkCreated(ExpenseReinvoiceLinkCreatedEvent),
+    ExpenseReinvoiceLinkUpdated(ExpenseReinvoiceLinkUpdatedEvent),
+    ExpenseReinvoiceLinkDeleted(ExpenseReinvoiceLinkDeletedEvent),
     QuotationCreated(QuotationCreatedEvent),
     QuotationUpdated(QuotationUpdatedEvent),
     QuotationDeleted(QuotationDeletedEvent),

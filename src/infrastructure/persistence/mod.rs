@@ -4,6 +4,8 @@
 //!
 //! Uses backbone-orm's `DatabaseOperations<T>` trait.
 
+mod delivery_carrier_repository;
+mod expense_reinvoice_link_repository;
 mod quotation_repository;
 mod quotation_item_repository;
 mod quotation_template_repository;
@@ -29,13 +31,20 @@ pub use sales_order_repository::{
     NewSalesOrderRow, OrderFulfillmentHeaderRow, SalesOrderRefRow,
 };
 pub use sales_order_item_repository::{
-    InvoicePolicyOrderLineRow, LineBillingCapacityRow, LinePatchRow, NewSalesOrderItemRow,
-    OrderBillingRemainderRow, OrderDeliveryRemainderRow, OrderLineForInvoiceRow,
-    WatermarkRollupRow,
+    CostStampLineRow, InvoicePolicyOrderLineRow, LineBillingCapacityRow, LinePatchRow,
+    MarginLineRow, MarginRollupRow, NewSalesOrderItemRow, OrderBillingRemainderRow,
+    OrderDeliveryRemainderRow, OrderLineForInvoiceRow, WatermarkRollupRow,
+};
+// The carrier master's row type (its insert takes plain parameters — no New* row struct exists).
+pub use delivery_carrier_repository::DeliveryCarrierRow;
+pub use expense_reinvoice_link_repository::{
+    ExpenseReinvoiceLinkRow, NewExpenseReinvoiceLinkRow,
 };
 // END CUSTOM
 
 // Re-exports
+pub use delivery_carrier_repository::DeliveryCarrierRepository;
+pub use expense_reinvoice_link_repository::ExpenseReinvoiceLinkRepository;
 pub use quotation_repository::QuotationRepository;
 pub use quotation_item_repository::QuotationItemRepository;
 pub use quotation_template_repository::QuotationTemplateRepository;

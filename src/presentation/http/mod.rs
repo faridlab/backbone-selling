@@ -5,6 +5,8 @@
 //! These handlers use Axum and backbone-core's BackboneCrudHandler
 //! to provide all 12 standard Backbone CRUD endpoints.
 
+pub mod delivery_carrier_handler;
+pub mod expense_reinvoice_link_handler;
 pub mod quotation_handler;
 pub mod quotation_item_handler;
 pub mod quotation_template_handler;
@@ -18,6 +20,8 @@ pub mod guarded_routes;
 // END CUSTOM
 
 // Re-exports
+pub use delivery_carrier_handler::{create_delivery_carrier_routes, create_delivery_carrier_read_routes, create_delivery_carrier_write_routes};
+pub use expense_reinvoice_link_handler::{create_expense_reinvoice_link_routes, create_expense_reinvoice_link_read_routes, create_expense_reinvoice_link_write_routes};
 pub use quotation_handler::{create_quotation_routes, create_quotation_read_routes, create_quotation_write_routes};
 pub use quotation_item_handler::{create_quotation_item_routes, create_quotation_item_read_routes, create_quotation_item_write_routes};
 pub use quotation_template_handler::{create_quotation_template_routes, create_quotation_template_read_routes, create_quotation_template_write_routes};

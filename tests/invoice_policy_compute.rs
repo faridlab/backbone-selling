@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use backbone_selling::application::service::selling_events::{SellingEvent, SellingEventSink};
 use backbone_selling::application::service::selling_order::UpdateOrderLinePatch;
+use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewQuotation, NewSalesOrder, SellingError, SellingWriteService,
 };
@@ -67,7 +68,7 @@ async fn confirmed_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewL
     let order = w
         .create_sales_order(NewSalesOrder {
             order_number: uq("SO"),
-            quotation_id: None,
+            quotation_id: None, delivery_carrier_id: None,
             company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
@@ -80,7 +81,7 @@ async fn confirmed_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewL
         })
         .await
         .unwrap();
-    w.confirm_sales_order(order, company).await.unwrap();
+    w.confirm_sales_order(order, company, &NoUnitCostPort).await.unwrap();
     order
 }
 async fn line_id(pool: &PgPool, order: Uuid, item: Uuid) -> Uuid {
@@ -275,7 +276,7 @@ async fn unconfirmed_orders_read_no() {
     let order = w
         .create_sales_order(NewSalesOrder {
             order_number: uq("SO"),
-            quotation_id: None,
+            quotation_id: None, delivery_carrier_id: None,
             company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
@@ -664,7 +665,7 @@ async fn draft_line_edit_reprices_totals() {
     let order = w
         .create_sales_order(NewSalesOrder {
             order_number: uq("SO"),
-            quotation_id: None,
+            quotation_id: None, delivery_carrier_id: None,
             company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
@@ -724,7 +725,7 @@ async fn cancel_draft_order() {
     let order = w
         .create_sales_order(NewSalesOrder {
             order_number: uq("SO"),
-            quotation_id: None,
+            quotation_id: None, delivery_carrier_id: None,
             company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),

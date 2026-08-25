@@ -53,6 +53,8 @@ pub struct CreateSalesOrderItemDto {
     pub line_discount: Decimal,
     #[serde(alias = "line_amount")]
     pub line_amount: Decimal,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "unit_cost")]
+    pub unit_cost: Option<Decimal>,
     #[serde(alias = "billed_qty")]
     pub billed_qty: Decimal,
     #[serde(alias = "delivered_qty")]
@@ -96,6 +98,8 @@ pub struct UpdateSalesOrderItemDto {
     pub line_discount: Decimal,
     #[serde(alias = "line_amount")]
     pub line_amount: Decimal,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "unit_cost")]
+    pub unit_cost: Option<Decimal>,
     #[serde(alias = "billed_qty")]
     pub billed_qty: Decimal,
     #[serde(alias = "delivered_qty")]
@@ -140,6 +144,8 @@ pub struct PatchSalesOrderItemDto {
     pub line_discount: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "line_amount")]
     pub line_amount: Option<Decimal>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "unit_cost")]
+    pub unit_cost: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "billed_qty")]
     pub billed_qty: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "delivered_qty")]
@@ -154,7 +160,7 @@ pub struct PatchSalesOrderItemDto {
 impl PatchSalesOrderItemDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.order_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some() || self.invoice_policy.is_some() || self.is_downpayment.is_some()
+        self.order_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.unit_cost.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some() || self.invoice_policy.is_some() || self.is_downpayment.is_some()
     }
 }
 
@@ -183,6 +189,7 @@ pub struct SalesOrderItemResponseDto {
     pub unit_price: Decimal,
     pub line_discount: Decimal,
     pub line_amount: Decimal,
+    pub unit_cost: Option<Decimal>,
     pub billed_qty: Decimal,
     pub delivered_qty: Decimal,
     pub invoice_policy: InvoicePolicy,
@@ -267,6 +274,7 @@ impl From<SalesOrderItem> for SalesOrderItemResponseDto {
             unit_price: entity.unit_price,
             line_discount: entity.line_discount,
             line_amount: entity.line_amount,
+            unit_cost: entity.unit_cost,
             billed_qty: entity.billed_qty,
             delivered_qty: entity.delivered_qty,
             invoice_policy: entity.invoice_policy,
@@ -301,6 +309,7 @@ impl From<CreateSalesOrderItemDto> for SalesOrderItem {
             unit_price: dto.unit_price,
             line_discount: dto.line_discount,
             line_amount: dto.line_amount,
+            unit_cost: dto.unit_cost,
             billed_qty: dto.billed_qty,
             delivered_qty: dto.delivered_qty,
             invoice_policy: dto.invoice_policy,
@@ -322,6 +331,7 @@ impl From<&SalesOrderItem> for SalesOrderItemResponseDto {
             unit_price: entity.unit_price.clone(),
             line_discount: entity.line_discount.clone(),
             line_amount: entity.line_amount.clone(),
+            unit_cost: entity.unit_cost.clone(),
             billed_qty: entity.billed_qty.clone(),
             delivered_qty: entity.delivered_qty.clone(),
             invoice_policy: entity.invoice_policy.clone(),
@@ -347,6 +357,7 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderItemDto> for SalesOrderItem {
         self.unit_price = dto.unit_price;
         self.line_discount = dto.line_discount;
         self.line_amount = dto.line_amount;
+        self.unit_cost = dto.unit_cost;
         self.billed_qty = dto.billed_qty;
         self.delivered_qty = dto.delivered_qty;
         self.invoice_policy = dto.invoice_policy;
