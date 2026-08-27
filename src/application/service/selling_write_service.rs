@@ -176,6 +176,17 @@ pub enum SellingError {
     /// analytics silently, so the order stays draft. Carries the port's own `code` verbatim
     /// so the host can distinguish and retry.
     CostRejected { code: String, message: String },
+    /// The stock engine refused the confirm-time rule launch (transport failure, no route
+    /// covers a line's demand). Same fail-closed posture as `CostRejected`: a confirmed
+    /// order whose fulfillment silently never launched is corrupt, so the order stays
+    /// draft and the launch can be retried with a healthy engine. Carries the port's own
+    /// `code` verbatim.
+    FulfillmentRejected { code: String, message: String },
+    /// The upstream decrease-quantity activity log FAILED after the cancellation itself
+    /// had already committed (the port is outside selling's transaction, so the log cannot
+    /// roll the flip back). The order IS cancelled; this error says the stock side was not
+    /// told — re-invoke the retry verb with a healthy engine. Never silently swallowed.
+    DecreaseActivityFailed { code: String, message: String },
     /// Unknown or cross-tenant delivery-carrier id (create-with-carrier / set-delivery /
     /// carrier update). Never surfaced via the FK violation's 500 — a company-scoped pre-read
     /// classifies it.
@@ -212,6 +223,8 @@ impl SellingError {
             SellingError::TemplateDuplicate(_) => "duplicate_template_name".into(),
             SellingError::PricingRejected { code, .. } => code.clone(),
             SellingError::CostRejected { code, .. } => code.clone(),
+            SellingError::FulfillmentRejected { code, .. } => code.clone(),
+            SellingError::DecreaseActivityFailed { code, .. } => code.clone(),
             SellingError::CarrierNotFound(_) => "carrier_not_found".into(),
             SellingError::CarrierDuplicate(_) => "duplicate_carrier_name".into(),
             SellingError::ReinvoiceNotFound(_) => "reinvoice_not_found".into(),
@@ -257,6 +270,15 @@ impl std::fmt::Display for SellingError {
             }
             SellingError::CostRejected { message, .. } => {
                 write!(f, "cost source rejected the confirm: {message}")
+            }
+            SellingError::FulfillmentRejected { message, .. } => {
+                write!(f, "stock engine rejected the confirm-time rule launch: {message}")
+            }
+            SellingError::DecreaseActivityFailed { message, .. } => {
+                write!(
+                    f,
+                    "the cancellation committed but the upstream decrease-quantity log failed: {message}"
+                )
             }
             SellingError::CarrierDuplicate(name) => {
                 write!(f, "a delivery carrier named '{name}' already exists")

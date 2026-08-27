@@ -27,13 +27,15 @@ pub use quotation_item_repository::{
 };
 pub use quotation_template_repository::{NewQuotationTemplateRow, QuotationTemplateRow};
 pub use sales_order_repository::{
-    CancelRefusalRow, ConfirmedOrderRow, InvoiceSourceOrderRow, InvoiceStatusHeaderRow,
-    NewSalesOrderRow, OrderFulfillmentHeaderRow, SalesOrderRefRow,
+    CancelRefusalRow, CancelledOrderRow, ConfirmedOrderRow, InvoiceSourceOrderRow,
+    InvoiceStatusHeaderRow, NewSalesOrderRow, OrderFulfillmentHeaderRow, OrderStockHeaderRow,
+    SalesOrderRefRow,
 };
 pub use sales_order_item_repository::{
-    CostStampLineRow, InvoicePolicyOrderLineRow, LineBillingCapacityRow, LinePatchRow,
-    MarginLineRow, MarginRollupRow, NewSalesOrderItemRow, OrderBillingRemainderRow,
-    OrderDeliveryRemainderRow, OrderLineForInvoiceRow, WatermarkRollupRow,
+    CostStampLineRow, InvoicePolicyOrderLineRow, LineBillingCapacityRow, LineDeliveryCapacityRow,
+    LinePatchRow, MarginLineRow, MarginRollupRow, NewSalesOrderItemRow,
+    OrderBillingRemainderRow, OrderDeliveryRemainderRow, OrderLineForInvoiceRow,
+    OrderStockLineRow, WatermarkRollupRow,
 };
 // The carrier master's row type (its insert takes plain parameters — no New* row struct exists).
 pub use delivery_carrier_repository::DeliveryCarrierRow;

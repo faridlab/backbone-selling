@@ -12,7 +12,13 @@
 //! The confirm route takes the unit-cost port (catalog standard-cost seam) as a REQUIRED argument
 //! of [`create_guarded_selling_routes`] — the composing service supplies its catalog-backed
 //! implementation; confirm stamps each line's `unit_cost` snapshot through it before the
-//! draft → confirmed flip. The generic CRUD read routers for the carrier registry and the
+//! draft → confirmed flip. It takes the stock-fulfillment port (the sale_stock confirm engine's
+//! seam to the stock module) the same way: confirm launches the stock rules for every
+//! stock-tracked line through it, cancel logs decrease-quantity activities upstream through it,
+//! and the delivery-status routes read the move-backed reconstruction through it. A composition
+//! without a stock engine passes
+//! [`crate::application::service::selling_stock_fulfillment::NoStockFulfillmentPort`] to opt out
+//! explicitly. The generic CRUD read routers for the carrier registry and the
 //! expense-reinvoice link are merged unauthenticated (same posture as the document reads); every
 //! WRITE below rides `company_auth` and derives its tenant from the signed token.
 //!
@@ -33,6 +39,7 @@ use uuid::Uuid;
 
 use crate::application::service::selling_carrier::UpdateCarrierPatch;
 use crate::application::service::selling_order::UpdateOrderLinePatch;
+use crate::application::service::selling_stock_fulfillment::StockFulfillmentPort;
 use crate::application::service::selling_unit_cost::UnitCostPort;
 use crate::application::service::selling_write_service::{
     NewLine, NewQuotation, NewSalesOrder, SellingError, SellingWriteService,
@@ -61,13 +68,16 @@ fn err_response(e: SellingError) -> axum::response::Response {
     (status, Json(ErrorBody { error: e.code(), message: e.to_string() })).into_response()
 }
 
-/// Handler state: the write service plus the unit-cost port that confirm passes through. The port
-/// is wiring, not service state — the service stays stateless over the pool and takes the port
-/// per call, so the composing host keeps full control of the cost source.
+/// Handler state: the write service plus the two ports the write verbs pass through (the
+/// unit-cost source behind the confirm-time margin snapshot, and the stock engine behind the
+/// confirm-time rule launch / delivered-qty reconstruction / cancel-time decrease-quantity log).
+/// The ports are wiring, not service state — the service stays stateless over the pool and takes
+/// them per call, so the composing host keeps full control of both sources.
 #[derive(Clone)]
 struct SellingWriteState {
     svc: Arc<SellingWriteService>,
     costs: Arc<dyn UnitCostPort>,
+    stock: Arc<dyn StockFulfillmentPort>,
 }
 
 /// `Option<Option<T>>` deserialization that distinguishes MISSING (keep the stored value) from
@@ -231,8 +241,15 @@ async fn confirm_sales_order(
     // The tenant scopes the lookup: authentication alone would let a principal of company A confirm
     // company B's order by id, firing B's downstream billing and GL posting. The cost port comes
     // from the composition (the host's catalog adapter) — a failing port refuses the confirm with
-    // `cost_rejected`, it never confirms with a silently unknown cost.
-    match st.svc.confirm_sales_order(b.order_id, tenant.company_id, st.costs.as_ref()).await {
+    // `cost_rejected`, it never confirms with a silently unknown cost. The stock port comes from
+    // the composition the same way (the host's stock-engine adapter) — a failing launch refuses
+    // with `fulfillment_rejected`, it never confirms an order whose fulfillment silently never
+    // launched.
+    match st
+        .svc
+        .confirm_sales_order(b.order_id, tenant.company_id, st.costs.as_ref(), st.stock.as_ref())
+        .await
+    {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.order_id })).into_response(),
         Err(e) => err_response(e),
     }
@@ -341,8 +358,50 @@ async fn cancel_sales_order(
     tenant: CompanyContext,
     Json(b): Json<OrderVerbBody>,
 ) -> axum::response::Response {
-    match st.svc.cancel_sales_order(b.order_id, tenant.company_id).await {
+    // On success the cancel also logs decrease-quantity activities upstream through the stock
+    // port — a log failure returns `decrease_activity_failed` with the cancellation
+    // already committed; the composition retries with the retry verb once its engine is healthy.
+    match st.svc.cancel_sales_order(b.order_id, tenant.company_id, st.stock.as_ref()).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.order_id })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+/// Re-attempt the upstream decrease-quantity log for a cancelled order whose cancel-time log
+/// call failed (`decrease_activity_failed`). Idempotent; refuses an order that is not cancelled.
+async fn retry_decrease_activities(
+    State(st): State<SellingWriteState>,
+    tenant: CompanyContext,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    match st.svc.retry_decrease_activities(order_id, tenant.company_id, st.stock.as_ref()).await {
+        Ok(()) => (StatusCode::OK, Json(IdResponse { id: order_id })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+// ── move-backed delivery read model (the sale_stock qty_delivered reconstruction) ──
+// Same shape as the margin read: `reconstructedDeliveredQty` is computed at read time from the
+// stock engine's move figures — it is not a schema field and appears on no write body. The sync
+// verb reconciles the stored `delivered_qty` watermark to it (return-adjusted, clamped at the
+// ordered quantity).
+async fn order_delivery_status(
+    State(st): State<SellingWriteState>,
+    _tenant: CompanyContext,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    match st.svc.order_delivery_view(order_id, st.stock.as_ref()).await {
+        Ok(view) => (StatusCode::OK, Json(view)).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+async fn sync_delivered_from_moves(
+    State(st): State<SellingWriteState>,
+    tenant: CompanyContext,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    match st.svc.sync_delivered_from_moves(order_id, tenant.company_id, st.stock.as_ref()).await {
+        Ok(()) => (StatusCode::OK, Json(IdResponse { id: order_id })).into_response(),
         Err(e) => err_response(e),
     }
 }
@@ -644,9 +703,12 @@ fn create_selling_write_routes(state: SellingWriteState, verifier: CompanyVerifi
         .route("/sales-orders", post(create_sales_order))
         .route("/sales-orders/confirm", post(confirm_sales_order))
         .route("/sales-orders/cancel", post(cancel_sales_order))
+        .route("/sales-orders/:id/retry-decrease-activities", post(retry_decrease_activities))
         .route("/sales-orders/lines/:id", patch(update_order_line))
         .route("/sales-orders/:id/invoice-status", get(order_invoice_status))
         .route("/sales-orders/:id/margin", get(order_margin_view))
+        .route("/sales-orders/:id/delivery-status", get(order_delivery_status))
+        .route("/sales-orders/:id/sync-delivered", post(sync_delivered_from_moves))
         .route("/sales-orders/:id/expense-reinvoices",
                get(list_expense_reinvoices).post(attach_expense_reinvoice))
         .route("/expense-reinvoices/:id/mark-invoiced", post(mark_expense_reinvoice_invoiced))
@@ -675,15 +737,25 @@ fn create_selling_write_routes(state: SellingWriteState, verifier: CompanyVerifi
 /// standard-cost seam). Pass [`crate::application::service::selling_unit_cost::NoUnitCostPort`]
 /// only in compositions that never confirm orders — it resolves every cost to NULL, which confirm
 /// treats as honest absence (margin reads null, never zero).
+///
+/// `stock` is REQUIRED the same way: the stock engine behind the sale_stock confirm engine (the
+/// confirm-time rule launch per stock-tracked line, the move-backed delivered-qty reconstruction,
+/// and the cancel-time decrease-quantity activity log). Pass
+/// [`crate::application::service::selling_stock_fulfillment::NoStockFulfillmentPort`] only in
+/// compositions with no stock engine — it launches nothing (every line reads as not
+/// stock-tracked), reports no move figures (the stored watermarks stand), and skips the
+/// upstream cancel log; a forgotten adapter is a compile error, never a silent no-op.
 pub fn create_guarded_selling_routes(
     m: &SellingModule,
     pool: PgPool,
     verifier: CompanyVerifier,
     unit_cost: Arc<dyn UnitCostPort>,
+    stock: Arc<dyn StockFulfillmentPort>,
 ) -> Router {
     let write = SellingWriteState {
         svc: Arc::new(SellingWriteService::new(pool)),
         costs: unit_cost,
+        stock,
     };
     Router::new()
         .merge(create_quotation_read_routes(m.quotation_service.clone()))

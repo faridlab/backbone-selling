@@ -105,6 +105,23 @@ pub struct CancelRefusalRow {
     pub has_billed: bool,
 }
 
+/// What a successful cancel returns: the event's projection plus the order number the
+/// upstream decrease-quantity log keys its correspondence on.
+pub struct CancelledOrderRow {
+    pub company_id: Uuid,
+    pub customer_id: Uuid,
+    pub order_number: String,
+}
+
+/// The order header the stock-fulfillment paths read: tenant + customer identity, the
+/// order number (the procurement-group correspondence key), and the status text.
+pub struct OrderStockHeaderRow {
+    pub company_id: Uuid,
+    pub customer_id: Uuid,
+    pub order_number: String,
+    pub status: String,
+}
+
 /// The order header the invoice-status read model aggregates under.
 pub struct InvoiceStatusHeaderRow {
     pub order_number: String,
@@ -285,6 +302,31 @@ impl SalesOrderRepository {
         }))
     }
 
+    /// Read the order header the stock-fulfillment paths build their port requests from
+    /// (the confirm-time rule launch and the delivered-qty reconstruction): the tenant +
+    /// customer identity, the order number (the procurement-group correspondence key), and
+    /// the status text. ID-only, same scoping as [`Self::find_ref`].
+    pub async fn find_stock_header(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<Option<OrderStockHeaderRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT company_id, customer_id, order_number, status::text AS st
+                   FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(row.map(|r| OrderStockHeaderRow {
+            company_id: r.get("company_id"),
+            customer_id: r.get("customer_id"),
+            order_number: r.get("order_number"),
+            status: r.get("st"),
+        }))
+    }
+
     /// Advance an in-flight order's status to `next` (the recomputed watermark state). The
     /// `status = ANY(...)` gate is the invariant: only a confirmed order moves — draft/closed/cancelled
     /// are left alone. `next` binds as `&str` with a DB-side `::sales_order_status` cast, so a value
@@ -318,7 +360,7 @@ impl SalesOrderRepository {
         pool: &PgPool,
         order_id: Uuid,
         company_id: Uuid,
-    ) -> Result<Option<ConfirmedOrderRow>, sqlx::Error> {
+    ) -> Result<Option<CancelledOrderRow>, sqlx::Error> {
         let row = company_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
@@ -330,15 +372,14 @@ impl SalesOrderRepository {
                        SELECT 1 FROM selling.sales_order_items soi
                        WHERE soi.order_id = $1 AND soi.billed_qty > 0
                          AND (soi.metadata->>'deleted_at') IS NULL)
-                   RETURNING company_id, customer_id, total, currency"#,
+                   RETURNING company_id, customer_id, order_number"#,
             )
             .bind(order_id).bind(company_id),
         ).await?;
-        Ok(row.map(|r| ConfirmedOrderRow {
+        Ok(row.map(|r| CancelledOrderRow {
             company_id: r.get("company_id"),
             customer_id: r.get("customer_id"),
-            total: r.get("total"),
-            currency: r.get("currency"),
+            order_number: r.get("order_number"),
         }))
     }
 

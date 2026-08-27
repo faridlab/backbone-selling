@@ -11,6 +11,7 @@ use rust_decimal::Decimal;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewQuotation, NewSalesOrder, SellingError, SellingWriteService,
@@ -65,11 +66,11 @@ async fn quotation_order_confirm_flow() {
         lines: vec![line(rev, "10", "100000", "0")],
     }).await.unwrap();
 
-    w.confirm_sales_order(oid, company, &NoUnitCostPort).await.unwrap();
+    w.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(oid).fetch_one(&pool).await.unwrap();
     assert_eq!(st, "to_deliver_and_bill"); // ADR-003: confirmed order awaits both delivery and billing (inventory live)
 
     // confirming again (not draft) is rejected.
-    assert!(matches!(w.confirm_sales_order(oid, company, &NoUnitCostPort).await.unwrap_err(), SellingError::NotDraft(_)));
+    assert!(matches!(w.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap_err(), SellingError::NotDraft(_)));
 }

@@ -37,6 +37,10 @@ pub mod selling_invoice_policy;
 // confirm-time snapshots + the order margin read model).
 pub mod selling_unit_cost;
 pub mod selling_margin;
+// The stock-fulfillment port (the sale_stock confirm engine's seam to the stock module):
+// confirm-time rule launch per storable line, move-backed delivered-qty reconstruction,
+// and the cancel-time decrease-quantity activity log.
+pub mod selling_stock_fulfillment;
 // The delivery-carrier registry (master + the order carrier/tracking verb).
 pub mod selling_carrier;
 // The expense-reinvoice link verbs (attach / list / mark-invoiced) the host billing adapter drives.
@@ -70,6 +74,12 @@ pub use selling_cart_pricing::{
     PricedRewardLine,
 };
 pub use selling_unit_cost::{ItemUnitCost, NoUnitCostPort, UnitCostError, UnitCostPort, UnitCostRequest};
+pub use selling_stock_fulfillment::{
+    DecreaseQuantityLine, DecreaseQuantityRequest, DeliveredQtyLineRef, DeliveredQtyRequest,
+    MoveDeliveryFigures, NoStockFulfillmentPort, StockFulfillmentError, StockFulfillmentPort,
+    StockRuleLine, StockRuleOutcome, StockRuleRequest,
+};
+pub use selling_delivery_seam::{SalesOrderDeliveryDto, SalesOrderDeliveryLineDto};
 pub use selling_margin::{SalesOrderMarginDto, SalesOrderMarginLineDto};
 pub use selling_carrier::{CarrierDto, UpdateCarrierPatch};
 pub use selling_reinvoice::ExpenseReinvoiceDto;

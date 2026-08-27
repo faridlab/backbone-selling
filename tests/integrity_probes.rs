@@ -53,6 +53,12 @@ fn app(pool: &PgPool, m: &SellingModule) -> axum::Router {
         // honest absence — good enough for the route-level probes here (the margin snapshot's own
         // port behaviors are proven in tests/margin_compute.rs with a scripted port).
         std::sync::Arc::new(backbone_selling::application::service::selling_unit_cost::NoUnitCostPort),
+        // No stock engine in the probe app either: the opt-out adapter launches nothing and
+        // reports no move figures — the stock port's own behaviors are proven in
+        // tests/sale_stock_confirm.rs with a scripted port.
+        std::sync::Arc::new(
+            backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort,
+        ),
     )
 }
 

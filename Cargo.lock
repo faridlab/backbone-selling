@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "backbone-inventory"
-version = "0.4.3"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",

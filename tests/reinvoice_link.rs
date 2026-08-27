@@ -19,6 +19,7 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewSalesOrder, SellingError, SellingWriteService,
@@ -108,7 +109,7 @@ async fn attach_refuses_cancelled_and_unknown_orders() {
     let w = SellingWriteService::new(pool.clone());
     let company = Uuid::new_v4();
     let cancelled = draft_order(&w, company).await;
-    w.cancel_sales_order(cancelled, company).await.unwrap();
+    w.cancel_sales_order(cancelled, company, &NoStockFulfillmentPort).await.unwrap();
 
     match w.attach_expense_reinvoice(cancelled, Uuid::new_v4(), d("10.00"), company).await.unwrap_err() {
         SellingError::InvalidTransition { verb, current } => {
@@ -221,6 +222,7 @@ async fn probe_app() -> axum::Router {
         pool,
         backbone_auth::company::CompanyVerifier::hs256(SECRET),
         std::sync::Arc::new(NoUnitCostPort),
+        std::sync::Arc::new(NoStockFulfillmentPort),
     )
 }
 

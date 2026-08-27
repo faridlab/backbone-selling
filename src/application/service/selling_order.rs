@@ -7,12 +7,15 @@
 //! it resolves per-line nets via the `CartPricingPort` and maps them back to
 //! `(unit_price, line_discount)` so the order's own `price_document` reproduces the cart total
 //! exactly. Zero normal Cargo edge to promo. `confirm_sales_order` is the gated
-//! draft → `to_deliver_and_bill` flip (council 2026-07-05; ADR-003); `convert_quotation_to_order`
+//! draft → `to_deliver_and_bill` flip (council 2026-07-05; ADR-003) — it stamps the confirm-time
+//! unit-cost snapshot AND launches the stock rules for every stock-tracked line through the
+//! [`super::selling_stock_fulfillment`] port (the sale_stock confirm engine); `convert_quotation_to_order`
 //! is the quote→order step that copies header + lines (including each line's invoicing policy and
 //! downpayment flag) and links back to the quotation; `cancel_sales_order` is the one-way exit —
-//! refused the moment any line carries a billed quantity (posted invoices are never cancelled);
-//! `update_order_line` is the order lock — frozen fields refuse once the order is confirmed;
-//! `sales_order_ref` loads the cross-module DTO.
+//! refused the moment any line carries a billed quantity (posted invoices are never cancelled) —
+//! and on success logs decrease-quantity activities UPSTREAM through the same port instead of
+//! silently un-reserving; `update_order_line` is the order lock — frozen fields refuse
+//! once the order is confirmed; `sales_order_ref` loads the cross-module DTO.
 //!
 //! Per the module's 4-layer rule this file holds no SQL — the statements live on
 //! `SalesOrderRepository` / `SalesOrderItemRepository` (and `QuotationRepository` /
@@ -26,6 +29,10 @@ use crate::infrastructure::persistence::{NewSalesOrderItemRow, NewSalesOrderRow}
 
 use super::selling_cart_pricing::{CartPriceLine, CartPriceRequest, CartPricingPort};
 use super::selling_events::{SalesOrderCancelled, SalesOrderConfirmed, SalesOrderRef, SellingEvent};
+use super::selling_stock_fulfillment::{
+    DecreaseQuantityLine, DecreaseQuantityRequest, StockFulfillmentPort, StockRuleLine,
+    StockRuleRequest,
+};
 use super::selling_unit_cost::{ItemUnitCost, UnitCostPort, UnitCostRequest};
 use super::selling_write_service::{
     is_dup, money, price_document, NewCartSalesOrder, NewLine, NewSalesOrder, SellingError,
@@ -204,20 +211,36 @@ impl SellingWriteService {
     /// Since the unit-cost margin snapshot landed, confirm also STAMPS each live line's
     /// `unit_cost` from the `costs` port (the confirm-time snapshot — no later edit and no later
     /// catalog standard_cost change can rewrite it; the stamp statement is the only writer).
+    /// Since the sale_stock confirm engine landed, confirm also LAUNCHES the stock rules for
+    /// every stock-tracked line through the `stock` port (the procurement-group → rule → move →
+    /// picking intent; see [`super::selling_stock_fulfillment`]).
     ///
     /// Flow: (1) read the order's live (line id, item id) pairs on the request scope; (2) ask the
-    /// port for the DISTINCT items' costs — BEFORE any transaction, so no network call runs inside
-    /// the DB tx and draft lines are not locked across the port call; (3) in ONE transaction
-    /// (company bound on it): stamp the snapshots, then run the UNCHANGED draft→confirmed guard.
-    /// The guard losing (0 rows) rolls the stamp back with it — a loser of two concurrent confirms
-    /// never leaves a cost on a non-confirmed order.
+    /// cost port for the DISTINCT items' costs — BEFORE any transaction, so no network call runs
+    /// inside the DB tx and draft lines are not locked across the port call; (2b) ask the stock
+    /// port to launch the order's non-downpayment lines (the port launches only stock-tracked
+    /// items; a service line is a skip, not an error) — also before any transaction; (3) in ONE
+    /// transaction (company bound on it): stamp the snapshots, then run the UNCHANGED
+    /// draft→confirmed guard. The guard losing (0 rows) rolls the stamp back with it — a loser of
+    /// two concurrent confirms never leaves a cost on a non-confirmed order.
     ///
-    /// Port-failure rule (explicit, tested): a port `Err`, a requested item MISSING from the
+    /// Port-failure rule (explicit, tested): a cost-port `Err`, a requested item MISSING from the
     /// response, or a NEGATIVE cost each REFUSE the confirm with `CostRejected` — the order stays
-    /// draft, no event fires. A confirm is a commitment; an unknown-cost confirm corrupts margin
-    /// analytics silently. A NULL cost for an item PROCEEDS (that line snapshots NULL — margin
-    /// reads NULL, never zero). The refusal is not sticky: a retried confirm with a healthy port
-    /// succeeds.
+    /// draft, no event fires. A stock-port `Err` REFUSES the confirm with `FulfillmentRejected`
+    /// for the same reason: a confirm is a commitment, and a confirmed order whose fulfillment
+    /// silently never launched is corrupt. A NULL cost for an item PROCEEDS (that line snapshots
+    /// NULL — margin reads NULL, never zero). Neither refusal is sticky: a retried confirm with
+    /// healthy ports succeeds.
+    ///
+    /// Launch-before-commit note: the stock port runs BEFORE the confirm transaction commits
+    /// (the port writes the stock engine's own tables and cannot join selling's transaction), so
+    /// the port's idempotency-per-order contract is what makes a concurrent duplicate confirm or
+    /// a retry after a lost guard race safe — the second launch returns the first's outcomes
+    /// instead of double-minting moves. In the crash window where the launch landed but the
+    /// confirm transaction failed, the moves exist for a still-draft order; the retried confirm
+    /// re-launches (a no-op per the contract) and commits. An outcome for a line the confirm did
+    /// not launch this call (already launched, or not stock-tracked) is accepted verbatim — the
+    /// port is the record of what launched.
     ///
     /// Race note: a draft line ADDED between the (1) read and the (3) stamp is not in the stamp's
     /// unnest table and stays NULL — honest absence, never a WRONG cost, only a missing one
@@ -233,6 +256,7 @@ impl SellingWriteService {
         order_id: Uuid,
         company_id: Uuid,
         costs: &dyn UnitCostPort,
+        stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
         // (1) live (line, item) pairs — ID-only, company-scoped through the caller's fence; a
         // wrong-tenant order simply reads [] and the guard below refuses with NotDraft.
@@ -272,6 +296,59 @@ impl SellingWriteService {
                 stamps.push((l.id, cost_of(l.item_id)?));
             }
         }
+
+        // (2b) launch the stock rules for the order's non-downpayment lines, outside any
+        // transaction. A refused launch refuses the whole confirm — the order stays draft with
+        // no stamp written (the stamp only happens inside the transaction below) and no event
+        // fired. Downpayment lines are excluded: a downpayment's placeholder quantity is never
+        // physically delivered, so it never drives stock work.
+        let stock_header = company_scope::with_company_scope(
+            Some(company_id),
+            self.repos.orders.find_stock_header(&self.db_pool, order_id),
+        ).await?;
+        if let Some(hdr) = stock_header {
+            let demand_lines = company_scope::with_company_scope(
+                Some(company_id),
+                self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id),
+            ).await?;
+            if !demand_lines.is_empty() {
+                let outcomes = stock
+                    .launch_stock_rules(&StockRuleRequest {
+                        order_id,
+                        company_id: hdr.company_id,
+                        customer_id: hdr.customer_id,
+                        order_number: hdr.order_number.clone(),
+                        lines: demand_lines
+                            .iter()
+                            .map(|l| StockRuleLine {
+                                line_id: l.id,
+                                item_id: l.item_id,
+                                quantity: l.quantity,
+                            })
+                            .collect(),
+                    })
+                    .await
+                    .map_err(|e| SellingError::FulfillmentRejected { code: e.code, message: e.message })?;
+                // Observability only — the moves and their picking projections are the stock
+                // engine's records; selling persists nothing about them.
+                for o in &outcomes {
+                    if o.launched {
+                        tracing::debug!(
+                            target: "selling.stock",
+                            order_id = %order_id,
+                            line_id = %o.line_id,
+                            move_id = ?o.move_id,
+                            picking_id = ?o.picking_id,
+                            procure_method = ?o.procure_method,
+                            "confirm launched stock rule"
+                        );
+                    }
+                }
+            }
+        }
+        // A missing stock header (wrong tenant / absent id) is NOT refused here: the guard
+        // below is the sole authority on whether this order is confirmable, and its NotDraft
+        // refusal types every absent-id case identically (no existence leak).
 
         // (3) stamp + guard as ONE unit of work; a losing guard rolls the stamp back.
         let mut tx = self.db_pool.begin().await?;
@@ -367,10 +444,28 @@ impl SellingWriteService {
     /// path. The billed check and the flip are ONE atomic statement, so a racing `mark_invoiced`
     /// cannot slip a billed quantity between check and flip. A delivered-but-unbilled order CAN be
     /// cancelled (only billed guards; delivery reversal is inventory's lane).
+    ///
+    /// Since the sale_stock confirm engine landed, a successful cancel also asks the `stock` port
+    /// to LOG DECREASE-QUANTITY ACTIVITIES on the upstream fulfillment records (the pickings and
+    /// moves the confirm launched) instead of silently un-reserving: selling holds no
+    /// reservation of its own to release — reservations live on the stock engine's quants — so
+    /// the activity log is the loud channel that tells the stock side a confirmed demand went
+    /// away, and an operator decides what to do with any already-reserved or already-shipped
+    /// quantity.
+    ///
+    /// Ordering + failure posture (explicit, tested): the log is requested only AFTER the guarded
+    /// flip committed — logging for an order that then refuses cancellation would tell the stock
+    /// side to decrease quantities the order still stands behind, which is worse than a missing
+    /// log. The port sits outside selling's transaction, so a log failure cannot roll the
+    /// cancellation back: the order IS cancelled, the `SalesOrderCancelled` event still fires
+    /// (consumers must see the commitment's end), and the method returns
+    /// `DecreaseActivityFailed` telling the caller to re-invoke
+    /// [`Self::retry_decrease_activities`] with a healthy engine. Never a silent skip.
     pub async fn cancel_sales_order(
         &self,
         order_id: Uuid,
         company_id: Uuid,
+        stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
         let row = company_scope::with_company_scope(
             Some(company_id),
@@ -380,7 +475,8 @@ impl SellingWriteService {
             Some(r) => r,
             None => {
                 // The guard refused — classify why (only after a refusal; the guarded statement
-                // itself never leaks whether the id exists).
+                // itself never leaks whether the id exists). No port call happens on a refusal:
+                // nothing was cancelled, so there is nothing to tell the stock side.
                 let why = company_scope::with_company_scope(
                     Some(company_id),
                     self.repos.orders.find_cancel_refusal(&self.db_pool, order_id, company_id),
@@ -405,7 +501,67 @@ impl SellingWriteService {
             company_id: row.company_id,
             customer_id: row.customer_id,
         }));
+        // The commitment's end is published first (it happened); the upstream log follows. A
+        // failure here is returned loudly but does not undo anything — see the method doc.
+        self.log_decrease_activities(order_id, company_id, &row.order_number, stock).await?;
         Ok(())
+    }
+
+    /// Re-attempt the upstream decrease-quantity log for an order whose cancellation committed
+    /// but whose log call failed (`DecreaseActivityFailed`). Refuses unless the order actually
+    /// IS cancelled (the log is only ever about a cancelled demand). The port's
+    /// idempotency-per-order contract makes a retry after an ambiguous failure safe.
+    pub async fn retry_decrease_activities(
+        &self,
+        order_id: Uuid,
+        company_id: Uuid,
+        stock: &dyn StockFulfillmentPort,
+    ) -> Result<(), SellingError> {
+        let hdr = company_scope::with_company_scope(
+            Some(company_id),
+            self.repos.orders.find_stock_header(&self.db_pool, order_id),
+        ).await?
+        .ok_or(SellingError::OrderNotFound(order_id))?;
+        if hdr.status != "cancelled" {
+            return Err(SellingError::InvalidTransition { verb: "retry_decrease_activities".into(), current: hdr.status });
+        }
+        self.log_decrease_activities(order_id, company_id, &hdr.order_number, stock).await
+    }
+
+    /// Build and send the decrease-quantity request for a cancelled order: one entry per live
+    /// non-downpayment line, carrying what was ordered vs what had shipped (the stored delivery
+    /// watermark at cancel time). Shared by the cancel flow and its retry verb.
+    async fn log_decrease_activities(
+        &self,
+        order_id: Uuid,
+        company_id: Uuid,
+        order_number: &str,
+        stock: &dyn StockFulfillmentPort,
+    ) -> Result<(), SellingError> {
+        let lines = company_scope::with_company_scope(
+            Some(company_id),
+            self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id),
+        ).await?;
+        if lines.is_empty() {
+            return Ok(()); // nothing was ever orderable — nothing to decrease upstream
+        }
+        stock
+            .log_decrease_quantity(&DecreaseQuantityRequest {
+                order_id,
+                company_id,
+                order_number: order_number.to_string(),
+                lines: lines
+                    .iter()
+                    .map(|l| DecreaseQuantityLine {
+                        line_id: l.id,
+                        item_id: l.item_id,
+                        ordered_qty: l.quantity,
+                        delivered_qty: l.delivered_qty,
+                    })
+                    .collect(),
+            })
+            .await
+            .map_err(|e| SellingError::DecreaseActivityFailed { code: e.code, message: e.message })
     }
 
     /// Edit one order line under the ORDER LOCK. Once the order's status is anything other than

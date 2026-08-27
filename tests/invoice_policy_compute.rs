@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use backbone_selling::application::service::selling_events::{SellingEvent, SellingEventSink};
 use backbone_selling::application::service::selling_order::UpdateOrderLinePatch;
+use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewQuotation, NewSalesOrder, SellingError, SellingWriteService,
@@ -81,7 +82,7 @@ async fn confirmed_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewL
         })
         .await
         .unwrap();
-    w.confirm_sales_order(order, company, &NoUnitCostPort).await.unwrap();
+    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
     order
 }
 async fn line_id(pool: &PgPool, order: Uuid, item: Uuid) -> Uuid {
@@ -739,7 +740,7 @@ async fn cancel_draft_order() {
         .await
         .unwrap();
 
-    w.cancel_sales_order(order, company).await.unwrap();
+    w.cancel_sales_order(order, company, &NoStockFulfillmentPort).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order)
         .fetch_one(&pool)
@@ -759,7 +760,7 @@ async fn cancel_refuses_billed_allows_delivered() {
     let billed = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
     w.mark_invoiced(billed, company, &[(item, d("1"))]).await.unwrap();
 
-    let e = w.cancel_sales_order(billed, company).await.unwrap_err();
+    let e = w.cancel_sales_order(billed, company, &NoStockFulfillmentPort).await.unwrap_err();
     assert!(matches!(e, SellingError::OrderBilled));
     assert_eq!(SellingError::OrderBilled.http_status(), 422);
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
@@ -771,7 +772,7 @@ async fn cancel_refuses_billed_allows_delivered() {
 
     let delivered = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
     w.mark_delivered(delivered, company, &[(item, d("10"))]).await.unwrap();
-    w.cancel_sales_order(delivered, company).await.unwrap();
+    w.cancel_sales_order(delivered, company, &NoStockFulfillmentPort).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(delivered)
         .fetch_one(&pool)
@@ -796,7 +797,7 @@ async fn cancel_refuses_completed() {
         .unwrap();
     assert_eq!(st, "completed");
 
-    let e = w.cancel_sales_order(order, company).await.unwrap_err();
+    let e = w.cancel_sales_order(order, company, &NoStockFulfillmentPort).await.unwrap_err();
     assert!(matches!(e, SellingError::InvalidTransition { ref verb, ref current }
         if verb == "cancel" && current == "completed"));
 }
@@ -810,6 +811,6 @@ async fn cancel_unknown_order_is_not_found() {
     let foreign = confirmed_order(&w, Uuid::new_v4(), vec![pline(Uuid::new_v4(), "1", InvoicePolicy::Order, false)]).await;
 
     for oid in [Uuid::new_v4(), foreign] {
-        assert!(matches!(w.cancel_sales_order(oid, company).await.unwrap_err(), SellingError::OrderNotFound(_)));
+        assert!(matches!(w.cancel_sales_order(oid, company, &NoStockFulfillmentPort).await.unwrap_err(), SellingError::OrderNotFound(_)));
     }
 }

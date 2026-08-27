@@ -9,15 +9,61 @@
 //! `quantity`, and rejects `OverDelivered`, then recomputes the order status via the shared
 //! `pub(super)` helper in [`super::selling_invoice_post::SellingWriteService::recompute_order_status`].
 //!
+//! The sale_stock confirm engine adds the MOVE-BACKED half of the inbound direction:
+//! `order_delivery_view` reconstructs each line's delivered quantity from the stock engine's
+//! done moves through the [`super::selling_stock_fulfillment`] port — gross outgoing minus the
+//! returns flagged to-refund (an exchanged return ships a replacement and does not reduce the
+//! delivered commitment) — and `sync_delivered_from_moves` reconciles the stored
+//! `delivered_qty` watermark to that reconstruction. The two inbound paths coexist deliberately:
+//! `mark_delivered` advances an event's figure under the over-delivery cap, while the
+//! reconstruction REPLACES the watermark with the physical truth (a refund-shaped return can
+//! legitimately lower it); the moves are the truth, the watermark is the cached projection.
+//!
 //! Per the module's 4-layer rule this file holds no SQL — the statements live on
 //! `SalesOrderRepository` / `SalesOrderItemRepository`.
 
 use backbone_orm::company_scope;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::selling_events::{DeliveryRequestEnvelope, DeliveryRequestLine, SellingEvent};
+use super::selling_stock_fulfillment::{
+    DeliveredQtyLineRef, DeliveredQtyRequest, MoveDeliveryFigures, StockFulfillmentPort,
+};
 use super::selling_write_service::{SellingError, SellingWriteService};
+
+// --- the move-backed delivery read model ----------------------------------------
+
+/// One line of the order delivery view: the ordered quantity, the STORED watermark, and —
+/// when the stock engine reported move-backed figures for the line — the raw figures plus
+/// the return-adjusted reconstruction selling derives from them. `move_*` fields are `None`
+/// when no figure exists for the line (no stock engine composed, or no moves were ever
+/// minted): absence, never zero.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SalesOrderDeliveryLineDto {
+    pub line_id: Uuid,
+    pub item_id: Uuid,
+    pub quantity: Decimal,
+    /// The stored `delivered_qty` watermark (what `mark_delivered` / the sync last wrote).
+    pub stored_delivered_qty: Decimal,
+    /// DONE outgoing moves, gross.
+    pub move_delivered_qty: Option<Decimal>,
+    /// DONE incoming returns, all of them.
+    pub move_returned_qty: Option<Decimal>,
+    /// The returned subset flagged to-refund.
+    pub move_to_refund_qty: Option<Decimal>,
+    /// The reconstruction `move_delivered_qty − move_to_refund_qty` (the return-adjusted
+    /// delivered quantity). `None` iff the `move_*` figures are.
+    pub reconstructed_delivered_qty: Option<Decimal>,
+}
+
+/// The order-wide delivery view (`order_delivery_view`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SalesOrderDeliveryDto {
+    pub order_id: Uuid,
+    pub lines: Vec<SalesOrderDeliveryLineDto>,
+}
 
 impl SellingWriteService {
     /// Build the cross-module delivery request for a confirmed order (the envelope selling emits;
@@ -115,6 +161,123 @@ impl SellingWriteService {
             self.repos.order_items.add_delivered_qty_on_line(&mut *tx, line.id, take).await?;
             qty -= take;
         }
+        Ok(())
+    }
+
+    /// The move-backed delivery view: per live non-downpayment line, the ordered quantity, the
+    /// stored watermark, and — when the stock engine has figures — the raw move figures plus the
+    /// RETURN-ADJUSTED reconstruction `delivered − to_refund` (the sale_stock `qty_delivered`
+    /// compute). Pure read: nothing is written; the raw reconstruction can exceed the ordered
+    /// quantity (the physical moves over-delivered) and is shown as-is so the over-delivery is
+    /// visible rather than masked.
+    pub async fn order_delivery_view(
+        &self,
+        order_id: Uuid,
+        stock: &dyn StockFulfillmentPort,
+    ) -> Result<SalesOrderDeliveryDto, SellingError> {
+        // RLS scope (ADR-0008), ID-only pattern — the header read rides the request-dedicated
+        // connection (see `convert_quotation_to_order`); having read the order, its own company
+        // scopes the line read and the port request below.
+        let hdr = self.repos.orders.find_stock_header(&self.db_pool, order_id).await?
+            .ok_or(SellingError::OrderNotFound(order_id))?;
+        let lines = company_scope::with_company_scope(
+            Some(hdr.company_id),
+            self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id),
+        ).await?;
+        let figures = stock
+            .delivered_quantities(&DeliveredQtyRequest {
+                company_id: hdr.company_id,
+                order_id,
+                lines: lines
+                    .iter()
+                    .map(|l| DeliveredQtyLineRef { line_id: l.id, item_id: l.item_id })
+                    .collect(),
+            })
+            .await
+            .map_err(|e| SellingError::FulfillmentRejected { code: e.code, message: e.message })?;
+        let fig_of = |line_id: Uuid| figures.iter().find(|f| f.line_id == line_id);
+        Ok(SalesOrderDeliveryDto {
+            order_id,
+            lines: lines
+                .iter()
+                .map(|l| {
+                    let fig: Option<&MoveDeliveryFigures> = fig_of(l.id);
+                    SalesOrderDeliveryLineDto {
+                        line_id: l.id,
+                        item_id: l.item_id,
+                        quantity: l.quantity,
+                        stored_delivered_qty: l.delivered_qty,
+                        move_delivered_qty: fig.map(|f| f.delivered_qty),
+                        move_returned_qty: fig.map(|f| f.returned_qty),
+                        move_to_refund_qty: fig.map(|f| f.to_refund_qty),
+                        reconstructed_delivered_qty: fig
+                            .map(|f| f.delivered_qty - f.to_refund_qty),
+                    }
+                })
+                .collect(),
+        })
+    }
+
+    /// Reconcile the stored `delivered_qty` watermarks to the move-backed reconstruction (the
+    /// sale_stock `qty_delivered` write path): per line with move figures, SET the watermark to
+    /// `min(delivered − to_refund, quantity)` — clamped at the ordered quantity because the
+    /// watermark invariant `delivered_qty <= quantity` is selling's own (an over-delivery stays
+    /// visible in [`Self::order_delivery_view`]'s raw figures instead) — then recompute the
+    /// order status from the watermarks.
+    ///
+    /// A REPLACE, not an add: a refund-shaped return legitimately LOWERS a watermark a previous
+    /// delivery event had advanced (10 delivered, 3 returned to-refund → 7), which can move an
+    /// order back from `to_bill` to `to_deliver_and_bill` — the status recompute follows the
+    /// watermarks in either direction. Lines the stock engine reported NO figure for keep their
+    /// stored watermark untouched (absence is never zero); with no figures at all the whole sync
+    /// is a no-op. Concurrent `mark_delivered` allocations can interleave between the read and
+    /// the write — the moves remain the truth a later sync reconciles to.
+    pub async fn sync_delivered_from_moves(
+        &self,
+        order_id: Uuid,
+        company_id: Uuid,
+        stock: &dyn StockFulfillmentPort,
+    ) -> Result<(), SellingError> {
+        let lines = company_scope::with_company_scope(
+            Some(company_id),
+            self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id),
+        ).await?;
+        if lines.is_empty() {
+            return Ok(());
+        }
+        let figures = stock
+            .delivered_quantities(&DeliveredQtyRequest {
+                company_id,
+                order_id,
+                lines: lines
+                    .iter()
+                    .map(|l| DeliveredQtyLineRef { line_id: l.id, item_id: l.item_id })
+                    .collect(),
+            })
+            .await
+            .map_err(|e| SellingError::FulfillmentRejected { code: e.code, message: e.message })?;
+        // Only lines the engine reported figures for are written; clamp each at its ordered
+        // quantity (the watermark invariant — the raw figure stays visible in the view).
+        let updates: Vec<(Uuid, Decimal)> = lines
+            .iter()
+            .filter_map(|l| {
+                figures
+                    .iter()
+                    .find(|f| f.line_id == l.id)
+                    .map(|f| {
+                        let net = f.delivered_qty - f.to_refund_qty;
+                        (l.id, if net > l.quantity { l.quantity } else { net })
+                    })
+            })
+            .collect();
+        if updates.is_empty() {
+            return Ok(()); // no move-backed figures: keep every stored watermark
+        }
+        let mut tx = self.db_pool.begin().await?;
+        company_scope::bind_company_on(&mut tx, company_id).await?;
+        self.repos.order_items.set_delivered_quantities(&mut tx, order_id, &updates).await?;
+        tx.commit().await?;
+        self.recompute_order_status(order_id).await?;
         Ok(())
     }
 }

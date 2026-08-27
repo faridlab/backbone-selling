@@ -19,6 +19,7 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use backbone_selling::application::service::selling_carrier::UpdateCarrierPatch;
+use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewSalesOrder, SellingError, SellingWriteService,
@@ -171,12 +172,12 @@ async fn set_delivery_writes_draft_and_confirmed_and_refuses_cancelled() {
 
     // confirmed: still writable — tracking typically arrives only after ship.
     let confirmed = draft_order(&w, company).await;
-    w.confirm_sales_order(confirmed, company, &NoUnitCostPort).await.unwrap();
+    w.confirm_sales_order(confirmed, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
     w.set_order_delivery(confirmed, company, Some(Some(carrier)), Some(Some("SHIP-9".into()))).await.unwrap();
 
     // cancelled: refused.
     let cancelled = draft_order(&w, company).await;
-    w.cancel_sales_order(cancelled, company).await.unwrap();
+    w.cancel_sales_order(cancelled, company, &NoStockFulfillmentPort).await.unwrap();
     match w.set_order_delivery(cancelled, company, Some(Some(carrier)), None).await.unwrap_err() {
         SellingError::InvalidTransition { verb, current } => {
             assert_eq!(verb, "set_delivery");
@@ -268,6 +269,7 @@ async fn probe_app() -> axum::Router {
         pool,
         backbone_auth::company::CompanyVerifier::hs256(SECRET),
         std::sync::Arc::new(NoUnitCostPort),
+        std::sync::Arc::new(NoStockFulfillmentPort),
     )
 }
 

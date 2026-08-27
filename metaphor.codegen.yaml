@@ -32,6 +32,9 @@ user_owned:
   - "src/application/service/selling_margin.rs"
   - "src/application/service/selling_carrier.rs"
   - "src/application/service/selling_reinvoice.rs"
+  # The stock-fulfillment port (the sale_stock confirm engine's seam to the stock module):
+  # confirm-time rule launch, move-backed delivered-qty reconstruction, cancel-time log.
+  - "src/application/service/selling_stock_fulfillment.rs"
   - "src/presentation/http/guarded_routes.rs"
 
   # The five document repositories own the hand-written selling SQL that the write service
@@ -58,6 +61,7 @@ user_owned:
   - "tests/order_to_cash.rs"
   - "tests/delivery_seam.rs"
   - "tests/delivery_outbox_durability.rs"
+  - "tests/sale_stock_confirm.rs"
   - "tests/invoice_seam.rs"
   - "tests/quotation_machine.rs"
   - "tests/invoice_policy_compute.rs"

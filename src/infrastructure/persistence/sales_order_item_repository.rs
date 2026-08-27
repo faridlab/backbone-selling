@@ -154,6 +154,18 @@ pub struct MarginLineRow {
     pub unit_cost: Option<Decimal>,
 }
 
+/// One live NON-DOWNPAYMENT order line as the stock-fulfillment paths read it: the
+/// confirm-time rule launch (the demand), the delivered-qty reconstruction (the line refs
+/// + the stored watermark it may replace), and the cancel-time decrease-quantity log
+/// (ordered vs shipped). Downpayment lines are excluded by the SQL — a downpayment's
+/// placeholder quantity is never physically delivered, so it never drives stock work.
+pub struct OrderStockLineRow {
+    pub id: Uuid,
+    pub item_id: Uuid,
+    pub quantity: Decimal,
+    pub delivered_qty: Decimal,
+}
+
 /// The order-wide margin rollup (SQL mirror of the margin expression in
 /// `selling_margin.rs`): the sum over COSTED lines only, plus the coverage counters that make
 /// partial-coverage orders visible. `margin_sum` / `amount_sum_costed` are NULL when no line
@@ -563,6 +575,64 @@ impl SalesOrderItemRepository {
                  AND (soi.metadata->>'deleted_at') IS NULL"#,
         )
         .bind(order_id).bind(line_ids).bind(costs)
+        .execute(conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Read an order's live NON-DOWNPAYMENT lines for the stock-fulfillment paths (the
+    /// confirm-time rule launch, the delivered-qty reconstruction, the cancel-time
+    /// decrease-quantity log). ID-only — same scoping as [`Self::list_cost_stamp_lines`]
+    /// (RLS fences a wrong-tenant order to zero rows).
+    pub async fn list_stock_demand_lines(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<Vec<OrderStockLineRow>, sqlx::Error> {
+        let rows = company_scope::fetch_all_rows_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT id, item_id, quantity, delivered_qty FROM selling.sales_order_items
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL
+                     AND NOT is_downpayment ORDER BY id"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(rows.iter().map(|r| OrderStockLineRow {
+            id: r.get("id"),
+            item_id: r.get("item_id"),
+            quantity: r.get("quantity"),
+            delivered_qty: r.get("delivered_qty"),
+        }).collect())
+    }
+
+    /// Authoritatively SET each named line's `delivered_qty` to the reconstructed figure
+    /// (the move-backed reconstruction is a REPLACE, not an add — a refund-shaped return
+    /// legitimately lowers the watermark below a previously-marked figure). ONE statement
+    /// via an unnest join, on the caller's transaction, scoped to the order's live lines;
+    /// a line id not belonging to the order is simply not matched.
+    ///
+    /// This is deliberately NOT the `FOR UPDATE`-capped allocation shape of
+    /// [`Self::add_delivered_qty_on_line`]: that path advances an inbound event under the
+    /// over-delivery cap, while this one reconciles the stored watermark to the physical
+    /// truth the moves recorded. The caller clamps to the line's `quantity` before calling
+    /// (the watermark invariant `delivered_qty <= quantity` is selling's, and holds even
+    /// when the physical moves over-delivered).
+    pub async fn set_delivered_quantities(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        order_id: Uuid,
+        figures: &[(Uuid, Decimal)],
+    ) -> Result<(), sqlx::Error> {
+        let line_ids: Vec<Uuid> = figures.iter().map(|(id, _)| *id).collect();
+        let qtys: Vec<Decimal> = figures.iter().map(|(_, q)| *q).collect();
+        sqlx::query(
+            r#"UPDATE selling.sales_order_items soi SET delivered_qty = v.qty
+               FROM (SELECT * FROM unnest($2::uuid[], $3::numeric[])) AS v(line_id, qty)
+               WHERE soi.id = v.line_id AND soi.order_id = $1
+                 AND (soi.metadata->>'deleted_at') IS NULL"#,
+        )
+        .bind(order_id).bind(line_ids).bind(qtys)
         .execute(conn)
         .await?;
         Ok(())
