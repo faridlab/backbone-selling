@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "backbone-inventory"
-version = "0.7.0"
+version = "0.7.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -423,6 +423,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "backbone-project"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "backbone-auth",
+ "backbone-core",
+ "backbone-messaging",
+ "backbone-orm",
+ "chrono",
+ "config",
+ "prost",
+ "prost-types",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "tower 0.4.13",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "validator",
+]
+
+[[package]]
 name = "backbone-selling"
 version = "0.9.0"
 dependencies = [
@@ -437,6 +469,7 @@ dependencies = [
  "backbone-messaging",
  "backbone-orm",
  "backbone-outbox",
+ "backbone-project",
  "chrono",
  "config",
  "jsonwebtoken",

@@ -94,3 +94,10 @@ backbone-inventory = { path = "../backbone-inventory" }
 # The OrderInvoiced seam test drives the REAL backbone-billing (invoice request -> Sales Invoice ->
 # revenue post -> SalesInvoicePosted -> mark_invoiced). Dev-dependency ONLY — zero normal edge.
 backbone-billing = { path = "../backbone-billing" }
+# The service-delivery mint seam test drives the REAL backbone-project mint
+# (ProjectWriteService::mint_service_delivery) through an in-test adapter that maps this module's
+# fulfillment-port DTOs onto project's — proving the cross-adapter seam end-to-end. The sibling
+# checkout this resolves to is the tagged v0.4.0 tree. Dev-dependency ONLY — the shipped selling
+# library has ZERO horizontal edges to project (verify: `cargo tree -e normal -i backbone-project`
+# is empty).
+backbone-project = { path = "../backbone-project" }
