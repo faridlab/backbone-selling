@@ -20,6 +20,8 @@ use uuid::Uuid;
 
 use backbone_selling::application::service::selling_carrier::UpdateCarrierPatch;
 use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
+use backbone_selling::application::service::selling_service_catalog::NoServiceCatalog;
+use backbone_selling::application::service::selling_service_delivery::NoServiceDelivery;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewSalesOrder, SellingError, SellingWriteService,
@@ -172,7 +174,7 @@ async fn set_delivery_writes_draft_and_confirmed_and_refuses_cancelled() {
 
     // confirmed: still writable — tracking typically arrives only after ship.
     let confirmed = draft_order(&w, company).await;
-    w.confirm_sales_order(confirmed, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
+    w.confirm_sales_order(confirmed, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     w.set_order_delivery(confirmed, company, Some(Some(carrier)), Some(Some("SHIP-9".into()))).await.unwrap();
 
     // cancelled: refused.
@@ -270,6 +272,8 @@ async fn probe_app() -> axum::Router {
         backbone_auth::company::CompanyVerifier::hs256(SECRET),
         std::sync::Arc::new(NoUnitCostPort),
         std::sync::Arc::new(NoStockFulfillmentPort),
+        std::sync::Arc::new(NoServiceCatalog),
+        std::sync::Arc::new(NoServiceDelivery),
     )
 }
 

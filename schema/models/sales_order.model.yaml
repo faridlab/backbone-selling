@@ -193,6 +193,16 @@ models:
         attributes: ["@default(false)"]
         description: "Downpayment advance line (excluded from the order invoice-status aggregation; the billed watermark still bounds it)"
 
+      project_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Service-delivery backref # logical FK to project.Project.id. Stamped by confirm when the line's product carries a service-tracking policy and the mint succeeded; NULL = nothing minted (manual policy / untracked product / pre-seam order). No cross-module key by design — the composing host owns the seam."
+
+      task_id:
+        type: uuid?
+        attributes: ["@exclude_from_foreign_key_check"]
+        description: "Service-delivery task backref # logical FK to project.Task.id. Stamped with project_id when the policy mints tasks; NULL for project-only policies and unminted lines."
+
       metadata:
         type: Metadata
         attributes: ["@audit_metadata"]

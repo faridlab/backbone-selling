@@ -64,6 +64,10 @@ pub struct CreateSalesOrderItemDto {
     #[cfg_attr(feature = "openapi", schema(example = true))]
     #[serde(alias = "is_downpayment")]
     pub is_downpayment: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "project_id")]
+    pub project_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "task_id")]
+    pub task_id: Option<Uuid>,
 }
 
 // =============================================================================
@@ -109,6 +113,10 @@ pub struct UpdateSalesOrderItemDto {
     #[cfg_attr(feature = "openapi", schema(example = true))]
     #[serde(alias = "is_downpayment")]
     pub is_downpayment: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "project_id")]
+    pub project_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "task_id")]
+    pub task_id: Option<Uuid>,
 }
 
 // =============================================================================
@@ -155,12 +163,16 @@ pub struct PatchSalesOrderItemDto {
     #[cfg_attr(feature = "openapi", schema(example = true))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "is_downpayment")]
     pub is_downpayment: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "project_id")]
+    pub project_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "task_id")]
+    pub task_id: Option<Uuid>,
 }
 
 impl PatchSalesOrderItemDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.order_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.unit_cost.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some() || self.invoice_policy.is_some() || self.is_downpayment.is_some()
+        self.order_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.unit_cost.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some() || self.invoice_policy.is_some() || self.is_downpayment.is_some() || self.project_id.is_some() || self.task_id.is_some()
     }
 }
 
@@ -195,6 +207,8 @@ pub struct SalesOrderItemResponseDto {
     pub invoice_policy: InvoicePolicy,
     #[cfg_attr(feature = "openapi", schema(example = true))]
     pub is_downpayment: bool,
+    pub project_id: Option<Uuid>,
+    pub task_id: Option<Uuid>,
     pub metadata: AuditMetadata,
 }
 
@@ -279,6 +293,8 @@ impl From<SalesOrderItem> for SalesOrderItemResponseDto {
             delivered_qty: entity.delivered_qty,
             invoice_policy: entity.invoice_policy,
             is_downpayment: entity.is_downpayment,
+            project_id: entity.project_id,
+            task_id: entity.task_id,
             metadata: entity.metadata,
         }
     }
@@ -314,6 +330,8 @@ impl From<CreateSalesOrderItemDto> for SalesOrderItem {
             delivered_qty: dto.delivered_qty,
             invoice_policy: dto.invoice_policy,
             is_downpayment: dto.is_downpayment,
+            project_id: dto.project_id,
+            task_id: dto.task_id,
             metadata: AuditMetadata::default(),
         }
     }
@@ -336,6 +354,8 @@ impl From<&SalesOrderItem> for SalesOrderItemResponseDto {
             delivered_qty: entity.delivered_qty.clone(),
             invoice_policy: entity.invoice_policy.clone(),
             is_downpayment: entity.is_downpayment.clone(),
+            project_id: entity.project_id.clone(),
+            task_id: entity.task_id.clone(),
             metadata: entity.metadata.clone(),
         }
     }
@@ -362,6 +382,8 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderItemDto> for SalesOrderItem {
         self.delivered_qty = dto.delivered_qty;
         self.invoice_policy = dto.invoice_policy;
         self.is_downpayment = dto.is_downpayment;
+        self.project_id = dto.project_id;
+        self.task_id = dto.task_id;
         Ok(self)
     }
 }

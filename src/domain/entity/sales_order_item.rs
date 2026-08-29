@@ -64,6 +64,8 @@ pub struct SalesOrderItem {
     pub delivered_qty: Decimal,
     pub invoice_policy: InvoicePolicy,
     pub is_downpayment: bool,
+    pub project_id: Option<Uuid>,
+    pub task_id: Option<Uuid>,
     #[serde(default)]
     #[sqlx(json)]
     pub metadata: AuditMetadata,
@@ -92,6 +94,8 @@ impl SalesOrderItem {
             delivered_qty,
             invoice_policy,
             is_downpayment,
+            project_id: None,
+            task_id: None,
             metadata: AuditMetadata::default(),
         }
     }
@@ -163,6 +167,18 @@ impl SalesOrderItem {
         self
     }
 
+    /// Set the project_id field (chainable)
+    pub fn with_project_id(mut self, value: Uuid) -> Self {
+        self.project_id = Some(value);
+        self
+    }
+
+    /// Set the task_id field (chainable)
+    pub fn with_task_id(mut self, value: Uuid) -> Self {
+        self.task_id = Some(value);
+        self
+    }
+
     // ==========================================================
     // Partial Update
     // ==========================================================
@@ -209,6 +225,12 @@ impl SalesOrderItem {
                 }
                 "is_downpayment" => {
                     if let Ok(v) = serde_json::from_value(value) { self.is_downpayment = v; }
+                }
+                "project_id" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.project_id = v; }
+                }
+                "task_id" => {
+                    if let Ok(v) = serde_json::from_value(value) { self.task_id = v; }
                 }
                 _ => {} // ignore unknown fields
             }
@@ -267,6 +289,8 @@ impl backbone_orm::EntityRepoMeta for SalesOrderItem {
         m.insert("order_id".to_string(), "uuid".to_string());
         m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("item_id".to_string(), "uuid".to_string());
+        m.insert("project_id".to_string(), "uuid".to_string());
+        m.insert("task_id".to_string(), "uuid".to_string());
         m.insert("invoice_policy".to_string(), "invoice_policy".to_string());
         m
     }
@@ -300,6 +324,8 @@ pub struct SalesOrderItemBuilder {
     delivered_qty: Option<Decimal>,
     invoice_policy: Option<InvoicePolicy>,
     is_downpayment: Option<bool>,
+    project_id: Option<Uuid>,
+    task_id: Option<Uuid>,
 }
 
 impl SalesOrderItemBuilder {
@@ -381,6 +407,18 @@ impl SalesOrderItemBuilder {
         self
     }
 
+    /// Set the project_id field (optional)
+    pub fn project_id(mut self, value: Uuid) -> Self {
+        self.project_id = Some(value);
+        self
+    }
+
+    /// Set the task_id field (optional)
+    pub fn task_id(mut self, value: Uuid) -> Self {
+        self.task_id = Some(value);
+        self
+    }
+
     /// Build the SalesOrderItem entity
     ///
     /// Returns Err if any required field without a default is missing.
@@ -406,6 +444,8 @@ impl SalesOrderItemBuilder {
             delivered_qty: self.delivered_qty.unwrap_or(Decimal::from(0)),
             invoice_policy: self.invoice_policy.unwrap_or_default(),
             is_downpayment: self.is_downpayment.unwrap_or(false),
+            project_id: self.project_id,
+            task_id: self.task_id,
             metadata: AuditMetadata::default(),
         })
     }

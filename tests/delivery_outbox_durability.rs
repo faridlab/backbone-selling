@@ -8,6 +8,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
+use backbone_selling::application::service::selling_service_catalog::NoServiceCatalog;
+use backbone_selling::application::service::selling_service_delivery::NoServiceDelivery;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{NewLine, NewSalesOrder, SellingWriteService};
 
@@ -34,7 +36,7 @@ async fn dod1_delivery_request_is_durably_staged() {
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
+    selling.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     selling.build_delivery_request(oid).await.unwrap();
 

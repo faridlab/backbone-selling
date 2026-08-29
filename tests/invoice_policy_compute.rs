@@ -21,6 +21,8 @@ use uuid::Uuid;
 use backbone_selling::application::service::selling_events::{SellingEvent, SellingEventSink};
 use backbone_selling::application::service::selling_order::UpdateOrderLinePatch;
 use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
+use backbone_selling::application::service::selling_service_catalog::NoServiceCatalog;
+use backbone_selling::application::service::selling_service_delivery::NoServiceDelivery;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewQuotation, NewSalesOrder, SellingError, SellingWriteService,
@@ -82,7 +84,7 @@ async fn confirmed_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewL
         })
         .await
         .unwrap();
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
+    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     order
 }
 async fn line_id(pool: &PgPool, order: Uuid, item: Uuid) -> Uuid {

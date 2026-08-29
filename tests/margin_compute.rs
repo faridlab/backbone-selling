@@ -23,6 +23,8 @@ use uuid::Uuid;
 
 use backbone_selling::application::service::selling_margin::{line_margin, margin_percent};
 use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
+use backbone_selling::application::service::selling_service_catalog::NoServiceCatalog;
+use backbone_selling::application::service::selling_service_delivery::NoServiceDelivery;
 use backbone_selling::application::service::selling_unit_cost::{
     ItemUnitCost, NoUnitCostPort, UnitCostError, UnitCostPort, UnitCostRequest,
 };
@@ -124,7 +126,7 @@ async fn null_cost_confirms_and_reads_as_absent() {
     let item = Uuid::new_v4();
     let order = draft_order(&w, company, vec![line(item, "10", "1000", "0")]).await;
 
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
+    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(status(&pool, order).await, "to_deliver_and_bill");
     assert_eq!(line_costs(&pool, order).await, vec![None], "no cost source ⇒ no snapshot");
 
@@ -153,7 +155,7 @@ async fn port_failure_refuses_confirm_verbatim_and_is_not_sticky() {
         fail_with: Some(UnitCostError { code: "catalog_unavailable".into(), message: "catalog is down".into() }),
         omit: vec![],
     };
-    match w.confirm_sales_order(order, company, &down, &NoStockFulfillmentPort).await.unwrap_err() {
+    match w.confirm_sales_order(order, company, &down, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
         SellingError::CostRejected { code, message } => {
             assert_eq!(code, "catalog_unavailable", "the port's code must ride through verbatim");
             assert_eq!(message, "catalog is down");
@@ -165,7 +167,7 @@ async fn port_failure_refuses_confirm_verbatim_and_is_not_sticky() {
 
     // Same order, healthy port: the confirm succeeds.
     let up = ScriptedCosts::healthy([(item, Some("500"))]);
-    w.confirm_sales_order(order, company, &up, &NoStockFulfillmentPort).await.unwrap();
+    w.confirm_sales_order(order, company, &up, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(status(&pool, order).await, "to_deliver_and_bill");
     assert_eq!(line_costs(&pool, order).await, vec![Some(d("500"))]);
 }
@@ -181,7 +183,7 @@ async fn omitted_item_refuses_confirm() {
     let order = draft_order(&w, company, vec![line(a, "1", "100", "0"), line(b, "1", "100", "0")]).await;
 
     let holey = ScriptedCosts { costs: HashMap::new(), fail_with: None, omit: vec![b] };
-    match w.confirm_sales_order(order, company, &holey, &NoStockFulfillmentPort).await.unwrap_err() {
+    match w.confirm_sales_order(order, company, &holey, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
         SellingError::CostRejected { code, .. } => assert_eq!(code, "unit_cost_line_missing"),
         other => panic!("expected CostRejected(unit_cost_line_missing), got {other:?}"),
     }
@@ -199,7 +201,7 @@ async fn negative_cost_refuses_confirm() {
     let order = draft_order(&w, company, vec![line(item, "1", "100", "0")]).await;
 
     let negative = ScriptedCosts::healthy([(item, Some("-1"))]);
-    match w.confirm_sales_order(order, company, &negative, &NoStockFulfillmentPort).await.unwrap_err() {
+    match w.confirm_sales_order(order, company, &negative, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
         SellingError::CostRejected { code, .. } => assert_eq!(code, "unit_cost_negative"),
         other => panic!("expected CostRejected(unit_cost_negative), got {other:?}"),
     }
@@ -218,7 +220,7 @@ async fn confirm_stamps_costs_and_margin_view_computes() {
     let order = draft_order(&w, company, vec![line(item, "10", "1000", "0")]).await;
 
     let costs = ScriptedCosts::healthy([(item, Some("600"))]);
-    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort).await.unwrap();
+    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(line_costs(&pool, order).await, vec![Some(d("600"))]);
 
     let view = w.order_margin_view(order).await.unwrap();
@@ -243,11 +245,11 @@ async fn a_losing_confirm_rolls_its_stamp_back() {
     let order = draft_order(&w, company, vec![line(item, "2", "500", "0")]).await;
 
     let first = ScriptedCosts::healthy([(item, Some("100"))]);
-    w.confirm_sales_order(order, company, &first, &NoStockFulfillmentPort).await.unwrap();
+    w.confirm_sales_order(order, company, &first, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     let second = ScriptedCosts::healthy([(item, Some("999"))]);
     assert!(matches!(
-        w.confirm_sales_order(order, company, &second, &NoStockFulfillmentPort).await.unwrap_err(),
+        w.confirm_sales_order(order, company, &second, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err(),
         SellingError::NotDraft(_)
     ));
     assert_eq!(
@@ -268,7 +270,7 @@ async fn rollup_covers_the_costed_subset_only() {
     let order = draft_order(&w, company, vec![line(a, "5", "1000", "0"), line(b, "1", "777", "0")]).await;
 
     let costs = ScriptedCosts::healthy([(a, Some("200")), (b, None)]);
-    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort).await.unwrap();
+    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     let view = w.order_margin_view(order).await.unwrap();
     assert_eq!(view.margin_lines_costed, 1);
@@ -298,7 +300,7 @@ async fn negative_margins_are_reported_not_clamped() {
     ).await;
 
     let costs = ScriptedCosts::healthy([(loss_item, Some("150")), (free_item, Some("150"))]);
-    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort).await.unwrap();
+    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     let view = w.order_margin_view(order).await.unwrap();
     let loss = view.lines.iter().find(|l| l.item_id == loss_item).unwrap();
@@ -353,6 +355,8 @@ async fn probe_app(costs: ScriptedCosts) -> axum::Router {
         backbone_auth::company::CompanyVerifier::hs256(SECRET),
         Arc::new(costs),
         Arc::new(NoStockFulfillmentPort),
+        Arc::new(NoServiceCatalog),
+        Arc::new(NoServiceDelivery),
     )
 }
 

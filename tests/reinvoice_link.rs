@@ -20,6 +20,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
+use backbone_selling::application::service::selling_service_catalog::NoServiceCatalog;
+use backbone_selling::application::service::selling_service_delivery::NoServiceDelivery;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewSalesOrder, SellingError, SellingWriteService,
@@ -223,6 +225,8 @@ async fn probe_app() -> axum::Router {
         backbone_auth::company::CompanyVerifier::hs256(SECRET),
         std::sync::Arc::new(NoUnitCostPort),
         std::sync::Arc::new(NoStockFulfillmentPort),
+        std::sync::Arc::new(NoServiceCatalog),
+        std::sync::Arc::new(NoServiceDelivery),
     )
 }
 

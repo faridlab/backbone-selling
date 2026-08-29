@@ -35,6 +35,11 @@ user_owned:
   # The stock-fulfillment port (the sale_stock confirm engine's seam to the stock module):
   # confirm-time rule launch, move-backed delivered-qty reconstruction, cancel-time log.
   - "src/application/service/selling_stock_fulfillment.rs"
+  # The service-delivery confirm engine's seams: the service-tracking policy read off the
+  # product surface + the confirm-time project/task mint whose outcomes become the order
+  # lines' delivery backrefs.
+  - "src/application/service/selling_service_catalog.rs"
+  - "src/application/service/selling_service_delivery.rs"
   - "src/presentation/http/guarded_routes.rs"
 
   # The five document repositories own the hand-written selling SQL that the write service
@@ -62,6 +67,7 @@ user_owned:
   - "tests/delivery_seam.rs"
   - "tests/delivery_outbox_durability.rs"
   - "tests/sale_stock_confirm.rs"
+  - "tests/sale_service_confirm.rs"
   - "tests/invoice_seam.rs"
   - "tests/quotation_machine.rs"
   - "tests/invoice_policy_compute.rs"
@@ -74,6 +80,11 @@ user_owned:
   # Tradeoff: a newly-added entity will NOT auto-generate its integration test here — add it by hand.
   - "tests/integration_tests.rs"
   - "tests/integration/**"
+
+  # The service-delivery backref migration: project_id/task_id on sales order items (the
+  # confirm-mint's per-line delivery backrefs) — hand-owned ALTER pair.
+  - "migrations/20260829000100_selling_service_delivery_backrefs.up.sql"
+  - "migrations/20260829000100_selling_service_delivery_backrefs.down.sql"
 
   # Hand-authored module documentation.
   - "docs/**"

@@ -142,6 +142,17 @@ pub struct CostStampLineRow {
     pub item_id: Uuid,
 }
 
+/// One live NON-DOWNPAYMENT order line as the service-delivery confirm path reads it: enough
+/// to resolve the product's service-tracking rung and build the mint request's line entry.
+/// Downpayment lines are excluded by the SQL — a downpayment's placeholder quantity is never
+/// delivered, so it never drives delivery work.
+pub struct ServiceDeliveryLineRow {
+    pub id: Uuid,
+    pub item_id: Uuid,
+    pub description: Option<String>,
+    pub quantity: Decimal,
+}
+
 /// One live order line as the margin read model loads it. `unit_cost` is the confirm-time
 /// snapshot (NULL = never stamped / no cost maintained — margin reads NULL, never zero).
 pub struct MarginLineRow {
@@ -633,6 +644,64 @@ impl SalesOrderItemRepository {
                  AND (soi.metadata->>'deleted_at') IS NULL"#,
         )
         .bind(order_id).bind(line_ids).bind(qtys)
+        .execute(conn)
+        .await?;
+        Ok(())
+    }
+
+    /// Read an order's live NON-DOWNPAYMENT lines for the service-delivery confirm path (the
+    /// mint request's line entries). ID-only — same scoping as
+    /// [`Self::list_cost_stamp_lines`] (RLS fences a wrong-tenant order to zero rows, which the
+    /// confirm guard then types as `NotDraft` — no existence leak).
+    pub async fn list_service_delivery_lines(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<Vec<ServiceDeliveryLineRow>, sqlx::Error> {
+        let rows = company_scope::fetch_all_rows_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT id, item_id, description, quantity FROM selling.sales_order_items
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL
+                     AND NOT is_downpayment ORDER BY id"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(rows.iter().map(|r| ServiceDeliveryLineRow {
+            id: r.get("id"),
+            item_id: r.get("item_id"),
+            description: r.get("description"),
+            quantity: r.get("quantity"),
+        }).collect())
+    }
+
+    /// Stamp the service-delivery backrefs (the minted project/task ids) onto an order's live
+    /// lines, ONE statement via an unnest join. Takes the CALLER'S connection: this runs INSIDE
+    /// the confirm transaction, right beside the unit-cost stamp, so a losing concurrent confirm
+    /// rolls its backrefs back.
+    ///
+    /// Only lines the mint reported (`minted: true`) appear in `stamps` — a manual or untracked
+    /// line is simply absent and keeps NULL. A line id that no longer belongs to the order (or
+    /// is soft-deleted) is not matched: the stamp for a stale line set is a no-op for that id.
+    /// The values are written unconditionally per the port's outcome — the port is the record
+    /// of what minted, and its per-line idempotency means a repeat stamp carries the same ids.
+    pub async fn stamp_service_backrefs(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        order_id: Uuid,
+        stamps: &[(Uuid, Option<Uuid>, Option<Uuid>)],
+    ) -> Result<(), sqlx::Error> {
+        let line_ids: Vec<Uuid> = stamps.iter().map(|(id, _, _)| *id).collect();
+        let project_ids: Vec<Option<Uuid>> = stamps.iter().map(|(_, p, _)| *p).collect();
+        let task_ids: Vec<Option<Uuid>> = stamps.iter().map(|(_, _, t)| *t).collect();
+        sqlx::query(
+            r#"UPDATE selling.sales_order_items soi
+               SET project_id = v.project_id, task_id = v.task_id
+               FROM (SELECT * FROM unnest($2::uuid[], $3::uuid[], $4::uuid[])) AS v(line_id, project_id, task_id)
+               WHERE soi.id = v.line_id AND soi.order_id = $1
+                 AND (soi.metadata->>'deleted_at') IS NULL"#,
+        )
+        .bind(order_id).bind(line_ids).bind(project_ids).bind(task_ids)
         .execute(conn)
         .await?;
         Ok(())

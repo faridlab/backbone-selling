@@ -438,6 +438,8 @@ pub struct SalesOrderItemDto {
     pub delivered_qty: Decimal,
     pub invoice_policy: InvoicePolicy,
     pub is_downpayment: bool,
+    pub project_id: Option<Uuid>,
+    pub task_id: Option<Uuid>,
     pub metadata: serde_json::Value,
 }
 

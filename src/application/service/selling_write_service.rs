@@ -182,6 +182,19 @@ pub enum SellingError {
     /// draft and the launch can be retried with a healthy engine. Carries the port's own
     /// `code` verbatim.
     FulfillmentRejected { code: String, message: String },
+    /// The product-surface reader refused the confirm-time service-tracking resolution
+    /// (transport failure, unreadable projection). Same fail-closed posture as
+    /// `CostRejected`: without the policy the confirm cannot know which lines commit
+    /// delivery work, so the order stays draft and the resolution can be retried with a
+    /// healthy source. Carries the port's own `code` verbatim. (A product merely MISSING
+    /// from the resolution is NOT this error — absence is the manual policy.)
+    ServiceCatalogRejected { code: String, message: String },
+    /// The project side refused the confirm-time service-delivery mint (transport failure,
+    /// a product whose fixed-project anchor is missing). Same fail-closed posture as
+    /// `FulfillmentRejected`: a confirmed service order whose delivery work silently never
+    /// minted is corrupt, so the order stays draft and the mint can be retried. Carries the
+    /// port's own `code` verbatim.
+    ServiceDeliveryRejected { code: String, message: String },
     /// The upstream decrease-quantity activity log FAILED after the cancellation itself
     /// had already committed (the port is outside selling's transaction, so the log cannot
     /// roll the flip back). The order IS cancelled; this error says the stock side was not
@@ -224,6 +237,8 @@ impl SellingError {
             SellingError::PricingRejected { code, .. } => code.clone(),
             SellingError::CostRejected { code, .. } => code.clone(),
             SellingError::FulfillmentRejected { code, .. } => code.clone(),
+            SellingError::ServiceCatalogRejected { code, .. } => code.clone(),
+            SellingError::ServiceDeliveryRejected { code, .. } => code.clone(),
             SellingError::DecreaseActivityFailed { code, .. } => code.clone(),
             SellingError::CarrierNotFound(_) => "carrier_not_found".into(),
             SellingError::CarrierDuplicate(_) => "duplicate_carrier_name".into(),
@@ -273,6 +288,12 @@ impl std::fmt::Display for SellingError {
             }
             SellingError::FulfillmentRejected { message, .. } => {
                 write!(f, "stock engine rejected the confirm-time rule launch: {message}")
+            }
+            SellingError::ServiceCatalogRejected { message, .. } => {
+                write!(f, "product surface rejected the service-tracking resolution: {message}")
+            }
+            SellingError::ServiceDeliveryRejected { message, .. } => {
+                write!(f, "project engine rejected the confirm-time delivery mint: {message}")
             }
             SellingError::DecreaseActivityFailed { message, .. } => {
                 write!(

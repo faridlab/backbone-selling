@@ -41,6 +41,11 @@ pub mod selling_margin;
 // confirm-time rule launch per storable line, move-backed delivered-qty reconstruction,
 // and the cancel-time decrease-quantity activity log.
 pub mod selling_stock_fulfillment;
+// The service-delivery confirm engine's seams to the product surface and the project module:
+// the service-tracking policy read (the ladder off the product) and the confirm-time
+// project/task mint whose outcomes become the order lines' delivery backrefs.
+pub mod selling_service_catalog;
+pub mod selling_service_delivery;
 // The delivery-carrier registry (master + the order carrier/tracking verb).
 pub mod selling_carrier;
 // The expense-reinvoice link verbs (attach / list / mark-invoiced) the host billing adapter drives.
@@ -78,6 +83,14 @@ pub use selling_stock_fulfillment::{
     DecreaseQuantityLine, DecreaseQuantityRequest, DeliveredQtyLineRef, DeliveredQtyRequest,
     MoveDeliveryFigures, NoStockFulfillmentPort, StockFulfillmentError, StockFulfillmentPort,
     StockRuleLine, StockRuleOutcome, StockRuleRequest,
+};
+pub use selling_service_catalog::{
+    NoServiceCatalog, ServiceCatalogError, ServiceCatalogPort, ServiceTrackingInfo,
+    ServiceTrackingRung,
+};
+pub use selling_service_delivery::{
+    NoServiceDelivery, ProjectFulfillmentError, ProjectFulfillmentPort, ServiceDeliveryLine,
+    ServiceDeliveryLineOutcome, ServiceDeliveryRequest,
 };
 pub use selling_delivery_seam::{SalesOrderDeliveryDto, SalesOrderDeliveryLineDto};
 pub use selling_margin::{SalesOrderMarginDto, SalesOrderMarginLineDto};

@@ -59,6 +59,15 @@ fn app(pool: &PgPool, m: &SellingModule) -> axum::Router {
         std::sync::Arc::new(
             backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort,
         ),
+        // No product-surface tracking and no project engine in the probe app: every line
+        // reads as manually tracked and mints nothing — the service-delivery ports' own
+        // behaviors are proven in tests/sale_service_confirm.rs with scripted ports.
+        std::sync::Arc::new(
+            backbone_selling::application::service::selling_service_catalog::NoServiceCatalog,
+        ),
+        std::sync::Arc::new(
+            backbone_selling::application::service::selling_service_delivery::NoServiceDelivery,
+        ),
     )
 }
 

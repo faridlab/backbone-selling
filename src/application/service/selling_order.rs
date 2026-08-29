@@ -9,7 +9,10 @@
 //! exactly. Zero normal Cargo edge to promo. `confirm_sales_order` is the gated
 //! draft → `to_deliver_and_bill` flip (council 2026-07-05; ADR-003) — it stamps the confirm-time
 //! unit-cost snapshot AND launches the stock rules for every stock-tracked line through the
-//! [`super::selling_stock_fulfillment`] port (the sale_stock confirm engine); `convert_quotation_to_order`
+//! [`super::selling_stock_fulfillment`] port (the sale_stock confirm engine) AND mints the
+//! project/task delivery work for every service-tracked line through the
+//! [`super::selling_service_delivery`] port (its policy read rides
+//! [`super::selling_service_catalog`]); `convert_quotation_to_order`
 //! is the quote→order step that copies header + lines (including each line's invoicing policy and
 //! downpayment flag) and links back to the quotation; `cancel_sales_order` is the one-way exit —
 //! refused the moment any line carries a billed quantity (posted invoices are never cancelled) —
@@ -29,6 +32,8 @@ use crate::infrastructure::persistence::{NewSalesOrderItemRow, NewSalesOrderRow}
 
 use super::selling_cart_pricing::{CartPriceLine, CartPriceRequest, CartPricingPort};
 use super::selling_events::{SalesOrderCancelled, SalesOrderConfirmed, SalesOrderRef, SellingEvent};
+use super::selling_service_catalog::{ServiceCatalogPort, ServiceTrackingInfo, ServiceTrackingRung};
+use super::selling_service_delivery::{ProjectFulfillmentPort, ServiceDeliveryLine, ServiceDeliveryRequest};
 use super::selling_stock_fulfillment::{
     DecreaseQuantityLine, DecreaseQuantityRequest, StockFulfillmentPort, StockRuleLine,
     StockRuleRequest,
@@ -242,6 +247,17 @@ impl SellingWriteService {
     /// not launch this call (already launched, or not stock-tracked) is accepted verbatim — the
     /// port is the record of what launched.
     ///
+    /// Service-delivery note: since the service-delivery confirm engine landed, confirm ALSO
+    /// resolves each non-downpayment line's product service-tracking policy through the
+    /// `catalog` port and asks the `delivery` port to MINT the project/task work the confirmed
+    /// line commits to — same before-the-transaction posture as the stock launch, same
+    /// fail-closed refusal (`ServiceCatalogRejected` / `ServiceDeliveryRejected`), and the
+    /// mint's per-sale-line idempotency covers the same crash window. What the mint reports is
+    /// stamped onto the order lines (`project_id` / `task_id`) INSIDE the confirm transaction —
+    /// the backrefs are selling's only record of the mint. A product ABSENT from the catalog
+    /// resolution is the manual policy (mints nothing) — absence is a configuration, not a
+    /// refusal; only the port's `Err` refuses.
+    ///
     /// Race note: a draft line ADDED between the (1) read and the (3) stamp is not in the stamp's
     /// unnest table and stays NULL — honest absence, never a WRONG cost, only a missing one
     /// (tightening would need `FOR UPDATE` line reads inside the tx; deliberately not taken in
@@ -257,6 +273,8 @@ impl SellingWriteService {
         company_id: Uuid,
         costs: &dyn UnitCostPort,
         stock: &dyn StockFulfillmentPort,
+        catalog: &dyn ServiceCatalogPort,
+        delivery: &dyn ProjectFulfillmentPort,
     ) -> Result<(), SellingError> {
         // (1) live (line, item) pairs — ID-only, company-scoped through the caller's fence; a
         // wrong-tenant order simply reads [] and the guard below refuses with NotDraft.
@@ -350,11 +368,88 @@ impl SellingWriteService {
         // below is the sole authority on whether this order is confirmable, and its NotDraft
         // refusal types every absent-id case identically (no existence leak).
 
+        // (2c) resolve the service-tracking policy for the order's non-downpayment products and
+        // mint the delivery work a confirm commits to — outside any transaction, same posture as
+        // the stock launch. A refused resolution or mint refuses the whole confirm (the order
+        // stays draft, no stamp written, no event fired); a product ABSENT from the resolution
+        // is the manual policy (mints nothing, proceeds). Downpayment lines are excluded: a
+        // downpayment's placeholder quantity is never delivered, so it never drives delivery work.
+        let mut backrefs: Vec<(Uuid, Option<Uuid>, Option<Uuid>)> = Vec::new();
+        if let Some(hdr) = company_scope::with_company_scope(
+            Some(company_id),
+            self.repos.orders.find_delivery_header(&self.db_pool, order_id),
+        ).await? {
+            let service_lines = company_scope::with_company_scope(
+                Some(company_id),
+                self.repos.order_items.list_service_delivery_lines(&self.db_pool, order_id),
+            ).await?;
+            if !service_lines.is_empty() {
+                let mut item_ids: Vec<Uuid> = service_lines.iter().map(|l| l.item_id).collect();
+                item_ids.sort_unstable();
+                item_ids.dedup();
+                let policies = catalog
+                    .resolve_service_tracking(company_id, &item_ids)
+                    .await
+                    .map_err(|e| SellingError::ServiceCatalogRejected { code: e.code, message: e.message })?;
+                // Absent item = manual: the product surface holds no tracking row, which is
+                // exactly what "tracked by hand" means. Not an error (contrast CostRejected).
+                let policy_of = |item_id: Uuid| -> ServiceTrackingInfo {
+                    policies
+                        .iter()
+                        .find(|p| p.item_id == item_id)
+                        .cloned()
+                        .unwrap_or(ServiceTrackingInfo {
+                            item_id,
+                            service_tracking: ServiceTrackingRung::Manual,
+                            service_project_id: None,
+                            service_project_template_id: None,
+                        })
+                };
+                let outcomes = delivery
+                    .mint_service_delivery(&ServiceDeliveryRequest {
+                        order_id,
+                        company_id: hdr.company_id,
+                        customer_id: hdr.customer_id,
+                        order_number: hdr.order_number.clone(),
+                        currency: hdr.currency.clone(),
+                        lines: service_lines
+                            .iter()
+                            .map(|l| {
+                                let p = policy_of(l.item_id);
+                                ServiceDeliveryLine {
+                                    sale_line_id: l.id,
+                                    item_id: l.item_id,
+                                    quantity: l.quantity,
+                                    description: l.description.clone(),
+                                    rung: p.service_tracking,
+                                    fixed_project_id: p.service_project_id,
+                                    template_id: p.service_project_template_id,
+                                }
+                            })
+                            .collect(),
+                    })
+                    .await
+                    .map_err(|e| SellingError::ServiceDeliveryRejected { code: e.code, message: e.message })?;
+                // The mint's outcomes are the record: only `minted: true` lines get a backref
+                // (a manual or untracked line stamps nothing and keeps NULL).
+                for o in &outcomes {
+                    if o.minted {
+                        backrefs.push((o.sale_line_id, o.project_id, o.task_id));
+                    }
+                }
+            }
+        }
+        // A missing delivery header is the same non-refusal as the stock header above: the
+        // guard below is the sole authority (NotDraft types every absent-id case identically).
+
         // (3) stamp + guard as ONE unit of work; a losing guard rolls the stamp back.
         let mut tx = self.db_pool.begin().await?;
         company_scope::bind_company_on(&mut tx, company_id).await?;
         if !stamps.is_empty() {
             self.repos.order_items.stamp_unit_costs(&mut tx, order_id, &stamps).await?;
+        }
+        if !backrefs.is_empty() {
+            self.repos.order_items.stamp_service_backrefs(&mut tx, order_id, &backrefs).await?;
         }
         let row = self.repos.orders.confirm_tx(&mut tx, order_id, company_id).await?;
         let Some(row) = row else {

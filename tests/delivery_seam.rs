@@ -24,6 +24,8 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use backbone_selling::application::service::selling_stock_fulfillment::NoStockFulfillmentPort;
+use backbone_selling::application::service::selling_service_catalog::NoServiceCatalog;
+use backbone_selling::application::service::selling_service_delivery::NoServiceDelivery;
 use backbone_selling::application::service::selling_unit_cost::NoUnitCostPort;
 use backbone_selling::application::service::selling_write_service::{
     NewLine, NewSalesOrder, SellingError, SellingWriteService,
@@ -136,7 +138,7 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
+    selling.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(order_status(&pool, oid).await, "to_deliver_and_bill");
 
     // 3) selling emits a delivery request; ACL maps it into inventory's DeliveryRequested.
@@ -196,7 +198,7 @@ async fn confirmed_deliverable_order(
         customer_id: Uuid::new_v4(), order_date: day(), delivery_date: None, currency: None,
         tax_rate: Decimal::ZERO, notes: None, lines,
     }).await.unwrap();
-    selling.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort).await.unwrap();
+    selling.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     order
 }
 async fn delivered_total(pool: &PgPool, order: Uuid) -> Decimal {

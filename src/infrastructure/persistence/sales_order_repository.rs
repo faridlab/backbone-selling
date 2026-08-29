@@ -122,6 +122,16 @@ pub struct OrderStockHeaderRow {
     pub status: String,
 }
 
+/// The order header the service-delivery confirm path builds its mint request from: tenant +
+/// customer identity, the order number (the minted per-order project's correspondence key),
+/// and the currency the order's money speaks.
+pub struct OrderDeliveryHeaderRow {
+    pub company_id: Uuid,
+    pub customer_id: Uuid,
+    pub order_number: String,
+    pub currency: String,
+}
+
 /// The order header the invoice-status read model aggregates under.
 pub struct InvoiceStatusHeaderRow {
     pub order_number: String,
@@ -324,6 +334,31 @@ impl SalesOrderRepository {
             customer_id: r.get("customer_id"),
             order_number: r.get("order_number"),
             status: r.get("st"),
+        }))
+    }
+
+    /// Read the order header the service-delivery confirm path builds its mint request from
+    /// (tenant + customer identity, the order number, the currency). ID-only — same scoping as
+    /// [`Self::find_stock_header`]: a wrong-tenant order reads None, which the confirm guard
+    /// types as `NotDraft` (no existence leak).
+    pub async fn find_delivery_header(
+        &self,
+        pool: &PgPool,
+        order_id: Uuid,
+    ) -> Result<Option<OrderDeliveryHeaderRow>, sqlx::Error> {
+        let row = company_scope::fetch_optional_row_scoped(
+            pool,
+            sqlx::query(
+                r#"SELECT company_id, customer_id, order_number, currency
+                   FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
+            )
+            .bind(order_id),
+        ).await?;
+        Ok(row.map(|r| OrderDeliveryHeaderRow {
+            company_id: r.get("company_id"),
+            customer_id: r.get("customer_id"),
+            order_number: r.get("order_number"),
+            currency: r.get("currency"),
         }))
     }
 

@@ -39,6 +39,8 @@ use uuid::Uuid;
 
 use crate::application::service::selling_carrier::UpdateCarrierPatch;
 use crate::application::service::selling_order::UpdateOrderLinePatch;
+use crate::application::service::selling_service_catalog::ServiceCatalogPort;
+use crate::application::service::selling_service_delivery::ProjectFulfillmentPort;
 use crate::application::service::selling_stock_fulfillment::StockFulfillmentPort;
 use crate::application::service::selling_unit_cost::UnitCostPort;
 use crate::application::service::selling_write_service::{
@@ -78,6 +80,8 @@ struct SellingWriteState {
     svc: Arc<SellingWriteService>,
     costs: Arc<dyn UnitCostPort>,
     stock: Arc<dyn StockFulfillmentPort>,
+    catalog: Arc<dyn ServiceCatalogPort>,
+    delivery: Arc<dyn ProjectFulfillmentPort>,
 }
 
 /// `Option<Option<T>>` deserialization that distinguishes MISSING (keep the stored value) from
@@ -247,7 +251,14 @@ async fn confirm_sales_order(
     // launched.
     match st
         .svc
-        .confirm_sales_order(b.order_id, tenant.company_id, st.costs.as_ref(), st.stock.as_ref())
+        .confirm_sales_order(
+            b.order_id,
+            tenant.company_id,
+            st.costs.as_ref(),
+            st.stock.as_ref(),
+            st.catalog.as_ref(),
+            st.delivery.as_ref(),
+        )
         .await
     {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.order_id })).into_response(),
@@ -745,17 +756,31 @@ fn create_selling_write_routes(state: SellingWriteState, verifier: CompanyVerifi
 /// compositions with no stock engine — it launches nothing (every line reads as not
 /// stock-tracked), reports no move figures (the stored watermarks stand), and skips the
 /// upstream cancel log; a forgotten adapter is a compile error, never a silent no-op.
+///
+/// `catalog` and `delivery` are REQUIRED the same way: the product surface behind the
+/// service-tracking policy read, and the project engine behind the confirm-time
+/// project/task mint for service-tracked lines (whose outcomes become the order lines'
+/// delivery backrefs). Pass
+/// [`crate::application::service::selling_service_catalog::NoServiceCatalog`] and
+/// [`crate::application::service::selling_service_delivery::NoServiceDelivery`] only in
+/// compositions with no product-surface tracking and no project engine — every line then
+/// reads as manually tracked and mints nothing, which is exactly the pre-seam behavior; a
+/// forgotten adapter is a compile error, never a silently unconfigured product.
 pub fn create_guarded_selling_routes(
     m: &SellingModule,
     pool: PgPool,
     verifier: CompanyVerifier,
     unit_cost: Arc<dyn UnitCostPort>,
     stock: Arc<dyn StockFulfillmentPort>,
+    catalog: Arc<dyn ServiceCatalogPort>,
+    delivery: Arc<dyn ProjectFulfillmentPort>,
 ) -> Router {
     let write = SellingWriteState {
         svc: Arc::new(SellingWriteService::new(pool)),
         costs: unit_cost,
         stock,
+        catalog,
+        delivery,
     };
     Router::new()
         .merge(create_quotation_read_routes(m.quotation_service.clone()))

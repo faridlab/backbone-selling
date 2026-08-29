@@ -4469,6 +4469,14 @@ components:
           type: string
         is_downpayment:
           type: boolean
+        project_id:
+          nullable: true
+          type: string
+          format: uuid
+        task_id:
+          nullable: true
+          type: string
+          format: uuid
         metadata:
           type: object
 
@@ -4533,6 +4541,14 @@ components:
           type: string
         is_downpayment:
           type: boolean
+        project_id:
+          nullable: true
+          type: string
+          format: uuid
+        task_id:
+          nullable: true
+          type: string
+          format: uuid
         metadata:
           type: object
 
@@ -4584,6 +4600,14 @@ components:
           type: string
         is_downpayment:
           type: boolean
+        project_id:
+          nullable: true
+          type: string
+          format: uuid
+        task_id:
+          nullable: true
+          type: string
+          format: uuid
         metadata:
           type: object
 
@@ -4622,6 +4646,14 @@ components:
           type: string
         is_downpayment:
           type: boolean
+        project_id:
+          nullable: true
+          type: string
+          format: uuid
+        task_id:
+          nullable: true
+          type: string
+          format: uuid
         metadata:
           type: object
 
