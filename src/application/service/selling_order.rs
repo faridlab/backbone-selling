@@ -194,7 +194,7 @@ impl SellingWriteService {
         self.create_sales_order(NewSalesOrder {
             order_number: o.order_number,
             quotation_id: None,
-            delivery_carrier_id: None,
+            delivery_carrier_id: o.delivery_carrier_id,
             company_id: o.company_id,
             branch_id: o.branch_id,
             customer_id: o.customer_id,

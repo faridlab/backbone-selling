@@ -124,6 +124,11 @@ pub struct CartOrderLine {
 #[derive(Debug, Clone)]
 pub struct NewCartSalesOrder {
     pub order_number: String,
+    /// Carrier chosen before the mint (the storefront stamps it on the
+    /// cart under the checkout lock). Validated against the company's
+    /// carrier registry exactly like `NewSalesOrder`'s field — the plain
+    /// and priced create paths share one validation shape.
+    pub delivery_carrier_id: Option<Uuid>,
     pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
