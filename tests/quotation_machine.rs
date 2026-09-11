@@ -56,12 +56,11 @@ fn line() -> NewLine {
         line_discount: Decimal::ZERO,
     }
 }
-async fn draft_quotation(w: &SellingWriteService, company: Uuid) -> Uuid {
+async fn draft_quotation(w: &SellingWriteService) -> Uuid {
     w.create_quotation(NewQuotation {
         opportunity_id: None,
         template_id: None,
         quotation_number: uq("QUO"),
-        company_id: company,
         branch_id: None,
         customer_id: Uuid::new_v4(),
         quotation_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
@@ -86,12 +85,11 @@ async fn status_of(pool: &PgPool, quotation: Uuid) -> (String, Option<String>) {
 #[tokio::test]
 async fn send_moves_draft_to_sent() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let rec = RecordingSink::default();
     let w = SellingWriteService::with_sink(pool.clone(), Arc::new(rec.clone()));
-    let q = draft_quotation(&w, company).await;
+    let q = draft_quotation(&w).await;
 
-    w.send_quotation(q, company).await.unwrap();
+    w.send_quotation(q).await.unwrap();
     assert_eq!(status_of(&pool, q).await.0, "sent");
     assert!(rec.has(|e| matches!(e, SellingEvent::QuotationSent(e) if e.quotation_id == q)));
 }
@@ -100,12 +98,11 @@ async fn send_moves_draft_to_sent() {
 #[tokio::test]
 async fn send_refuses_non_draft() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone());
-    let q = draft_quotation(&w, company).await;
-    w.send_quotation(q, company).await.unwrap();
+    let q = draft_quotation(&w).await;
+    w.send_quotation(q).await.unwrap();
 
-    let e = w.send_quotation(q, company).await.unwrap_err();
+    let e = w.send_quotation(q).await.unwrap_err();
     assert!(matches!(e, SellingError::InvalidTransition { ref verb, ref current }
         if verb == "send" && current == "sent"));
     assert_eq!(SellingError::InvalidTransition { verb: "send".into(), current: "sent".into() }.http_status(), 422);
@@ -115,13 +112,12 @@ async fn send_refuses_non_draft() {
 #[tokio::test]
 async fn reject_records_reason() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let rec = RecordingSink::default();
     let w = SellingWriteService::with_sink(pool.clone(), Arc::new(rec.clone()));
-    let q = draft_quotation(&w, company).await;
-    w.send_quotation(q, company).await.unwrap();
+    let q = draft_quotation(&w).await;
+    w.send_quotation(q).await.unwrap();
 
-    w.reject_quotation(q, company, Some("customer chose a competitor".into())).await.unwrap();
+    w.reject_quotation(q, Some("customer chose a competitor".into())).await.unwrap();
     let (st, reason) = status_of(&pool, q).await;
     assert_eq!(st, "rejected");
     assert_eq!(reason.as_deref(), Some("customer chose a competitor"));
@@ -132,11 +128,10 @@ async fn reject_records_reason() {
 #[tokio::test]
 async fn reject_refuses_draft() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone());
-    let q = draft_quotation(&w, company).await;
+    let q = draft_quotation(&w).await;
 
-    let e = w.reject_quotation(q, company, None).await.unwrap_err();
+    let e = w.reject_quotation(q, None).await.unwrap_err();
     assert!(matches!(e, SellingError::InvalidTransition { ref verb, ref current }
         if verb == "reject" && current == "draft"));
 }
@@ -145,24 +140,23 @@ async fn reject_refuses_draft() {
 #[tokio::test]
 async fn cancel_exits_from_draft_sent_accepted() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone());
 
     // draft → cancelled
-    let a = draft_quotation(&w, company).await;
-    w.cancel_quotation(a, company, Some("withdrawn".into())).await.unwrap();
+    let a = draft_quotation(&w).await;
+    w.cancel_quotation(a, Some("withdrawn".into())).await.unwrap();
     assert_eq!(status_of(&pool, a).await, ("cancelled".into(), Some("withdrawn".into())));
 
     // sent → cancelled
-    let b = draft_quotation(&w, company).await;
-    w.send_quotation(b, company).await.unwrap();
-    w.cancel_quotation(b, company, None).await.unwrap();
+    let b = draft_quotation(&w).await;
+    w.send_quotation(b).await.unwrap();
+    w.cancel_quotation(b, None).await.unwrap();
     assert_eq!(status_of(&pool, b).await.0, "cancelled");
 
     // accepted → cancelled
-    let c = draft_quotation(&w, company).await;
-    w.accept_quotation(c, company).await.unwrap();
-    w.cancel_quotation(c, company, None).await.unwrap();
+    let c = draft_quotation(&w).await;
+    w.accept_quotation(c).await.unwrap();
+    w.cancel_quotation(c, None).await.unwrap();
     assert_eq!(status_of(&pool, c).await.0, "cancelled");
 }
 
@@ -170,14 +164,13 @@ async fn cancel_exits_from_draft_sent_accepted() {
 #[tokio::test]
 async fn cancel_refuses_ordered() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone());
-    let q = draft_quotation(&w, company).await;
-    w.accept_quotation(q, company).await.unwrap();
+    let q = draft_quotation(&w).await;
+    w.accept_quotation(q).await.unwrap();
     w.convert_quotation_to_order(q, uq("SO")).await.unwrap();
     assert_eq!(status_of(&pool, q).await.0, "ordered");
 
-    let e = w.cancel_quotation(q, company, None).await.unwrap_err();
+    let e = w.cancel_quotation(q, None).await.unwrap_err();
     assert!(matches!(e, SellingError::QuotationOrdered(id) if id == q));
     assert_eq!(SellingError::QuotationOrdered(q).http_status(), 422);
     assert_eq!(status_of(&pool, q).await.0, "ordered", "a refused cancel leaves the state untouched");
@@ -187,26 +180,25 @@ async fn cancel_refuses_ordered() {
 #[tokio::test]
 async fn redraft_returns_editable_states_to_draft() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone());
 
     // rejected → draft (reason cleared)
-    let a = draft_quotation(&w, company).await;
-    w.send_quotation(a, company).await.unwrap();
-    w.reject_quotation(a, company, Some("too expensive".into())).await.unwrap();
-    w.redraft_quotation(a, company).await.unwrap();
+    let a = draft_quotation(&w).await;
+    w.send_quotation(a).await.unwrap();
+    w.reject_quotation(a, Some("too expensive".into())).await.unwrap();
+    w.redraft_quotation(a).await.unwrap();
     assert_eq!(status_of(&pool, a).await, ("draft".into(), None));
 
     // cancelled → draft
-    let b = draft_quotation(&w, company).await;
-    w.cancel_quotation(b, company, Some("withdrawn".into())).await.unwrap();
-    w.redraft_quotation(b, company).await.unwrap();
+    let b = draft_quotation(&w).await;
+    w.cancel_quotation(b, Some("withdrawn".into())).await.unwrap();
+    w.redraft_quotation(b).await.unwrap();
     assert_eq!(status_of(&pool, b).await.0, "draft");
 
     // sent → draft
-    let c = draft_quotation(&w, company).await;
-    w.send_quotation(c, company).await.unwrap();
-    w.redraft_quotation(c, company).await.unwrap();
+    let c = draft_quotation(&w).await;
+    w.send_quotation(c).await.unwrap();
+    w.redraft_quotation(c).await.unwrap();
     assert_eq!(status_of(&pool, c).await.0, "draft");
 }
 
@@ -214,13 +206,12 @@ async fn redraft_returns_editable_states_to_draft() {
 #[tokio::test]
 async fn redraft_refuses_ordered() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone());
-    let q = draft_quotation(&w, company).await;
-    w.accept_quotation(q, company).await.unwrap();
+    let q = draft_quotation(&w).await;
+    w.accept_quotation(q).await.unwrap();
     w.convert_quotation_to_order(q, uq("SO")).await.unwrap();
 
-    let e = w.redraft_quotation(q, company).await.unwrap_err();
+    let e = w.redraft_quotation(q).await.unwrap_err();
     assert!(matches!(e, SellingError::InvalidTransition { ref verb, ref current }
         if verb == "re-draft" && current == "ordered"));
 }
@@ -229,35 +220,32 @@ async fn redraft_refuses_ordered() {
 #[tokio::test]
 async fn full_round_trip_to_accepted() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone());
-    let q = draft_quotation(&w, company).await;
+    let q = draft_quotation(&w).await;
 
-    w.send_quotation(q, company).await.unwrap();
-    w.reject_quotation(q, company, None).await.unwrap();
-    w.redraft_quotation(q, company).await.unwrap();
-    w.send_quotation(q, company).await.unwrap();
-    w.accept_quotation(q, company).await.unwrap();
+    w.send_quotation(q).await.unwrap();
+    w.reject_quotation(q, None).await.unwrap();
+    w.redraft_quotation(q).await.unwrap();
+    w.send_quotation(q).await.unwrap();
+    w.accept_quotation(q).await.unwrap();
     assert_eq!(status_of(&pool, q).await.0, "accepted");
 }
 
-// QM-10: a wrong-tenant or unknown id is a 404 not-found, never a state-machine refusal — the
-// guarded statement does not leak whether the id exists, and the post-refusal classification
-// only runs after the refusal.
+// QM-10: an unknown id is a 404 not-found, never a state-machine refusal — the guarded
+// statement does not leak whether the id exists, and the post-refusal classification only runs
+// after the refusal. (Under a composed tenancy decorator a foreign id is indistinguishable —
+// ADR-0029.)
 #[tokio::test]
-async fn unknown_or_foreign_quotation_is_not_found() {
+async fn unknown_quotation_is_not_found() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone());
 
-    let stranger = draft_quotation(&w, Uuid::new_v4()).await; // another tenant's quotation
     for e in [
-        w.send_quotation(stranger, company).await.unwrap_err(),
-        w.accept_quotation(stranger, company).await.unwrap_err(),
-        w.reject_quotation(stranger, company, None).await.unwrap_err(),
-        w.cancel_quotation(stranger, company, None).await.unwrap_err(),
-        w.redraft_quotation(stranger, company).await.unwrap_err(),
-        w.send_quotation(Uuid::new_v4(), company).await.unwrap_err(),
+        w.send_quotation(Uuid::new_v4()).await.unwrap_err(),
+        w.accept_quotation(Uuid::new_v4()).await.unwrap_err(),
+        w.reject_quotation(Uuid::new_v4(), None).await.unwrap_err(),
+        w.cancel_quotation(Uuid::new_v4(), None).await.unwrap_err(),
+        w.redraft_quotation(Uuid::new_v4()).await.unwrap_err(),
     ] {
         assert!(matches!(e, SellingError::QuotationNotFound(_)));
         assert_eq!(SellingError::QuotationNotFound(Uuid::new_v4()).http_status(), 404);
@@ -268,15 +256,14 @@ async fn unknown_or_foreign_quotation_is_not_found() {
 #[tokio::test]
 async fn events_fire_once_per_transition() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let rec = RecordingSink::default();
     let w = SellingWriteService::with_sink(pool.clone(), Arc::new(rec.clone()));
-    let q = draft_quotation(&w, company).await;
+    let q = draft_quotation(&w).await;
 
-    w.send_quotation(q, company).await.unwrap();
-    w.reject_quotation(q, company, None).await.unwrap();
-    w.redraft_quotation(q, company).await.unwrap();
-    w.cancel_quotation(q, company, None).await.unwrap();
+    w.send_quotation(q).await.unwrap();
+    w.reject_quotation(q, None).await.unwrap();
+    w.redraft_quotation(q).await.unwrap();
+    w.cancel_quotation(q, None).await.unwrap();
 
     let count = |f: &dyn Fn(&SellingEvent) -> bool| rec.events.lock().unwrap().iter().filter(|e| f(e)).count();
     assert_eq!(count(&|e| matches!(e, SellingEvent::QuotationSent(e) if e.quotation_id == q)), 1);
@@ -285,6 +272,6 @@ async fn events_fire_once_per_transition() {
     assert_eq!(count(&|e| matches!(e, SellingEvent::QuotationCancelled(e) if e.quotation_id == q)), 1);
     // a failed verb emits nothing.
     let before = rec.events.lock().unwrap().len();
-    let _ = w.send_quotation(q, company).await.unwrap_err(); // cancelled, not draft
+    let _ = w.send_quotation(q).await.unwrap_err(); // cancelled, not draft
     assert_eq!(rec.events.lock().unwrap().len(), before);
 }

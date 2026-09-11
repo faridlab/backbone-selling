@@ -55,7 +55,6 @@ pub struct SalesOrder {
     pub quotation_id: Option<Uuid>,
     pub delivery_carrier_id: Option<Uuid>,
     pub tracking_ref: Option<String>,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub status: SalesOrderStatus,
@@ -79,14 +78,13 @@ impl SalesOrder {
     }
 
     /// Create a new SalesOrder with required fields
-    pub fn new(order_number: String, company_id: Uuid, customer_id: Uuid, status: SalesOrderStatus, order_date: NaiveDate, currency: String, subtotal: Decimal, tax_rate: Decimal, tax_amount: Decimal, total: Decimal) -> Self {
+    pub fn new(order_number: String, customer_id: Uuid, status: SalesOrderStatus, order_date: NaiveDate, currency: String, subtotal: Decimal, tax_rate: Decimal, tax_amount: Decimal, total: Decimal) -> Self {
         Self {
             id: Uuid::new_v4(),
             order_number,
             quotation_id: None,
             delivery_carrier_id: None,
             tracking_ref: None,
-            company_id,
             branch_id: None,
             customer_id,
             status,
@@ -218,9 +216,6 @@ impl SalesOrder {
                 "tracking_ref" => {
                     if let Ok(v) = serde_json::from_value(value) { self.tracking_ref = v; }
                 }
-                "company_id" => {
-                    if let Ok(v) = serde_json::from_value(value) { self.company_id = v; }
-                }
                 "branch_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.branch_id = v; }
                 }
@@ -310,7 +305,6 @@ impl backbone_orm::EntityRepoMeta for SalesOrder {
         m.insert("id".to_string(), "uuid".to_string());
         m.insert("quotation_id".to_string(), "uuid".to_string());
         m.insert("delivery_carrier_id".to_string(), "uuid".to_string());
-        m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("branch_id".to_string(), "uuid".to_string());
         m.insert("customer_id".to_string(), "uuid".to_string());
         m.insert("status".to_string(), "sales_order_status".to_string());
@@ -318,9 +312,6 @@ impl backbone_orm::EntityRepoMeta for SalesOrder {
     }
     fn search_fields() -> &'static [&'static str] {
         &["order_number", "currency"]
-    }
-    fn company_field() -> Option<&'static str> {
-        Some("company_id")
     }
 }
 
@@ -334,7 +325,6 @@ pub struct SalesOrderBuilder {
     quotation_id: Option<Uuid>,
     delivery_carrier_id: Option<Uuid>,
     tracking_ref: Option<String>,
-    company_id: Option<Uuid>,
     branch_id: Option<Uuid>,
     customer_id: Option<Uuid>,
     status: Option<SalesOrderStatus>,
@@ -370,12 +360,6 @@ impl SalesOrderBuilder {
     /// Set the tracking_ref field (optional)
     pub fn tracking_ref(mut self, value: String) -> Self {
         self.tracking_ref = Some(value);
-        self
-    }
-
-    /// Set the company_id field (required)
-    pub fn company_id(mut self, value: Uuid) -> Self {
-        self.company_id = Some(value);
         self
     }
 
@@ -450,7 +434,6 @@ impl SalesOrderBuilder {
     /// Returns Err if any required field without a default is missing.
     pub fn build(self) -> Result<SalesOrder, String> {
         let order_number = self.order_number.ok_or_else(|| "order_number is required".to_string())?;
-        let company_id = self.company_id.ok_or_else(|| "company_id is required".to_string())?;
         let customer_id = self.customer_id.ok_or_else(|| "customer_id is required".to_string())?;
         let order_date = self.order_date.ok_or_else(|| "order_date is required".to_string())?;
 
@@ -460,7 +443,6 @@ impl SalesOrderBuilder {
             quotation_id: self.quotation_id,
             delivery_carrier_id: self.delivery_carrier_id,
             tracking_ref: self.tracking_ref,
-            company_id,
             branch_id: self.branch_id,
             customer_id,
             status: self.status.unwrap_or_default(),

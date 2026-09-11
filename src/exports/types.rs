@@ -49,7 +49,6 @@ impl From<DeliveryCarrierId> for Uuid {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeliveryCarrierDto {
     pub id: DeliveryCarrierId,
-    pub company_id: Uuid,
     pub name: String,
     pub active: bool,
     pub tracking_url_template: Option<String>,
@@ -107,7 +106,6 @@ impl From<ExpenseReinvoiceLinkId> for Uuid {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpenseReinvoiceLinkDto {
     pub id: ExpenseReinvoiceLinkId,
-    pub company_id: Uuid,
     pub order_id: Uuid,
     pub expense_id: Uuid,
     pub amount: Decimal,
@@ -166,7 +164,6 @@ impl From<QuotationId> for Uuid {
 pub struct QuotationDto {
     pub id: QuotationId,
     pub quotation_number: String,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub status: QuotationStatus,
@@ -235,7 +232,6 @@ impl From<QuotationItemId> for Uuid {
 pub struct QuotationItemDto {
     pub id: QuotationItemId,
     pub quotation_id: Uuid,
-    pub company_id: Uuid,
     pub item_id: Uuid,
     pub description: Option<String>,
     pub quantity: Decimal,
@@ -297,7 +293,6 @@ impl From<QuotationTemplateId> for Uuid {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotationTemplateDto {
     pub id: QuotationTemplateId,
-    pub company_id: Uuid,
     pub name: String,
     pub validity_days: i32,
     pub default_notes: Option<String>,
@@ -359,7 +354,6 @@ pub struct SalesOrderDto {
     pub quotation_id: Option<Uuid>,
     pub delivery_carrier_id: Option<Uuid>,
     pub tracking_ref: Option<String>,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub status: SalesOrderStatus,
@@ -426,7 +420,6 @@ impl From<SalesOrderItemId> for Uuid {
 pub struct SalesOrderItemDto {
     pub id: SalesOrderItemId,
     pub order_id: Uuid,
-    pub company_id: Uuid,
     pub item_id: Uuid,
     pub description: Option<String>,
     pub quantity: Decimal,
@@ -493,7 +486,6 @@ impl From<SalesTeamId> for Uuid {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SalesTeamDto {
     pub id: SalesTeamId,
-    pub company_id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub metadata: serde_json::Value,
@@ -551,7 +543,6 @@ impl From<SalesPersonAllocationId> for Uuid {
 pub struct SalesPersonAllocationDto {
     pub id: SalesPersonAllocationId,
     pub order_id: Uuid,
-    pub company_id: Uuid,
     pub sales_person_id: Uuid,
     pub sales_team_id: Option<Uuid>,
     pub allocated_pct: Decimal,

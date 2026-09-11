@@ -6,7 +6,6 @@
 
 -- INSERT INTO selling.quotation_templates (
 --     id,
---     company_id,
 --     name,
 --     validity_days,
 --     default_notes,

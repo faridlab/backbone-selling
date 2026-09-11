@@ -3,7 +3,7 @@
 # Entity: Quotation + QuotationItem
 # Description: The offer at the head of the order-to-cash pipeline. A priced,
 # time-boxed proposal to a customer. Converts into a SalesOrder on acceptance.
-# All cross-module references (customer, item, company, branch) are LOGICAL FKs
+# All cross-module references (customer, item, branch) are LOGICAL FKs
 # (@exclude_from_foreign_key_check) — no DB constraint into another module's schema.
 # =============================================================================
 
@@ -22,11 +22,6 @@ models:
         type: string
         attributes: ["@required", "@max(40)"]
         description: "Human reference (e.g. QUO-2026-00042)"
-
-      company_id:
-        type: uuid
-        attributes: ["@required", "@exclude_from_foreign_key_check"]
-        description: "Books owner # logical FK to organization.Company.id"
 
       branch_id:
         type: uuid?
@@ -109,8 +104,9 @@ models:
       - type: unique
         fields: [quotation_number]
         where: "deleted_at IS NULL"
-      - type: index
-        fields: [company_id, customer_id, status]
+      # No tenancy indexes (ADR-0029): the module is tenant-agnostic. The per-unit
+      # customer/status listing index is installed by the composing service's tenancy
+      # decorator (org_unit_id-leading), not declared here.
       - type: index
         fields: [quotation_date]
       - type: index
@@ -130,11 +126,6 @@ models:
         type: uuid
         attributes: ["@required", "@foreign_key(Quotation.id)"]
         description: "Owning quotation"
-
-      company_id:
-        type: uuid
-        attributes: ["@required", "@exclude_from_foreign_key_check"]
-        description: "Books owner # logical FK to organization.Company.id (denormalized from Quotation.company_id for direct RLS fencing — ADR-0010 Decision A)"
 
       item_id:
         type: uuid

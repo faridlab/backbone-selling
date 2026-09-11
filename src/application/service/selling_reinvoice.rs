@@ -23,8 +23,9 @@
 //! Selling exports ONLY the three verbs below — no billing types leak in, no cargo edge.
 //!
 //! The double-bill guard is the partial unique index on `(order_id, expense_id)` over live rows
-//! (a soft-deleted link CAN be re-attached); the pending-queue read is indexed
-//! `(company_id, state)`.
+//! (a soft-deleted link CAN be re-attached). Under a composed tenancy decorator (ADR-0029) the
+//! decorator installs the pending-queue listing index (org-unit leading) and fences every read;
+//! on an undecorated deployment the same statements run unfenced.
 //!
 //! An `impl SellingWriteService` chunk over the vocabulary in [`super::selling_write_service`].
 //! Per the module's 4-layer rule this file holds no SQL — the statements live on
@@ -33,34 +34,30 @@
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-use backbone_orm::company_scope;
-
 use crate::infrastructure::persistence::NewExpenseReinvoiceLinkRow;
 
-use super::selling_write_service::{is_dup, SellingError, SellingWriteService};
+use super::selling_write_service::{
+    is_dup, relay_ambient_scope, SellingError, SellingWriteService,
+};
 
 impl SellingWriteService {
     /// Attach a customer-rebillable expense to an order (state starts `pending`). Attaching to
     /// a DRAFT order is allowed — estimating a quote-era charge onto the order before confirm is
-    /// normal. Refusals: unknown/wrong-tenant order (`OrderNotFound`), cancelled order
-    /// (`InvalidTransition`), non-positive amount (`InvalidReinvoiceAmount`), a live duplicate
-    /// `(order, expense)` link (`DuplicateReinvoice` — pre-read first, the partial unique index
-    /// backs the race).
+    /// normal. Refusals: unknown order (`OrderNotFound`; under a composed decorator a foreign
+    /// order is indistinguishable, which is the point), cancelled order (`InvalidTransition`),
+    /// non-positive amount (`InvalidReinvoiceAmount`), a live duplicate `(order, expense)` link
+    /// (`DuplicateReinvoice` — pre-read first, the partial unique index backs the race).
     pub async fn attach_expense_reinvoice(
         &self,
         order_id: Uuid,
         expense_id: Uuid,
         amount: Decimal,
-        company_id: Uuid,
     ) -> Result<Uuid, SellingError> {
         if amount <= Decimal::ZERO {
             return Err(SellingError::InvalidReinvoiceAmount);
         }
-        // The order must be this company's and not cancelled (wrong tenant ⇒ not found, no leak).
-        let why = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.orders.find_cancel_refusal(&self.db_pool, order_id, company_id),
-        ).await?;
+        // The order must exist and not be cancelled.
+        let why = self.repos.orders.find_cancel_refusal(&self.db_pool, order_id).await?;
         match why {
             None => return Err(SellingError::OrderNotFound(order_id)),
             Some(r) if r.status == "cancelled" => {
@@ -69,20 +66,16 @@ impl SellingWriteService {
             Some(_) => {}
         }
         // Duplicate pre-read (the partial unique index backs the race below).
-        let dup = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.reinvoices.find_live_link(&self.db_pool, order_id, expense_id, company_id),
-        ).await?;
+        let dup = self.repos.reinvoices.find_live_link(&self.db_pool, order_id, expense_id).await?;
         if dup.is_some() {
             return Err(SellingError::DuplicateReinvoice);
         }
 
         let id = Uuid::new_v4();
         let mut tx = self.db_pool.begin().await?;
-        company_scope::bind_company_on(&mut tx, company_id).await?;
+        relay_ambient_scope(&mut tx).await?;
         let r = self.repos.reinvoices.insert_link(&mut tx, &NewExpenseReinvoiceLinkRow {
             id,
-            company_id,
             order_id,
             expense_id,
             amount,
@@ -94,25 +87,20 @@ impl SellingWriteService {
         Ok(id)
     }
 
-    /// List an order's links — the host billing adapter's pull read. Company-scoped like the
-    /// verb siblings: the fence is an explicit `company_id` filter on the order-header probe
-    /// (defense-in-depth behind RLS — the deployment contract requires a non-superuser app
-    /// role, but the verb must not rely on that alone), so a cross-tenant order id is a plain
-    /// `OrderNotFound` and another company's links are never reachable.
+    /// List an order's links — the host billing adapter's pull read. ID-only like the verb
+    /// siblings: under a composed tenancy decorator (ADR-0029) the request's fence scopes the
+    /// order-header probe, so a foreign order id is a plain `OrderNotFound` and another tenant's
+    /// links are never reachable; an undecorated deployment lists all.
     pub async fn list_expense_reinvoices(
         &self,
         order_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Vec<ExpenseReinvoiceDto>, SellingError> {
-        // Fencing read: the order must be THIS company's (None ⇒ not found, no leak).
-        let why = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.orders.find_cancel_refusal(&self.db_pool, order_id, company_id),
-        ).await?;
+        // Existence probe: the order must exist (None ⇒ not found, no leak).
+        let why = self.repos.orders.find_cancel_refusal(&self.db_pool, order_id).await?;
         if why.is_none() {
             return Err(SellingError::OrderNotFound(order_id));
         }
-        let rows = self.repos.reinvoices.list_links_for_order(&self.db_pool, order_id, company_id).await?;
+        let rows = self.repos.reinvoices.list_links_for_order(&self.db_pool, order_id).await?;
         Ok(rows.into_iter().map(|l| ExpenseReinvoiceDto {
             id: l.id,
             order_id: l.order_id,
@@ -126,23 +114,15 @@ impl SellingWriteService {
     /// Flip a link pending → invoiced — called by the host billing adapter AFTER its invoice
     /// post for the order acked. NOT idempotent-by-silence: a double mark is a LOUD refusal
     /// (`InvalidTransition`, machine-verb posture), so a billing retry that re-marks an already
-    /// invoiced link surfaces instead of silently passing. Unknown/wrong-tenant link ⇒
-    /// `ReinvoiceNotFound`.
+    /// invoiced link surfaces instead of silently passing. Unknown link ⇒ `ReinvoiceNotFound`.
     pub async fn mark_expense_reinvoice_invoiced(
         &self,
         link_id: Uuid,
-        company_id: Uuid,
     ) -> Result<(), SellingError> {
-        let updated = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.reinvoices.mark_invoiced(&self.db_pool, link_id, company_id),
-        ).await?;
+        let updated = self.repos.reinvoices.mark_invoiced(&self.db_pool, link_id).await?;
         if !updated {
             // The guarded statement refused — classify why (only after a refusal).
-            let st = company_scope::with_company_scope(
-                Some(company_id),
-                self.repos.reinvoices.find_link_state(&self.db_pool, link_id, company_id),
-            ).await?;
+            let st = self.repos.reinvoices.find_link_state(&self.db_pool, link_id).await?;
             return Err(match st {
                 None => SellingError::ReinvoiceNotFound(link_id),
                 Some(state) => SellingError::InvalidTransition { verb: "mark_invoiced".into(), current: state },

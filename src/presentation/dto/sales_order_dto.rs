@@ -45,9 +45,6 @@ pub struct CreateSalesOrderDto {
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "tracking_ref")]
     pub tracking_ref: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "branch_id")]
     pub branch_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -97,9 +94,6 @@ pub struct UpdateSalesOrderDto {
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "tracking_ref")]
     pub tracking_ref: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "branch_id")]
     pub branch_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -149,9 +143,6 @@ pub struct PatchSalesOrderDto {
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "tracking_ref")]
     pub tracking_ref: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
-    pub company_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "branch_id")]
     pub branch_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -184,7 +175,7 @@ pub struct PatchSalesOrderDto {
 impl PatchSalesOrderDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.order_number.is_some() || self.quotation_id.is_some() || self.delivery_carrier_id.is_some() || self.tracking_ref.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.order_date.is_some() || self.delivery_date.is_some() || self.currency.is_some() || self.subtotal.is_some() || self.tax_rate.is_some() || self.tax_amount.is_some() || self.total.is_some() || self.notes.is_some()
+        self.order_number.is_some() || self.quotation_id.is_some() || self.delivery_carrier_id.is_some() || self.tracking_ref.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.order_date.is_some() || self.delivery_date.is_some() || self.currency.is_some() || self.subtotal.is_some() || self.tax_rate.is_some() || self.tax_amount.is_some() || self.total.is_some() || self.notes.is_some()
     }
 }
 
@@ -207,8 +198,6 @@ pub struct SalesOrderResponseDto {
     pub quotation_id: Option<Uuid>,
     pub delivery_carrier_id: Option<Uuid>,
     pub tracking_ref: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub customer_id: Uuid,
@@ -298,7 +287,6 @@ impl From<SalesOrder> for SalesOrderResponseDto {
             quotation_id: entity.quotation_id,
             delivery_carrier_id: entity.delivery_carrier_id,
             tracking_ref: entity.tracking_ref,
-            company_id: entity.company_id,
             branch_id: entity.branch_id,
             customer_id: entity.customer_id,
             status: entity.status,
@@ -336,7 +324,6 @@ impl From<CreateSalesOrderDto> for SalesOrder {
             quotation_id: dto.quotation_id,
             delivery_carrier_id: dto.delivery_carrier_id,
             tracking_ref: dto.tracking_ref,
-            company_id: dto.company_id,
             branch_id: dto.branch_id,
             customer_id: dto.customer_id,
             status: dto.status,
@@ -361,7 +348,6 @@ impl From<&SalesOrder> for SalesOrderResponseDto {
             quotation_id: entity.quotation_id.clone(),
             delivery_carrier_id: entity.delivery_carrier_id.clone(),
             tracking_ref: entity.tracking_ref.clone(),
-            company_id: entity.company_id.clone(),
             branch_id: entity.branch_id.clone(),
             customer_id: entity.customer_id.clone(),
             status: entity.status.clone(),
@@ -390,7 +376,6 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderDto> for SalesOrder {
         self.quotation_id = dto.quotation_id;
         self.delivery_carrier_id = dto.delivery_carrier_id;
         self.tracking_ref = dto.tracking_ref;
-        self.company_id = dto.company_id;
         self.branch_id = dto.branch_id;
         self.customer_id = dto.customer_id;
         self.status = dto.status;

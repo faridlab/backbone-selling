@@ -17,12 +17,13 @@
 //! Per the module's 4-layer rule this file holds no SQL — the statements live on
 //! `SalesOrderRepository` / `SalesOrderItemRepository`.
 
-use backbone_orm::company_scope;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use super::selling_events::{InvoiceRequestEnvelope, InvoiceRequestLine, SellingEvent};
-use super::selling_write_service::{SellingError, SellingWriteService};
+use super::selling_write_service::{
+    legacy_company_echo, relay_ambient_scope, SellingError, SellingWriteService,
+};
 
 impl SellingWriteService {
     /// Build the invoice request for a confirmed order (the order-to-cash mirror of
@@ -32,7 +33,7 @@ impl SellingWriteService {
     /// accounts) and posts the real revenue journal — so selling no longer owns invoicing or posts
     /// revenue itself (retiring `create_invoice_from_order` in the composed flow).
     pub async fn build_invoice_request(&self, order_id: Uuid) -> Result<InvoiceRequestEnvelope, SellingError> {
-        // RLS scope (ADR-0008), ID-only pattern — see `build_delivery_request`. Read-only.
+        // ID-only read — see `build_delivery_request`. Read-only.
         let hdr = self.repos.orders.find_fulfillment_header(&self.db_pool, order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
         if hdr.status == "draft" {
@@ -46,7 +47,9 @@ impl SellingWriteService {
         }).collect();
         let env = InvoiceRequestEnvelope {
             order_id,
-            company_id: hdr.company_id,
+            // Legacy twin (ADR-0029): the envelope's wire shape still carries the tenant for the
+            // unstripped billing consumer; the module keys no statement on it.
+            company_id: legacy_company_echo(),
             customer_id: hdr.customer_id,
             currency: hdr.currency,
             lines,
@@ -67,23 +70,19 @@ impl SellingWriteService {
     pub async fn mark_invoiced(
         &self,
         order_id: Uuid,
-        company_id: Uuid,
         billed: &[(Uuid, Decimal)],
     ) -> Result<(), SellingError> {
-        // RLS scope (ADR-0008): company on the parameter — the allocation tx binds it explicitly
-        // (`bind_company_on`), and the status recompute runs inside the scope. The inbound handler for
-        // billing's `SalesInvoicePosted` passes the event's company; an event/job caller can no longer
-        // forget to scope the `FOR UPDATE` reads inside `allocate_billed`.
-        company_scope::with_company_scope(Some(company_id), async move {
-            let mut tx = self.db_pool.begin().await?;
-            company_scope::bind_company_on(&mut tx, company_id).await?;
-            for (item_id, qty) in billed {
-                self.allocate_billed(&mut tx, order_id, *item_id, *qty).await?;
-            }
-            tx.commit().await?;
-            self.recompute_order_status(order_id).await?;
-            Ok(())
-        }).await
+        // The allocation transaction relays the caller's ambient org scope (when the composing
+        // service bound one) so the decorator's RLS sees it; on an undecorated deployment the
+        // transaction stays plain.
+        let mut tx = self.db_pool.begin().await?;
+        relay_ambient_scope(&mut tx).await?;
+        for (item_id, qty) in billed {
+            self.allocate_billed(&mut tx, order_id, *item_id, *qty).await?;
+        }
+        tx.commit().await?;
+        self.recompute_order_status(order_id).await?;
+        Ok(())
     }
 
     /// Fill `billed_qty` up to `quantity` across an item's order lines (`FOR UPDATE`, fill-in-order);

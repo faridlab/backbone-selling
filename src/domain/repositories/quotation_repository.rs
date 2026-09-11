@@ -45,7 +45,6 @@ pub struct QuotationPaginatedResult {
 #[derive(Debug, Clone, Default)]
 pub struct QuotationFilter {
     pub quotation_number: Option<String>,
-    pub company_id: Option<Uuid>,
     pub branch_id: Option<Uuid>,
     pub customer_id: Option<Uuid>,
     pub status: Option<QuotationStatus>,
@@ -58,7 +57,7 @@ pub struct QuotationFilter {
 impl QuotationFilter {
     /// Check if any filter is set
     pub fn has_filters(&self) -> bool {
-        self.quotation_number.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.currency.is_some() || self.notes.is_some() || self.opportunity_id.is_some() || self.status_reason.is_some()
+        self.quotation_number.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.currency.is_some() || self.notes.is_some() || self.opportunity_id.is_some() || self.status_reason.is_some()
     }
 }
 

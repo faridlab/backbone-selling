@@ -22,7 +22,6 @@
 //! Per the module's 4-layer rule this file holds no SQL — the statements live on
 //! `SalesOrderRepository` / `SalesOrderItemRepository`.
 
-use backbone_orm::company_scope;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -31,7 +30,9 @@ use super::selling_events::{DeliveryRequestEnvelope, DeliveryRequestLine, Sellin
 use super::selling_stock_fulfillment::{
     DeliveredQtyLineRef, DeliveredQtyRequest, MoveDeliveryFigures, StockFulfillmentPort,
 };
-use super::selling_write_service::{SellingError, SellingWriteService};
+use super::selling_write_service::{
+    legacy_company_echo, relay_ambient_scope, SellingError, SellingWriteService,
+};
 
 // --- the move-backed delivery read model ----------------------------------------
 
@@ -70,8 +71,6 @@ impl SellingWriteService {
     /// a fulfillment/composition layer maps it into inventory's `DeliveryRequested`). Emits the
     /// `DeliveryRequested` domain event. Guard: the order must be confirmed (not draft/cancelled).
     pub async fn build_delivery_request(&self, order_id: Uuid) -> Result<DeliveryRequestEnvelope, SellingError> {
-        // RLS scope (ADR-0008), ID-only pattern: the reads ride the request-dedicated connection;
-        // having read the order we bind ITS company onto the outbox transaction below.
         let hdr = self.repos.orders.find_fulfillment_header(&self.db_pool, order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
         if hdr.status == "draft" {
@@ -84,7 +83,9 @@ impl SellingWriteService {
         }).collect();
         let env = DeliveryRequestEnvelope {
             order_id,
-            company_id: hdr.company_id,
+            // Legacy twin (ADR-0029): the envelope's wire shape still carries the tenant for the
+            // unstripped inventory consumer; the module keys no statement on it.
+            company_id: legacy_company_echo(),
             customer_id: hdr.customer_id,
             currency: hdr.currency,
             lines,
@@ -92,15 +93,16 @@ impl SellingWriteService {
         // Durably stage the cross-module event before the in-proc publish (outbox rollout plan, P1):
         // inventory SUBSCRIBES to DeliveryRequested to move stock + post COGS, so a crash between here and
         // the in-proc publish must not drop it. Staged in its own tx → the relay drains selling.outbox_events;
-        // the in-proc publish stays as the fast path.
+        // the in-proc publish stays as the fast path. The ambient org scope (when the composing service
+        // bound one) is relayed onto the connection so the decorator's RLS sees the stage.
         let event = SellingEvent::DeliveryRequested(env.clone());
         let record = backbone_outbox::OutboxRecord::new(
-            "DeliveryRequested", "SalesOrder", order_id.to_string(), env.company_id,
+            "DeliveryRequested", "SalesOrder", order_id.to_string(), legacy_company_echo(),
             serde_json::to_value(&event).map_err(|e| SellingError::Outbox(e.to_string()))?,
             chrono::Utc::now(),
         );
         let mut tx = self.db_pool.begin().await?;
-        company_scope::bind_company_on(&mut tx, env.company_id).await?;
+        relay_ambient_scope(&mut tx).await?;
         backbone_outbox::outbox::stage(&mut *tx, "selling", &record)
             .await.map_err(|e| SellingError::Outbox(format!("stage: {e}")))?;
         tx.commit().await?;
@@ -122,23 +124,19 @@ impl SellingWriteService {
     pub async fn mark_delivered(
         &self,
         order_id: Uuid,
-        company_id: Uuid,
         deliveries: &[(Uuid, Decimal)],
     ) -> Result<(), SellingError> {
-        // RLS scope (ADR-0008): company on the parameter — the allocation tx binds it explicitly
-        // (`bind_company_on`), and the status recompute runs inside the scope. The inbound handler for
-        // inventory's `StockDelivered` passes the event's company; an event/job caller can no longer
-        // forget to scope the `FOR UPDATE` reads inside `allocate_delivered`.
-        company_scope::with_company_scope(Some(company_id), async move {
-            let mut tx = self.db_pool.begin().await?;
-            company_scope::bind_company_on(&mut tx, company_id).await?;
-            for (item_id, qty) in deliveries {
-                self.allocate_delivered(&mut tx, order_id, *item_id, *qty).await?;
-            }
-            tx.commit().await?;
-            self.recompute_order_status(order_id).await?;
-            Ok(())
-        }).await
+        // The allocation transaction relays the caller's ambient org scope (when the composing
+        // service bound one) so the decorator's RLS sees it; on an undecorated deployment the
+        // transaction stays plain.
+        let mut tx = self.db_pool.begin().await?;
+        relay_ambient_scope(&mut tx).await?;
+        for (item_id, qty) in deliveries {
+            self.allocate_delivered(&mut tx, order_id, *item_id, *qty).await?;
+        }
+        tx.commit().await?;
+        self.recompute_order_status(order_id).await?;
+        Ok(())
     }
 
     /// Fill `delivered_qty` up to `quantity` across an item's order lines (`FOR UPDATE`,
@@ -175,18 +173,16 @@ impl SellingWriteService {
         order_id: Uuid,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<SalesOrderDeliveryDto, SellingError> {
-        // RLS scope (ADR-0008), ID-only pattern — the header read rides the request-dedicated
-        // connection (see `convert_quotation_to_order`); having read the order, its own company
-        // scopes the line read and the port request below.
-        let hdr = self.repos.orders.find_stock_header(&self.db_pool, order_id).await?
+        // ID-only reads — see `convert_quotation_to_order`. The header read is the existence
+        // guard only (the reconstruction keys on the order's live lines).
+        let _hdr = self.repos.orders.find_stock_header(&self.db_pool, order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
-        let lines = company_scope::with_company_scope(
-            Some(hdr.company_id),
-            self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id),
-        ).await?;
+        let lines = self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id).await?;
         let figures = stock
             .delivered_quantities(&DeliveredQtyRequest {
-                company_id: hdr.company_id,
+                // Legacy twin (ADR-0029): the stock engine still fences on company, so the
+                // request carries the ambient org scope's legacy company echo for it.
+                company_id: legacy_company_echo(),
                 order_id,
                 lines: lines
                     .iter()
@@ -235,19 +231,17 @@ impl SellingWriteService {
     pub async fn sync_delivered_from_moves(
         &self,
         order_id: Uuid,
-        company_id: Uuid,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
-        let lines = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id),
-        ).await?;
+        let lines = self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id).await?;
         if lines.is_empty() {
             return Ok(());
         }
         let figures = stock
             .delivered_quantities(&DeliveredQtyRequest {
-                company_id,
+                // Legacy twin (ADR-0029): the stock engine still fences on company, so the
+                // request carries the ambient org scope's legacy company echo for it.
+                company_id: legacy_company_echo(),
                 order_id,
                 lines: lines
                     .iter()
@@ -274,7 +268,7 @@ impl SellingWriteService {
             return Ok(()); // no move-backed figures: keep every stored watermark
         }
         let mut tx = self.db_pool.begin().await?;
-        company_scope::bind_company_on(&mut tx, company_id).await?;
+        relay_ambient_scope(&mut tx).await?;
         self.repos.order_items.set_delivered_quantities(&mut tx, order_id, &updates).await?;
         tx.commit().await?;
         self.recompute_order_status(order_id).await?;

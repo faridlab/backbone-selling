@@ -83,8 +83,7 @@ async fn pool() -> PgPool {
         .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5433/backbone_selling".to_string());
     PgPool::connect(&url).await.expect("connect DB")
 }
-async fn seed_coa(pool: &PgPool) -> (Uuid, HashMap<&'static str, Uuid>) {
-    let company = Uuid::new_v4();
+async fn seed_coa(pool: &PgPool) -> HashMap<&'static str, Uuid> {
     let coa: &[(&str, &str, &str, &str, &str, bool, bool)] = &[
         ("1200", "Piutang", "asset", "accounts_receivable", "debit", false, true),
         ("1300", "Persediaan", "asset", "inventory", "debit", false, true),
@@ -96,13 +95,13 @@ async fn seed_coa(pool: &PgPool) -> (Uuid, HashMap<&'static str, Uuid>) {
     let mut m = HashMap::new();
     for (code, name, at, st, nb, h, det) in coa {
         let id = Uuid::new_v4();
-        sqlx::query(r#"INSERT INTO accounting.accounts (id, company_id, account_number, account_code, name, account_type, account_subtype, normal_balance, is_header, is_detail, status)
-            VALUES ($1,$2,$3,$4,$5,$6::account_type,$7::account_subtype,$8::normal_balance,$9,$10,'active'::account_status)"#)
-            .bind(id).bind(company).bind(code).bind(code).bind(name).bind(at).bind(st).bind(nb).bind(h).bind(det)
+        sqlx::query(r#"INSERT INTO accounting.accounts (id, account_number, account_code, name, account_type, account_subtype, normal_balance, is_header, is_detail, status)
+            VALUES ($1,$2,$3,$4,$5::account_type,$6::account_subtype,$7::normal_balance,$8,$9,'active'::account_status)"#)
+            .bind(id).bind(code).bind(code).bind(name).bind(at).bind(st).bind(nb).bind(h).bind(det)
             .execute(pool).await.expect("seed acct");
         m.insert(*code, id);
     }
-    (company, m)
+    m
 }
 
 /// DSEAM-1: the full order-to-cash + fulfillment round-trip across selling, inventory, and the real
@@ -110,17 +109,27 @@ async fn seed_coa(pool: &PgPool) -> (Uuid, HashMap<&'static str, Uuid>) {
 #[tokio::test]
 async fn order_to_cash_and_fulfillment_across_three_modules() {
     let pool = pool().await;
-    let (company, coa) = seed_coa(&pool).await;
+    let coa = seed_coa(&pool).await;
     let customer = Uuid::new_v4();
     let item = Uuid::new_v4();
 
+    // The composed-shape stand-in (ADR-0029): the whole flow rides an ambient org scope — the
+    // per-request binding a composing service resolves. The scope's legacy echo is what fills
+    // the envelopes' `company_id`, and inventory still keys stock under its own company column
+    // (until its own strip), so the warehouse + receipt are seeded under the same unit's
+    // legacy id.
+    let company = Uuid::new_v4();
+    backbone_orm::org_scope::with_org_request_scope(
+        &pool,
+        backbone_orm::org_scope::OrgScope::for_company_unit(company),
+        async {
     let selling = SellingWriteService::new(pool.clone());
     let recorder = RecordingInvSink::default();
     let inventory = InventoryWriteService::with_sink(pool.clone(), Arc::new(recorder.clone()));
     let intake = DeliveryIntake::new(pool.clone());
     let gl = GlAdapter { svc: PostingService::new(Arc::new(SqlxPostingRepository::new(pool.clone()))) };
 
-    // 1) inventory receives 10 @ 100 into a warehouse.
+    // 1) inventory receives 10 @ 100 into a warehouse, under the scoped unit's legacy id.
     let wh = inventory.create_warehouse(NewWarehouse { company_id: company, code: uq("WH"), name: "Main".into(), warehouse_type: None, parent_warehouse_id: None, is_group: false }).await.unwrap();
     let rid = inventory.create_purchase_receipt(NewReceipt {
         receipt_number: uq("PR"), company_id: company, branch_id: None, supplier_id: Uuid::new_v4(),
@@ -132,13 +141,13 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
 
     // 2) selling: create + confirm a Sales Order for 10 of that item.
     let oid = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, branch_id: None,
         customer_id: customer, order_date: day(), delivery_date: None, currency: None,
         tax_rate: d("11"), notes: None,
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None,
             quantity: d("10"), unit_price: d("150000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    selling.confirm_sales_order(oid, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(order_status(&pool, oid).await, "to_deliver_and_bill");
 
     // 3) selling emits a delivery request; ACL maps it into inventory's DeliveryRequested.
@@ -164,13 +173,15 @@ async fn order_to_cash_and_fulfillment_across_three_modules() {
     }).expect("StockDelivered for our order");
     assert_eq!(delivered_so.total_cogs, d("1000.00"));
     // We know the delivered lines from the request we routed (the composition's correspondence).
-    selling.mark_delivered(oid, delivered_so.company_id, &[(item, d("10"))]).await.unwrap();
+    selling.mark_delivered(oid, &[(item, d("10"))]).await.unwrap();
     assert_eq!(order_status(&pool, oid).await, "to_bill", "delivered, still awaiting billing");
 
     // (The revenue leg — billing posts the invoice, the order reaches `completed`, and the Bin
     // residual flushes — is owned by backbone-billing and proven in tests/invoice_seam.rs +
     // backbone-billing/tests/ar_seam.rs. This test stops at `to_bill` because selling exited the
     // invoice business; ADR-006.)
+    },
+    ).await.unwrap();
 }
 
 async fn order_status(pool: &PgPool, oid: Uuid) -> String {
@@ -191,14 +202,14 @@ fn dline(item: Uuid, qty: &str) -> NewLine {
     }
 }
 async fn confirmed_deliverable_order(
-    selling: &SellingWriteService, company: Uuid, lines: Vec<NewLine>,
+    selling: &SellingWriteService, lines: Vec<NewLine>,
 ) -> Uuid {
     let order = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, branch_id: None,
         customer_id: Uuid::new_v4(), order_date: day(), delivery_date: None, currency: None,
         tax_rate: Decimal::ZERO, notes: None, lines,
     }).await.unwrap();
-    selling.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    selling.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     order
 }
 async fn delivered_total(pool: &PgPool, order: Uuid) -> Decimal {
@@ -216,12 +227,12 @@ async fn delivered_total(pool: &PgPool, order: Uuid) -> Decimal {
 async fn over_delivery_is_refused() {
     let pool = pool().await;
     let selling = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_deliverable_order(&selling, company, vec![dline(item, "10")]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_deliverable_order(&selling, vec![dline(item, "10")]).await;
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
 
     // 11 > ordered 10 → refused; the watermark stays 0 and the order stays to_deliver_and_bill.
-    let e = selling.mark_delivered(order, company, &[(item, d("11"))]).await.unwrap_err();
+    let e = selling.mark_delivered(order, &[(item, d("11"))]).await.unwrap_err();
     assert!(matches!(e, SellingError::OverDelivered));
     assert_eq!(
         delivered_total(&pool, order).await, d("0.0000"),
@@ -238,18 +249,18 @@ async fn over_delivery_is_refused() {
 async fn duplicate_item_lines_allocate_delivery_by_capacity() {
     let pool = pool().await;
     let selling = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_deliverable_order(&selling, company, vec![dline(item, "6"), dline(item, "4")]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_deliverable_order(&selling, vec![dline(item, "6"), dline(item, "4")]).await;
 
     // 12 > total capacity 10 → refused, nothing advances.
     assert!(matches!(
-        selling.mark_delivered(order, company, &[(item, d("12"))]).await.unwrap_err(),
+        selling.mark_delivered(order, &[(item, d("12"))]).await.unwrap_err(),
         SellingError::OverDelivered,
     ));
     assert_eq!(delivered_total(&pool, order).await, d("0.0000"));
 
     // 10 fills both lines to their caps (6 then 4, fill-in-id order).
-    selling.mark_delivered(order, company, &[(item, d("10"))]).await.unwrap();
+    selling.mark_delivered(order, &[(item, d("10"))]).await.unwrap();
     let caps: Vec<Decimal> = sqlx::query_scalar(
         "SELECT delivered_qty FROM selling.sales_order_items WHERE order_id=$1 ORDER BY quantity DESC",
     ).bind(order).fetch_all(&pool).await.unwrap();

@@ -52,7 +52,6 @@ impl std::ops::Deref for QuotationId {
 pub struct Quotation {
     pub id: Uuid,
     pub quotation_number: String,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub status: QuotationStatus,
@@ -78,11 +77,10 @@ impl Quotation {
     }
 
     /// Create a new Quotation with required fields
-    pub fn new(quotation_number: String, company_id: Uuid, customer_id: Uuid, status: QuotationStatus, quotation_date: NaiveDate, currency: String, subtotal: Decimal, tax_rate: Decimal, tax_amount: Decimal, total: Decimal) -> Self {
+    pub fn new(quotation_number: String, customer_id: Uuid, status: QuotationStatus, quotation_date: NaiveDate, currency: String, subtotal: Decimal, tax_rate: Decimal, tax_amount: Decimal, total: Decimal) -> Self {
         Self {
             id: Uuid::new_v4(),
             quotation_number,
-            company_id,
             branch_id: None,
             customer_id,
             status,
@@ -201,9 +199,6 @@ impl Quotation {
                 "quotation_number" => {
                     if let Ok(v) = serde_json::from_value(value) { self.quotation_number = v; }
                 }
-                "company_id" => {
-                    if let Ok(v) = serde_json::from_value(value) { self.company_id = v; }
-                }
                 "branch_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.branch_id = v; }
                 }
@@ -297,7 +292,6 @@ impl backbone_orm::EntityRepoMeta for Quotation {
     fn column_types() -> std::collections::HashMap<String, String> {
         let mut m = std::collections::HashMap::new();
         m.insert("id".to_string(), "uuid".to_string());
-        m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("branch_id".to_string(), "uuid".to_string());
         m.insert("customer_id".to_string(), "uuid".to_string());
         m.insert("opportunity_id".to_string(), "uuid".to_string());
@@ -306,9 +300,6 @@ impl backbone_orm::EntityRepoMeta for Quotation {
     }
     fn search_fields() -> &'static [&'static str] {
         &["quotation_number", "currency"]
-    }
-    fn company_field() -> Option<&'static str> {
-        Some("company_id")
     }
 }
 
@@ -319,7 +310,6 @@ impl backbone_orm::EntityRepoMeta for Quotation {
 #[derive(Debug, Clone, Default)]
 pub struct QuotationBuilder {
     quotation_number: Option<String>,
-    company_id: Option<Uuid>,
     branch_id: Option<Uuid>,
     customer_id: Option<Uuid>,
     status: Option<QuotationStatus>,
@@ -339,12 +329,6 @@ impl QuotationBuilder {
     /// Set the quotation_number field (required)
     pub fn quotation_number(mut self, value: String) -> Self {
         self.quotation_number = Some(value);
-        self
-    }
-
-    /// Set the company_id field (required)
-    pub fn company_id(mut self, value: Uuid) -> Self {
-        self.company_id = Some(value);
         self
     }
 
@@ -431,14 +415,12 @@ impl QuotationBuilder {
     /// Returns Err if any required field without a default is missing.
     pub fn build(self) -> Result<Quotation, String> {
         let quotation_number = self.quotation_number.ok_or_else(|| "quotation_number is required".to_string())?;
-        let company_id = self.company_id.ok_or_else(|| "company_id is required".to_string())?;
         let customer_id = self.customer_id.ok_or_else(|| "customer_id is required".to_string())?;
         let quotation_date = self.quotation_date.ok_or_else(|| "quotation_date is required".to_string())?;
 
         Ok(Quotation {
             id: Uuid::new_v4(),
             quotation_number,
-            company_id,
             branch_id: self.branch_id,
             customer_id,
             status: self.status.unwrap_or_default(),

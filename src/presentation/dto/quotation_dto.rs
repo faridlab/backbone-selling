@@ -38,9 +38,6 @@ pub struct CreateQuotationDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(alias = "quotation_number")]
     pub quotation_number: String,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "branch_id")]
     pub branch_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -88,9 +85,6 @@ pub struct UpdateQuotationDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(alias = "quotation_number")]
     pub quotation_number: String,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "branch_id")]
     pub branch_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -138,9 +132,6 @@ pub struct PatchQuotationDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "quotation_number")]
     pub quotation_number: Option<String>,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
-    pub company_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "branch_id")]
     pub branch_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -178,7 +169,7 @@ pub struct PatchQuotationDto {
 impl PatchQuotationDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.quotation_number.is_some() || self.company_id.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.quotation_date.is_some() || self.valid_until.is_some() || self.currency.is_some() || self.subtotal.is_some() || self.tax_rate.is_some() || self.tax_amount.is_some() || self.total.is_some() || self.notes.is_some() || self.opportunity_id.is_some() || self.status_reason.is_some()
+        self.quotation_number.is_some() || self.branch_id.is_some() || self.customer_id.is_some() || self.status.is_some() || self.quotation_date.is_some() || self.valid_until.is_some() || self.currency.is_some() || self.subtotal.is_some() || self.tax_rate.is_some() || self.tax_amount.is_some() || self.total.is_some() || self.notes.is_some() || self.opportunity_id.is_some() || self.status_reason.is_some()
     }
 }
 
@@ -198,8 +189,6 @@ pub struct QuotationResponseDto {
     pub id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub quotation_number: String,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub customer_id: Uuid,
@@ -274,8 +263,8 @@ impl QuotationListResponseDto {
 pub struct QuotationSummaryDto {
     pub id: Uuid,
     pub quotation_number: String,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
+    pub customer_id: Uuid,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -288,7 +277,6 @@ impl From<Quotation> for QuotationResponseDto {
         Self {
             id: entity.id,
             quotation_number: entity.quotation_number,
-            company_id: entity.company_id,
             branch_id: entity.branch_id,
             customer_id: entity.customer_id,
             status: entity.status,
@@ -313,8 +301,8 @@ impl From<Quotation> for QuotationSummaryDto {
         Self {
             id: entity.id,
             quotation_number: entity.quotation_number,
-            company_id: entity.company_id,
             branch_id: entity.branch_id,
+            customer_id: entity.customer_id,
             created_at,
         }
     }
@@ -325,7 +313,6 @@ impl From<CreateQuotationDto> for Quotation {
         Self {
             id: Uuid::new_v4(),
             quotation_number: dto.quotation_number,
-            company_id: dto.company_id,
             branch_id: dto.branch_id,
             customer_id: dto.customer_id,
             status: dto.status,
@@ -349,7 +336,6 @@ impl From<&Quotation> for QuotationResponseDto {
         Self {
             id: entity.id.clone(),
             quotation_number: entity.quotation_number.clone(),
-            company_id: entity.company_id.clone(),
             branch_id: entity.branch_id.clone(),
             customer_id: entity.customer_id.clone(),
             status: entity.status.clone(),
@@ -377,7 +363,6 @@ impl backbone_core::FromCreateDto<CreateQuotationDto> for Quotation {
 impl backbone_core::ApplyUpdateDto<UpdateQuotationDto> for Quotation {
     fn apply_update(mut self, dto: UpdateQuotationDto) -> backbone_core::ServiceResult<Self> {
         self.quotation_number = dto.quotation_number;
-        self.company_id = dto.company_id;
         self.branch_id = dto.branch_id;
         self.customer_id = dto.customer_id;
         self.status = dto.status;

@@ -14,7 +14,12 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use backbone_orm::company_scope;
+// The single-row read twin lives only in the legacy `company_scope` module; the all-rows read
+// twin rides the same legacy module. Their connection discipline is the request-dedicated
+// connection when the composing service bound one, plain pool otherwise. The legacy task-local
+// branch is never taken: this module sets no legacy scope of its own (ADR-0029).
+use backbone_orm::company_scope::{fetch_all_rows_scoped, fetch_one_row_scoped};
+use backbone_orm::org_scope;
 
 use crate::domain::entity::SalesOrderItem;
 
@@ -52,7 +57,6 @@ impl SalesOrderItemRepository {
 pub struct NewSalesOrderItemRow<'a> {
     pub id: Uuid,
     pub order_id: Uuid,
-    pub company_id: Uuid,
     pub item_id: Uuid,
     pub description: Option<&'a str>,
     pub quantity: Decimal,
@@ -81,7 +85,6 @@ pub struct InvoicePolicyOrderLineRow {
 /// `confirm_sales_order` (which flips that same header row) and the watermark writers.
 pub struct LinePatchRow {
     pub order_id: Uuid,
-    pub company_id: Uuid,
     pub description: Option<String>,
     pub item_id: Uuid,
     pub quantity: Decimal,
@@ -194,7 +197,8 @@ impl SalesOrderItemRepository {
     /// Insert one sales-order line.
     ///
     /// Takes the CALLER'S connection so the line commits in the SAME transaction as its header. The
-    /// caller binds the company on that connection (`bind_company_on`) before calling — don't re-bind.
+    /// caller relays the ambient org scope onto that connection (`org_scope::bind_org_scope_on`)
+    /// before calling — don't re-bind.
     pub async fn insert_line(
         &self,
         conn: &mut sqlx::PgConnection,
@@ -202,11 +206,11 @@ impl SalesOrderItemRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.sales_order_items
-                (id, order_id, company_id, item_id, description, quantity, unit_price,
+                (id, order_id, item_id, description, quantity, unit_price,
                  line_discount, line_amount, invoice_policy, is_downpayment)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::invoice_policy,$11)"#,
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::invoice_policy,$10)"#,
         )
-        .bind(l.id).bind(l.order_id).bind(l.company_id).bind(l.item_id).bind(l.description)
+        .bind(l.id).bind(l.order_id).bind(l.item_id).bind(l.description)
         .bind(l.quantity).bind(l.unit_price).bind(l.line_discount).bind(l.line_amount)
         .bind(l.invoice_policy).bind(l.is_downpayment)
         .execute(conn)
@@ -216,14 +220,15 @@ impl SalesOrderItemRepository {
 
     /// Read an order's lines for `create_invoice_from_order`.
     ///
-    /// ID-only: no company argument, so this read rides the REQUEST-dedicated connection carrying the
-    /// caller's `app.company_id` — RLS fences it (ADR-0008).
+    /// ID-only: no tenant argument. The scoped reads ride the request-dedicated connection when
+    /// the composing service bound one (carrying the decorator's fence variables), plainly on
+    /// the pool otherwise (ADR-0029).
     pub async fn list_for_invoice(
         &self,
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Vec<OrderLineForInvoiceRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT id, item_id, description, quantity, unit_price, line_discount
@@ -252,7 +257,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<WatermarkRollupRow, sqlx::Error> {
-        let row = company_scope::fetch_one_row_scoped(
+        let row = fetch_one_row_scoped(
             pool,
             sqlx::query(
                 r#"SELECT bool_and(billed_qty >= (CASE WHEN invoice_policy='delivery' AND NOT is_downpayment
@@ -276,7 +281,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Vec<OrderDeliveryRemainderRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT item_id, (quantity - delivered_qty) AS remaining
@@ -300,7 +305,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Vec<OrderBillingRemainderRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT item_id,
@@ -324,14 +329,14 @@ impl SalesOrderItemRepository {
     /// Advance `billed_qty` on every order line an invoice's lines point at, in one statement.
     ///
     /// Scoped through the INVOICE, not the order: the `sales_invoice_items` subquery is what the
-    /// `invoice_id=$1` filter bites on, and the order lines are reached by join. ID-only — this
-    /// inherits its caller's scope (`post_sales_invoice`, via `advance_billing_watermarks`).
+    /// `invoice_id=$1` filter bites on, and the order lines are reached by join. ID-only — the
+    /// ambient org scope fences it (see `recompute_order_status`).
     pub async fn advance_billed_from_invoice(
         &self,
         pool: &PgPool,
         invoice_id: Uuid,
     ) -> Result<(), sqlx::Error> {
-        company_scope::execute_scoped(
+        org_scope::execute_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.sales_order_items soi
@@ -354,8 +359,8 @@ impl SalesOrderItemRepository {
     /// (downpayment lines keep the quantity basis so billing's advances still bound).
     ///
     /// Takes the CALLER'S connection: the `FOR UPDATE` is only meaningful inside the caller's
-    /// transaction — it is what serializes concurrent billers and closes the over-bill race. The caller
-    /// binds the company on that connection (`bind_current_company`) before calling — don't re-bind.
+    /// transaction — it is what serializes concurrent billers and closes the over-bill race. The
+    /// caller relays the ambient org scope onto that connection before calling — don't re-bind.
     pub async fn lock_billing_capacity(
         &self,
         conn: &mut sqlx::PgConnection,
@@ -400,7 +405,7 @@ impl SalesOrderItemRepository {
     /// Mirror of [`Self::lock_billing_capacity`] for the delivery watermark (council 2026-07-27).
     /// Takes the CALLER'S connection: the `FOR UPDATE` is only meaningful inside the caller's
     /// transaction — it is what serializes concurrent deliverers and closes the over-delivery race.
-    /// The caller binds the company on that connection (`bind_company_on`) before calling.
+    /// The caller relays the ambient org scope onto that connection before calling.
     pub async fn lock_delivery_capacity(
         &self,
         conn: &mut sqlx::PgConnection,
@@ -444,7 +449,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Vec<InvoicePolicyOrderLineRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT id, item_id, invoice_policy::text AS pol, is_downpayment,
@@ -468,29 +473,27 @@ impl SalesOrderItemRepository {
     /// Lock one order line (`FOR UPDATE`) together with its parent order's status — the read behind
     /// the line-edit freeze. Locking BOTH rows serializes the edit against
     /// `confirm_sales_order` (which flips the same header) and the watermark writers. Takes the
-    /// CALLER'S connection (the caller binds the company on it).
+    /// CALLER'S connection (the caller relays the ambient org scope onto it).
     pub async fn lock_line_with_parent_status(
         &self,
         conn: &mut sqlx::PgConnection,
         line_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Option<LinePatchRow>, sqlx::Error> {
         let row = sqlx::query(
-            r#"SELECT soi.order_id, soi.company_id, soi.description, soi.item_id,
+            r#"SELECT soi.order_id, soi.description, soi.item_id,
                       soi.quantity, soi.unit_price, soi.line_discount, soi.line_amount,
                       o.status::text AS order_status
                FROM selling.sales_order_items soi
                JOIN selling.sales_orders o ON o.id = soi.order_id
-               WHERE soi.id=$1 AND soi.company_id=$2
+               WHERE soi.id=$1
                  AND (soi.metadata->>'deleted_at') IS NULL
                FOR UPDATE OF soi, o"#,
         )
-        .bind(line_id).bind(company_id)
+        .bind(line_id)
         .fetch_optional(conn)
         .await?;
         Ok(row.map(|r| LinePatchRow {
             order_id: r.get("order_id"),
-            company_id: r.get("company_id"),
             description: r.get("description"),
             item_id: r.get("item_id"),
             quantity: r.get("quantity"),
@@ -543,7 +546,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Vec<CostStampLineRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT id, item_id FROM selling.sales_order_items
@@ -600,7 +603,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Vec<OrderStockLineRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT id, item_id, quantity, delivered_qty FROM selling.sales_order_items
@@ -658,7 +661,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Vec<ServiceDeliveryLineRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT id, item_id, description, quantity FROM selling.sales_order_items
@@ -715,7 +718,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Vec<MarginLineRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT id, item_id, quantity, unit_price, line_discount, line_amount, unit_cost
@@ -747,7 +750,7 @@ impl SalesOrderItemRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<MarginRollupRow, sqlx::Error> {
-        let row = company_scope::fetch_one_row_scoped(
+        let row = fetch_one_row_scoped(
             pool,
             sqlx::query(
                 r#"SELECT COUNT(*) FILTER (WHERE unit_cost IS NOT NULL) AS costed_lines,

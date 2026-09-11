@@ -8,7 +8,6 @@
 --     id,
 --     invoice_number,
 --     sales_order_id,
---     company_id,
 --     branch_id,
 --     customer_id,
 --     status,

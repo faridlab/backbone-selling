@@ -27,6 +27,8 @@ pub struct CartPriceLine {
 /// The whole basket to price. Customer, group and coupon are cart-wide.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CartPriceRequest {
+    /// Legacy tenant twin (ADR-0029) for the still-company-fenced promo consumer — selling
+    /// fills it with the ambient org scope's echo and keys no statement on it.
     pub company_id: Uuid,
     pub customer_id: Option<Uuid>,
     pub customer_group_id: Option<Uuid>,

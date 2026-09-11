@@ -6,7 +6,6 @@
 
 -- INSERT INTO selling.expense_reinvoice_links (
 --     id,
---     company_id,
 --     order_id,
 --     expense_id,
 --     amount,

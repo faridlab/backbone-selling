@@ -95,7 +95,7 @@ rules:
   - id: R13
     name: template_name_unique
     when: create_quotation_template
-    assert: "(company_id, name) is unique among live templates"
+    assert: "name is unique among the caller's live templates (service-side name pre-read; the per-unit unique is the composing decorator's)"
     error_code: duplicate_template_name
 
 # -----------------------------------------------------------------------------

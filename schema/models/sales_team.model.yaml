@@ -18,11 +18,6 @@ models:
         attributes: ["@id", "@default(uuid)"]
         description: "Unique sales-team identifier"
 
-      company_id:
-        type: uuid
-        attributes: ["@required", "@exclude_from_foreign_key_check"]
-        description: "Owning company # logical FK to organization.Company.id"
-
       name:
         type: string
         attributes: ["@required", "@max(120)"]
@@ -39,9 +34,9 @@ models:
         description: "Audit metadata"
 
     indexes:
-      - type: unique
-        fields: [company_id, name]
-        where: "deleted_at IS NULL"
+      # No tenancy indexes (ADR-0029): the module is tenant-agnostic. The per-unit
+      # team-name unique is installed by the composing service's tenancy decorator
+      # (org_unit_id-leading), not declared here.
 
   - name: SalesPersonAllocation
     collection: sales_person_allocations
@@ -57,11 +52,6 @@ models:
         type: uuid
         attributes: ["@required", "@foreign_key(SalesOrder.id)"]
         description: "Owning sales order"
-
-      company_id:
-        type: uuid
-        attributes: ["@required", "@exclude_from_foreign_key_check"]
-        description: "Books owner # logical FK to organization.Company.id (denormalized from SalesOrder.company_id for direct RLS fencing — ADR-0010 Decision A)"
 
       sales_person_id:
         type: uuid

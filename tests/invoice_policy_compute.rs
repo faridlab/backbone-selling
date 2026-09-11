@@ -67,12 +67,11 @@ fn pline(item: Uuid, qty: &str, policy: InvoicePolicy, downpayment: bool) -> New
         line_discount: Decimal::ZERO,
     }
 }
-async fn confirmed_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewLine>) -> Uuid {
+async fn confirmed_order(w: &SellingWriteService, lines: Vec<NewLine>) -> Uuid {
     let order = w
         .create_sales_order(NewSalesOrder {
             order_number: uq("SO"),
             quotation_id: None, delivery_carrier_id: None,
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
@@ -84,7 +83,7 @@ async fn confirmed_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewL
         })
         .await
         .unwrap();
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     order
 }
 async fn line_id(pool: &PgPool, order: Uuid, item: Uuid) -> Uuid {
@@ -106,20 +105,20 @@ fn n(v: Decimal) -> Decimal {
 async fn order_policy_bills_on_ordered_quantity() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
 
     let view = w.order_invoice_view(order).await.unwrap();
     assert_eq!(view.invoice_status, "to invoice");
     assert_eq!(n(view.lines[0].qty_to_invoice), d("10"));
     assert_eq!(view.lines[0].invoice_status, "to invoice");
 
-    w.mark_invoiced(order, company, &[(item, d("4"))]).await.unwrap();
+    w.mark_invoiced(order, &[(item, d("4"))]).await.unwrap();
     let view = w.order_invoice_view(order).await.unwrap();
     assert_eq!(n(view.lines[0].qty_to_invoice), d("6"));
     assert_eq!(view.lines[0].invoice_status, "to invoice");
 
-    w.mark_invoiced(order, company, &[(item, d("6"))]).await.unwrap();
+    w.mark_invoiced(order, &[(item, d("6"))]).await.unwrap();
     let view = w.order_invoice_view(order).await.unwrap();
     assert_eq!(view.invoice_status, "invoiced");
     assert_eq!(view.lines[0].invoice_status, "invoiced");
@@ -132,30 +131,30 @@ async fn order_policy_bills_on_ordered_quantity() {
 async fn delivery_policy_bills_on_delivered_quantity() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Delivery, false)]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Delivery, false)]).await;
 
     // Nothing delivered: nothing invoiceable, and the writer refuses any bill (capacity is 0).
     let view = w.order_invoice_view(order).await.unwrap();
     assert_eq!(view.lines[0].invoice_status, "no");
     assert_eq!(n(view.lines[0].qty_to_invoice), d("0"));
     assert!(matches!(
-        w.mark_invoiced(order, company, &[(item, d("1"))]).await.unwrap_err(),
+        w.mark_invoiced(order, &[(item, d("1"))]).await.unwrap_err(),
         SellingError::OverBilled
     ));
 
     // 6 delivered: exactly 6 invoiceable, and billing it leaves the line fully billed-to-delivered.
-    w.mark_delivered(order, company, &[(item, d("6"))]).await.unwrap();
+    w.mark_delivered(order, &[(item, d("6"))]).await.unwrap();
     let view = w.order_invoice_view(order).await.unwrap();
     assert_eq!(n(view.lines[0].qty_to_invoice), d("6"));
     assert_eq!(view.lines[0].invoice_status, "to invoice");
 
-    w.mark_invoiced(order, company, &[(item, d("6"))]).await.unwrap();
+    w.mark_invoiced(order, &[(item, d("6"))]).await.unwrap();
     let view = w.order_invoice_view(order).await.unwrap();
     assert_eq!(view.lines[0].invoice_status, "invoiced", "billed for everything deliverable so far");
     assert_eq!(view.invoice_status, "invoiced");
     // more delivery lands → the line reopens.
-    w.mark_delivered(order, company, &[(item, d("4"))]).await.unwrap();
+    w.mark_delivered(order, &[(item, d("4"))]).await.unwrap();
     let view = w.order_invoice_view(order).await.unwrap();
     assert_eq!(view.lines[0].invoice_status, "to invoice");
     assert_eq!(n(view.lines[0].qty_to_invoice), d("4"));
@@ -168,11 +167,11 @@ async fn delivery_policy_bills_on_delivered_quantity() {
 async fn delivery_policy_does_not_strand_the_order() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Delivery, false)]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Delivery, false)]).await;
 
-    w.mark_delivered(order, company, &[(item, d("6"))]).await.unwrap();
-    w.mark_invoiced(order, company, &[(item, d("6"))]).await.unwrap();
+    w.mark_delivered(order, &[(item, d("6"))]).await.unwrap();
+    w.mark_invoiced(order, &[(item, d("6"))]).await.unwrap();
 
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order)
@@ -189,8 +188,8 @@ async fn delivery_policy_does_not_strand_the_order() {
 async fn billed_beyond_ordered_reads_as_upselling() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
     let lid = line_id(&pool, order, item).await;
     sqlx::query("UPDATE selling.sales_order_items SET billed_qty=12 WHERE id=$1")
         .bind(lid)
@@ -210,10 +209,9 @@ async fn billed_beyond_ordered_reads_as_upselling() {
 async fn downpayment_bills_on_quantity_but_is_excluded_from_aggregates() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, goods, dp) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let (goods, dp) = (Uuid::new_v4(), Uuid::new_v4());
     let order = confirmed_order(
         &w,
-        company,
         vec![
             pline(goods, "10", InvoicePolicy::Delivery, false), // delivered 0 → nothing due yet
             pline(dp, "1", InvoicePolicy::Delivery, true),      // downpayment: quantity basis
@@ -229,12 +227,12 @@ async fn downpayment_bills_on_quantity_but_is_excluded_from_aggregates() {
     // …but the aggregate ignores it entirely (the goods line is `no` → aggregate `no`).
     assert_eq!(view.invoice_status, "no");
     // The writer honors the quantity basis for the downpayment even under a delivery policy.
-    w.mark_invoiced(order, company, &[(dp, d("1"))]).await.unwrap();
+    w.mark_invoiced(order, &[(dp, d("1"))]).await.unwrap();
 
     // The rollup excludes it too: delivering + billing the GOODS line completes the order even
     // though the downpayment line (quantity 1) is never delivered.
-    w.mark_delivered(order, company, &[(goods, d("10"))]).await.unwrap();
-    w.mark_invoiced(order, company, &[(goods, d("10"))]).await.unwrap();
+    w.mark_delivered(order, &[(goods, d("10"))]).await.unwrap();
+    w.mark_invoiced(order, &[(goods, d("10"))]).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order)
         .fetch_one(&pool)
@@ -248,10 +246,9 @@ async fn downpayment_bills_on_quantity_but_is_excluded_from_aggregates() {
 async fn aggregate_to_invoice_outranks_upselling() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, a, b) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
     let order = confirmed_order(
         &w,
-        company,
         vec![pline(a, "10", InvoicePolicy::Order, false), pline(b, "10", InvoicePolicy::Order, false)],
     )
     .await;
@@ -275,12 +272,11 @@ async fn aggregate_to_invoice_outranks_upselling() {
 async fn unconfirmed_orders_read_no() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let order = w
         .create_sales_order(NewSalesOrder {
             order_number: uq("SO"),
             quotation_id: None, delivery_carrier_id: None,
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
@@ -305,13 +301,12 @@ async fn unconfirmed_orders_read_no() {
 async fn quotation_read_model_has_no_watermarks() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let q = w
         .create_quotation(NewQuotation {
             opportunity_id: None,
             template_id: None,
             quotation_number: uq("QUO"),
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             quotation_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
@@ -340,17 +335,16 @@ async fn quotation_read_model_has_no_watermarks() {
 async fn invoice_request_follows_policy_basis() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, ord_item, del_item) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let (ord_item, del_item) = (Uuid::new_v4(), Uuid::new_v4());
     let order = confirmed_order(
         &w,
-        company,
         vec![
             pline(ord_item, "10", InvoicePolicy::Order, false),
             pline(del_item, "10", InvoicePolicy::Delivery, false),
         ],
     )
     .await;
-    w.mark_delivered(order, company, &[(del_item, d("4"))]).await.unwrap();
+    w.mark_delivered(order, &[(del_item, d("4"))]).await.unwrap();
 
     let req = w.build_invoice_request(order).await.unwrap();
     let get = |item: Uuid| req.lines.iter().find(|l| l.item_id == item).unwrap().quantity;
@@ -364,15 +358,15 @@ async fn invoice_request_follows_policy_basis() {
 async fn watermark_bound_is_policy_basis() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Delivery, false)]).await;
-    w.mark_delivered(order, company, &[(item, d("4"))]).await.unwrap();
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Delivery, false)]).await;
+    w.mark_delivered(order, &[(item, d("4"))]).await.unwrap();
 
     assert!(matches!(
-        w.mark_invoiced(order, company, &[(item, d("5"))]).await.unwrap_err(),
+        w.mark_invoiced(order, &[(item, d("5"))]).await.unwrap_err(),
         SellingError::OverBilled
     ));
-    w.mark_invoiced(order, company, &[(item, d("4"))]).await.unwrap();
+    w.mark_invoiced(order, &[(item, d("4"))]).await.unwrap();
     let bq: Decimal = sqlx::query_scalar(
         "SELECT billed_qty FROM selling.sales_order_items WHERE order_id=$1",
     )
@@ -388,10 +382,10 @@ async fn watermark_bound_is_policy_basis() {
 async fn read_model_and_request_agree() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Delivery, false)]).await;
-    w.mark_delivered(order, company, &[(item, d("7"))]).await.unwrap();
-    w.mark_invoiced(order, company, &[(item, d("3"))]).await.unwrap();
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Delivery, false)]).await;
+    w.mark_delivered(order, &[(item, d("7"))]).await.unwrap();
+    w.mark_invoiced(order, &[(item, d("3"))]).await.unwrap();
 
     let view = w.order_invoice_view(order).await.unwrap();
     let req = w.build_invoice_request(order).await.unwrap();
@@ -407,13 +401,12 @@ async fn read_model_and_request_agree() {
 async fn conversion_carries_policy_and_downpayment() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, a, b) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
     let q = w
         .create_quotation(NewQuotation {
             opportunity_id: None,
             template_id: None,
             quotation_number: uq("QUO"),
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             quotation_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
@@ -428,7 +421,7 @@ async fn conversion_carries_policy_and_downpayment() {
         })
         .await
         .unwrap();
-    w.accept_quotation(q, company).await.unwrap();
+    w.accept_quotation(q).await.unwrap();
     let order = w.convert_quotation_to_order(q, uq("SO")).await.unwrap();
 
     let rows: Vec<(Uuid, String, bool)> = sqlx::query_as(
@@ -447,33 +440,32 @@ async fn conversion_carries_policy_and_downpayment() {
 
 // ── QT: quotation templates ────────────────────────────────────────────────────
 
-async fn template(w: &SellingWriteService, company: Uuid, name: &str, days: i32, notes: Option<&str>) -> Uuid {
-    w.create_quotation_template(company, name, days, notes).await.unwrap()
+async fn template(w: &SellingWriteService, name: &str, days: i32, notes: Option<&str>) -> Uuid {
+    w.create_quotation_template(name, days, notes).await.unwrap()
 }
 
-// QT-1: template create + list; a duplicate (company_id, name) refuses loudly.
+// QT-1: template create + list; a duplicate live name refuses loudly.
 #[tokio::test]
 async fn template_create_list_and_duplicate_refusal() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let name = uq("Standard offer");
 
-    let tid = template(&w, company, &name, 21, Some("Prices exclude VAT.")).await;
-    let list = w.list_quotation_templates(company).await.unwrap();
+    let tid = template(&w, &name, 21, Some("Prices exclude VAT.")).await;
+    let list = w.list_quotation_templates().await.unwrap();
     let t = list.iter().find(|t| t.id == tid).unwrap();
     assert_eq!(t.name, name);
     assert_eq!(t.validity_days, 21);
     assert_eq!(t.default_notes.as_deref(), Some("Prices exclude VAT."));
 
-    let e = w.create_quotation_template(company, &name, 30, None).await.unwrap_err();
+    let e = w.create_quotation_template(&name, 30, None).await.unwrap_err();
     assert!(matches!(e, SellingError::TemplateDuplicate(_)));
     assert_eq!(SellingError::TemplateDuplicate(String::new()).http_status(), 422);
 
-    // Another tenant may hold the same name (the unique index is per company).
-    let other = Uuid::new_v4();
-    w.create_quotation_template(other, &name, 30, None).await.unwrap();
-    assert_eq!(w.list_quotation_templates(other).await.unwrap().len(), 1);
+    // The name pre-read is the module's own refusal (the module ships no unique of its own —
+    // ADR-0029). Undecorated it is unfenced, so the same name refuses globally; under a
+    // composed tenancy decorator the fence scopes the pre-read per unit (another unit may hold
+    // the same name) and the decorator's per-unit unique is the hard backstop.
 }
 
 // QT-2: a template stamps valid_until (quotation_date + validity_days) and the default notes when
@@ -482,15 +474,13 @@ async fn template_create_list_and_duplicate_refusal() {
 async fn template_stamps_validity_and_notes_when_absent() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let tid = template(&w, company, &uq("T"), 15, Some("Auto notes.")).await;
+    let tid = template(&w, &uq("T"), 15, Some("Auto notes.")).await;
 
     let q = w
         .create_quotation(NewQuotation {
             opportunity_id: None,
             template_id: Some(tid),
             quotation_number: uq("QUO"),
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             quotation_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
@@ -517,15 +507,13 @@ async fn template_stamps_validity_and_notes_when_absent() {
 async fn caller_values_beat_the_template() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let tid = template(&w, company, &uq("T"), 15, Some("Auto notes.")).await;
+    let tid = template(&w, &uq("T"), 15, Some("Auto notes.")).await;
 
     let q = w
         .create_quotation(NewQuotation {
             opportunity_id: None,
             template_id: Some(tid),
             quotation_number: uq("QUO"),
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             quotation_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
@@ -547,21 +535,18 @@ async fn caller_values_beat_the_template() {
     assert_eq!(notes.as_deref(), Some("Hand written."));
 }
 
-// QT-4: an unknown (or other-tenant) template id refuses with `template_not_found`.
+// QT-4: an unknown template id refuses with `template_not_found` (under a composed tenancy
+// decorator a foreign id is indistinguishable — which is the point, ADR-0029).
 #[tokio::test]
 async fn unknown_template_refuses() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let stranger = template(&w, Uuid::new_v4(), &uq("T"), 15, None).await; // another tenant's
-
-    for tid in [Uuid::new_v4(), stranger] {
+    for tid in [Uuid::new_v4()] {
         let e = w
             .create_quotation(NewQuotation {
                 opportunity_id: None,
                 template_id: Some(tid),
                 quotation_number: uq("QUO"),
-                company_id: company,
                 branch_id: None,
                 customer_id: Uuid::new_v4(),
                 quotation_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
@@ -586,13 +571,12 @@ async fn unknown_template_refuses() {
 async fn opportunity_id_persists() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, opportunity) = (Uuid::new_v4(), Uuid::new_v4());
+    let opportunity = Uuid::new_v4();
     let q = w
         .create_quotation(NewQuotation {
             opportunity_id: Some(opportunity),
             template_id: None,
             quotation_number: uq("QUO"),
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             quotation_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
@@ -621,12 +605,12 @@ async fn order_line_freeze() {
     let pool = pool().await;
     let rec = RecordingSink::default();
     let w = SellingWriteService::with_sink(pool.clone(), Arc::new(rec.clone()));
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
     let lid = line_id(&pool, order, item).await;
 
     // Confirmed: description-only edit is allowed.
-    w.update_order_line(lid, company, UpdateOrderLinePatch {
+    w.update_order_line(lid, UpdateOrderLinePatch {
         description: Some("renamed label".into()),
         ..Default::default()
     })
@@ -646,7 +630,7 @@ async fn order_line_freeze() {
         UpdateOrderLinePatch { line_discount: Some(d("1")), ..Default::default() },
         UpdateOrderLinePatch { item_id: Some(Uuid::new_v4()), ..Default::default() },
     ] {
-        let e = w.update_order_line(lid, company, patch).await.unwrap_err();
+        let e = w.update_order_line(lid, patch).await.unwrap_err();
         assert!(matches!(e, SellingError::OrderLineFrozen));
         assert_eq!(SellingError::OrderLineFrozen.http_status(), 422);
     }
@@ -664,12 +648,11 @@ async fn order_line_freeze() {
 async fn draft_line_edit_reprices_totals() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let order = w
         .create_sales_order(NewSalesOrder {
             order_number: uq("SO"),
             quotation_id: None, delivery_carrier_id: None,
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
@@ -692,7 +675,7 @@ async fn draft_line_edit_reprices_totals() {
         .unwrap();
     let lid = line_id(&pool, order, item).await;
 
-    w.update_order_line(lid, company, UpdateOrderLinePatch {
+    w.update_order_line(lid, UpdateOrderLinePatch {
         quantity: Some(d("3")),
         unit_price: Some(d("50000")),
         line_discount: Some(d("10000")),
@@ -724,12 +707,11 @@ async fn cancel_draft_order() {
     let pool = pool().await;
     let rec = RecordingSink::default();
     let w = SellingWriteService::with_sink(pool.clone(), Arc::new(rec.clone()));
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let order = w
         .create_sales_order(NewSalesOrder {
             order_number: uq("SO"),
             quotation_id: None, delivery_carrier_id: None,
-            company_id: company,
             branch_id: None,
             customer_id: Uuid::new_v4(),
             order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
@@ -742,7 +724,7 @@ async fn cancel_draft_order() {
         .await
         .unwrap();
 
-    w.cancel_sales_order(order, company, &NoStockFulfillmentPort).await.unwrap();
+    w.cancel_sales_order(order, &NoStockFulfillmentPort).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order)
         .fetch_one(&pool)
@@ -758,11 +740,11 @@ async fn cancel_draft_order() {
 async fn cancel_refuses_billed_allows_delivered() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let billed = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
-    w.mark_invoiced(billed, company, &[(item, d("1"))]).await.unwrap();
+    let item = Uuid::new_v4();
+    let billed = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
+    w.mark_invoiced(billed, &[(item, d("1"))]).await.unwrap();
 
-    let e = w.cancel_sales_order(billed, company, &NoStockFulfillmentPort).await.unwrap_err();
+    let e = w.cancel_sales_order(billed, &NoStockFulfillmentPort).await.unwrap_err();
     assert!(matches!(e, SellingError::OrderBilled));
     assert_eq!(SellingError::OrderBilled.http_status(), 422);
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
@@ -772,9 +754,9 @@ async fn cancel_refuses_billed_allows_delivered() {
         .unwrap();
     assert_eq!(st, "to_deliver_and_bill", "a refused cancel leaves the state untouched");
 
-    let delivered = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
-    w.mark_delivered(delivered, company, &[(item, d("10"))]).await.unwrap();
-    w.cancel_sales_order(delivered, company, &NoStockFulfillmentPort).await.unwrap();
+    let delivered = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
+    w.mark_delivered(delivered, &[(item, d("10"))]).await.unwrap();
+    w.cancel_sales_order(delivered, &NoStockFulfillmentPort).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(delivered)
         .fetch_one(&pool)
@@ -788,10 +770,10 @@ async fn cancel_refuses_billed_allows_delivered() {
 async fn cancel_refuses_completed() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&w, company, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
-    w.mark_delivered(order, company, &[(item, d("10"))]).await.unwrap();
-    w.mark_invoiced(order, company, &[(item, d("10"))]).await.unwrap();
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&w, vec![pline(item, "10", InvoicePolicy::Order, false)]).await;
+    w.mark_delivered(order, &[(item, d("10"))]).await.unwrap();
+    w.mark_invoiced(order, &[(item, d("10"))]).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order)
         .fetch_one(&pool)
@@ -799,20 +781,17 @@ async fn cancel_refuses_completed() {
         .unwrap();
     assert_eq!(st, "completed");
 
-    let e = w.cancel_sales_order(order, company, &NoStockFulfillmentPort).await.unwrap_err();
+    let e = w.cancel_sales_order(order, &NoStockFulfillmentPort).await.unwrap_err();
     assert!(matches!(e, SellingError::InvalidTransition { ref verb, ref current }
         if verb == "cancel" && current == "completed"));
 }
 
-// OM-4: an unknown or wrong-tenant order id is a 404, not a guard refusal.
+// OM-4: an unknown order id is a 404, not a guard refusal.
 #[tokio::test]
 async fn cancel_unknown_order_is_not_found() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let foreign = confirmed_order(&w, Uuid::new_v4(), vec![pline(Uuid::new_v4(), "1", InvoicePolicy::Order, false)]).await;
-
-    for oid in [Uuid::new_v4(), foreign] {
-        assert!(matches!(w.cancel_sales_order(oid, company, &NoStockFulfillmentPort).await.unwrap_err(), SellingError::OrderNotFound(_)));
+    for oid in [Uuid::new_v4()] {
+        assert!(matches!(w.cancel_sales_order(oid, &NoStockFulfillmentPort).await.unwrap_err(), SellingError::OrderNotFound(_)));
     }
 }

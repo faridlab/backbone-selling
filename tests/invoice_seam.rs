@@ -74,8 +74,7 @@ async fn pool() -> PgPool {
         .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5433/backbone_selling".to_string());
     PgPool::connect(&url).await.expect("connect DB")
 }
-async fn seed_coa(pool: &PgPool) -> (Uuid, HashMap<&'static str, Uuid>) {
-    let company = Uuid::new_v4();
+async fn seed_coa(pool: &PgPool) -> HashMap<&'static str, Uuid> {
     let coa: &[(&str, &str, &str, &str, &str)] = &[
         ("1200", "Piutang Usaha", "asset", "accounts_receivable", "debit"),
         ("4000", "Pendapatan", "revenue", "operating_revenue", "credit"),
@@ -83,13 +82,13 @@ async fn seed_coa(pool: &PgPool) -> (Uuid, HashMap<&'static str, Uuid>) {
     let mut m = HashMap::new();
     for (code, name, at, st, nb) in coa {
         let id = Uuid::new_v4();
-        sqlx::query(r#"INSERT INTO accounting.accounts (id, company_id, account_number, account_code, name, account_type, account_subtype, normal_balance, is_header, is_detail, status)
-            VALUES ($1,$2,$3,$4,$5,$6::account_type,$7::account_subtype,$8::normal_balance,false,true,'active'::account_status)"#)
-            .bind(id).bind(company).bind(code).bind(code).bind(name).bind(at).bind(st).bind(nb)
+        sqlx::query(r#"INSERT INTO accounting.accounts (id, account_number, account_code, name, account_type, account_subtype, normal_balance, is_header, is_detail, status)
+            VALUES ($1,$2,$3,$4,$5::account_type,$6::account_subtype,$7::normal_balance,false,true,'active'::account_status)"#)
+            .bind(id).bind(code).bind(code).bind(name).bind(at).bind(st).bind(nb)
             .execute(pool).await.expect("seed acct");
         m.insert(*code, id);
     }
-    (company, m)
+    m
 }
 async fn journal_totals(pool: &PgPool, jid: Uuid) -> (Decimal, Decimal) {
     let r = sqlx::query("SELECT total_debit, total_credit FROM accounting.journals WHERE id=$1").bind(jid).fetch_one(pool).await.unwrap();
@@ -98,12 +97,12 @@ async fn journal_totals(pool: &PgPool, jid: Uuid) -> (Decimal, Decimal) {
 fn line(item: Uuid, qty: &str) -> NewLine {
     NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None, quantity: d(qty), unit_price: d("100000"), line_discount: Decimal::ZERO }
 }
-async fn confirmed_order(selling: &SellingWriteService, company: Uuid, lines: Vec<NewLine>) -> Uuid {
+async fn confirmed_order(selling: &SellingWriteService, lines: Vec<NewLine>) -> Uuid {
     let order = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, branch_id: None, customer_id: Uuid::new_v4(),
         order_date: day(), delivery_date: None, currency: None, tax_rate: Decimal::ZERO, notes: None, lines,
     }).await.unwrap();
-    selling.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    selling.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     order
 }
 async fn billed_total(pool: &PgPool, order: Uuid) -> Decimal {
@@ -118,13 +117,13 @@ async fn billed_total(pool: &PgPool, order: Uuid) -> Decimal {
 async fn over_billing_is_refused() {
     let pool = pool().await;
     let selling = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&selling, company, vec![line(item, "10")]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&selling, vec![line(item, "10")]).await;
 
-    selling.mark_invoiced(order, company, &[(item, d("10"))]).await.unwrap();
+    selling.mark_invoiced(order, &[(item, d("10"))]).await.unwrap();
     assert_eq!(billed_total(&pool, order).await, d("10.0000"));
     // a second full invoice against the same order is refused — the order is fully billed.
-    let e = selling.mark_invoiced(order, company, &[(item, d("10"))]).await.unwrap_err();
+    let e = selling.mark_invoiced(order, &[(item, d("10"))]).await.unwrap_err();
     assert!(matches!(e, SellingError::OverBilled));
     assert_eq!(billed_total(&pool, order).await, d("10.0000"), "a rejected mark_invoiced leaves the watermark untouched");
 }
@@ -135,14 +134,14 @@ async fn over_billing_is_refused() {
 async fn duplicate_item_lines_allocate_by_capacity() {
     let pool = pool().await;
     let selling = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = confirmed_order(&selling, company, vec![line(item, "6"), line(item, "4")]).await;
+    let item = Uuid::new_v4();
+    let order = confirmed_order(&selling, vec![line(item, "6"), line(item, "4")]).await;
 
     // 12 > total capacity 10 → refused, nothing advances.
-    assert!(matches!(selling.mark_invoiced(order, company, &[(item, d("12"))]).await.unwrap_err(), SellingError::OverBilled));
+    assert!(matches!(selling.mark_invoiced(order, &[(item, d("12"))]).await.unwrap_err(), SellingError::OverBilled));
     assert_eq!(billed_total(&pool, order).await, d("0.0000"));
     // 10 fills both lines to their caps.
-    selling.mark_invoiced(order, company, &[(item, d("10"))]).await.unwrap();
+    selling.mark_invoiced(order, &[(item, d("10"))]).await.unwrap();
     let caps: Vec<Decimal> = sqlx::query_scalar("SELECT billed_qty FROM selling.sales_order_items WHERE order_id=$1 ORDER BY quantity DESC").bind(order).fetch_all(&pool).await.unwrap();
     assert_eq!(caps, vec![d("6.0000"), d("4.0000")]);
 }
@@ -151,7 +150,7 @@ async fn duplicate_item_lines_allocate_by_capacity() {
 #[tokio::test]
 async fn order_invoiced_across_three_modules() {
     let pool = pool().await;
-    let (company, coa) = seed_coa(&pool).await;
+    let coa = seed_coa(&pool).await;
     let customer = Uuid::new_v4();
     let item = Uuid::new_v4();
 
@@ -163,11 +162,11 @@ async fn order_invoiced_across_three_modules() {
 
     // 1) selling: create + confirm a Sales Order — 10 @ 100,000 (no tax).
     let order = selling.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None, customer_id: customer,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, branch_id: None, customer_id: customer,
         order_date: day(), delivery_date: None, currency: None, tax_rate: Decimal::ZERO, notes: None,
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: item, revenue_account_id: None, description: None, quantity: d("10"), unit_price: d("100000"), line_discount: Decimal::ZERO }],
     }).await.unwrap();
-    selling.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    selling.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     // 2) selling emits the invoice request (un-invoiced remainder = 10).
     let req: InvoiceRequestEnvelope = selling.build_invoice_request(order).await.unwrap();
@@ -179,7 +178,7 @@ async fn order_invoiced_across_three_modules() {
     // empty tax overlay), so the invoice must stay on the manual-due-date + caller-tax-lines path —
     // a template would route the document through the (unwired) tax engine and fail closed.
     let inv = billing.create_sales_invoice(NewSalesInvoice {
-        invoice_number: uq("SI"), company_id: req.company_id, branch_id: None, customer_id: req.customer_id,
+        invoice_number: uq("SI"), branch_id: None, customer_id: req.customer_id,
         source_so_id: Some(req.order_id), posting_date: day(), due_date: None, payment_term_id: None, currency: None,
         receivable_account_id: coa["1200"],
         lines: req.lines.iter().map(|l| NewInvoiceLine {
@@ -199,7 +198,7 @@ async fn order_invoiced_across_three_modules() {
     assert_eq!(posted.grand_total, d("1000000.00"));
     let billed: Vec<(Uuid, Decimal)> = posted.billed_lines.iter().map(|l| (l.item_id, l.quantity)).collect();
     assert_eq!(billed, vec![(item, d("10.0000"))]);
-    selling.mark_invoiced(order, company, &billed).await.unwrap();
+    selling.mark_invoiced(order, &billed).await.unwrap();
 
     // 5) the order's billed watermark advanced via a REAL billing invoice (not a simulated leg).
     let bq: Decimal = sqlx::query_scalar("SELECT billed_qty FROM selling.sales_order_items WHERE order_id=$1").bind(order).fetch_one(&pool).await.unwrap();

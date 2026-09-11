@@ -12,7 +12,11 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use backbone_orm::company_scope;
+// The all-rows read twin lives only in the legacy `company_scope` module. Its connection
+// discipline is the request-dedicated connection when the composing service bound one, plain
+// pool otherwise. The legacy task-local branch is never taken: this module sets no legacy
+// scope of its own (ADR-0029).
+use backbone_orm::company_scope::fetch_all_rows_scoped;
 
 use crate::domain::entity::QuotationItem;
 
@@ -48,7 +52,6 @@ impl QuotationItemRepository {
 pub struct NewQuotationItemRow<'a> {
     pub id: Uuid,
     pub quotation_id: Uuid,
-    pub company_id: Uuid,
     pub item_id: Uuid,
     pub description: Option<&'a str>,
     pub quantity: Decimal,
@@ -87,7 +90,8 @@ impl QuotationItemRepository {
     /// Insert one quotation line.
     ///
     /// Takes the CALLER'S connection so the line commits in the SAME transaction as its header. The
-    /// caller binds the company on that connection (`bind_company_on`) before calling — don't re-bind.
+    /// caller relays the ambient org scope onto that connection (`org_scope::bind_org_scope_on`)
+    /// before calling — don't re-bind.
     pub async fn insert_line(
         &self,
         conn: &mut sqlx::PgConnection,
@@ -95,11 +99,11 @@ impl QuotationItemRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.quotation_items
-                (id, quotation_id, company_id, item_id, description, quantity, unit_price,
+                (id, quotation_id, item_id, description, quantity, unit_price,
                  line_discount, line_amount, invoice_policy, is_downpayment)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::invoice_policy,$11)"#,
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::invoice_policy,$10)"#,
         )
-        .bind(l.id).bind(l.quotation_id).bind(l.company_id).bind(l.item_id).bind(l.description)
+        .bind(l.id).bind(l.quotation_id).bind(l.item_id).bind(l.description)
         .bind(l.quantity).bind(l.unit_price).bind(l.line_discount).bind(l.line_amount)
         .bind(l.invoice_policy).bind(l.is_downpayment)
         .execute(conn)
@@ -109,14 +113,15 @@ impl QuotationItemRepository {
 
     /// Read a quotation's lines for `convert_quotation_to_order`.
     ///
-    /// ID-only: no company argument, so this read rides the REQUEST-dedicated connection carrying the
-    /// caller's `app.company_id` — RLS fences it (ADR-0008).
+    /// ID-only: no tenant argument. `fetch_all_rows_scoped` rides the request-dedicated connection
+    /// when the composing service bound one (carrying the decorator's fence variables), plainly on
+    /// the pool otherwise (ADR-0029).
     pub async fn list_for_conversion(
         &self,
         pool: &PgPool,
         quotation_id: Uuid,
     ) -> Result<Vec<QuotationLineRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT item_id, description, quantity, unit_price, line_discount,
@@ -144,7 +149,7 @@ impl QuotationItemRepository {
         pool: &PgPool,
         quotation_id: Uuid,
     ) -> Result<Vec<InvoicePolicyLineRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT id, item_id, invoice_policy::text AS pol, is_downpayment, quantity

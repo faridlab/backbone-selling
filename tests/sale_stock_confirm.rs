@@ -136,11 +136,11 @@ fn downpayment_line(item: Uuid, qty: &str) -> NewLine {
         line_discount: Decimal::ZERO,
     }
 }
-async fn draft_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewLine>) -> Uuid {
+async fn draft_order(w: &SellingWriteService, lines: Vec<NewLine>) -> Uuid {
     let n = uq("SO");
     let order = w
         .create_sales_order(NewSalesOrder {
-            order_number: n, quotation_id: None, delivery_carrier_id: None, company_id: company,
+            order_number: n, quotation_id: None, delivery_carrier_id: None,
             branch_id: None, customer_id: Uuid::new_v4(),
             order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 27).unwrap(),
             delivery_date: None, currency: None, tax_rate: Decimal::ZERO, notes: None, lines,
@@ -176,13 +176,12 @@ async fn line_watermark(pool: &PgPool, order: Uuid, item: Uuid) -> Decimal {
 async fn confirm_launches_rules_per_storable_line_only() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, storable, service) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let (storable, service) = (Uuid::new_v4(), Uuid::new_v4());
     let port = FakeStockPort::default();
     *port.storable.lock().unwrap() = HashSet::from([storable]);
 
     let order = draft_order(
         &w,
-        company,
         vec![line(storable, "10"), line(service, "2"), downpayment_line(service, "1")],
     )
     .await;
@@ -194,7 +193,7 @@ async fn confirm_launches_rules_per_storable_line_only() {
     .await
     .unwrap();
 
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
 
     // Exactly one launch, carrying the order's identity + the TWO non-downpayment lines.
@@ -202,7 +201,9 @@ async fn confirm_launches_rules_per_storable_line_only() {
     assert_eq!(launches.len(), 1, "one procurement-group launch per confirm");
     let req = &launches[0];
     assert_eq!(req.order_id, order);
-    assert_eq!(req.company_id, company);
+    // The stock rule request's company is the legacy tenant twin (ADR-0029): the ambient org
+    // scope's echo — nil on this undecorated deployment.
+    assert_eq!(req.company_id, Uuid::nil());
     assert_eq!(req.order_number, order_number);
     assert_eq!(req.lines.len(), 2, "the downpayment line never drives stock work");
     let by_item = |it: Uuid| req.lines.iter().find(|l| l.item_id == it).expect("line present");
@@ -217,13 +218,13 @@ async fn confirm_launches_rules_per_storable_line_only() {
 async fn refused_launch_leaves_the_order_draft_and_is_retryable() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let port = FakeStockPort::default();
     *port.storable.lock().unwrap() = HashSet::from([item]);
     *port.launch_err.lock().unwrap() = Some(FakeStockPort::err("no_rule_for_demand", "no active pull rule covers the demand"));
 
-    let order = draft_order(&w, company, vec![line(item, "5")]).await;
-    match w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
+    let order = draft_order(&w, vec![line(item, "5")]).await;
+    match w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
         SellingError::FulfillmentRejected { code, .. } => assert_eq!(code, "no_rule_for_demand"),
         other => panic!("expected FulfillmentRejected, got {other:?}"),
     }
@@ -238,7 +239,7 @@ async fn refused_launch_leaves_the_order_draft_and_is_retryable() {
     assert_eq!(stamped, 0, "a refused launch wrote no cost stamp (stamp rides the confirm tx)");
 
     // Not sticky: the armed error is consumed; the retry launches and confirms.
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
     assert_eq!(port.launches.lock().unwrap().len(), 2);
 }
@@ -249,10 +250,10 @@ async fn refused_launch_leaves_the_order_draft_and_is_retryable() {
 async fn downpayment_only_order_never_launches() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let port = FakeStockPort::default();
-    let order = draft_order(&w, company, vec![downpayment_line(item, "1")]).await;
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    let order = draft_order(&w, vec![downpayment_line(item, "1")]).await;
+    w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert!(port.launches.lock().unwrap().is_empty());
 }
 
@@ -266,10 +267,10 @@ async fn downpayment_only_order_never_launches() {
 async fn delivered_reconstruction_subtracts_to_refund_returns_only() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let port = FakeStockPort::default();
-    let order = draft_order(&w, company, vec![line(item, "10")]).await;
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    let order = draft_order(&w, vec![line(item, "10")]).await;
+    w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     // 10 delivered gross, 3 returned of which 1 to-refund → net 9 (the 2 exchanged stay delivered).
     *port.figures.lock().unwrap() = vec![MoveDeliveryFigures {
@@ -286,20 +287,20 @@ async fn delivered_reconstruction_subtracts_to_refund_returns_only() {
     assert_eq!(l.move_to_refund_qty, Some(d("1")));
     assert_eq!(l.reconstructed_delivered_qty, Some(d("9")), "net of the to-refund return only");
 
-    w.sync_delivered_from_moves(order, company, &port).await.unwrap();
+    w.sync_delivered_from_moves(order, &port).await.unwrap();
     assert_eq!(line_watermark(&pool, order, item).await, d("9"));
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill", "1 of 10 still owed");
 
     // The customer refunds the rest of the returns: net drops to 7 — the watermark FOLLOWS IT
     // DOWN (a replace, not an add) and the order stays in the awaiting-delivery band.
     port.figures.lock().unwrap()[0].to_refund_qty = d("3");
-    w.sync_delivered_from_moves(order, company, &port).await.unwrap();
+    w.sync_delivered_from_moves(order, &port).await.unwrap();
     assert_eq!(line_watermark(&pool, order, item).await, d("7"), "a refund-shaped return lowers the watermark");
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
 
     // Fully delivered and un-returned: the watermark reaches the ordered quantity.
     port.figures.lock().unwrap()[0].to_refund_qty = d("0");
-    w.sync_delivered_from_moves(order, company, &port).await.unwrap();
+    w.sync_delivered_from_moves(order, &port).await.unwrap();
     assert_eq!(order_status(&pool, order).await, "to_bill", "delivered band once the reconstruction covers the order");
 }
 
@@ -311,13 +312,13 @@ async fn delivered_reconstruction_subtracts_to_refund_returns_only() {
 async fn reconstruction_clamps_at_ordered_qty_and_absence_is_not_zero() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, storable, other) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let (storable, other) = (Uuid::new_v4(), Uuid::new_v4());
     let port = FakeStockPort::default();
-    let order = draft_order(&w, company, vec![line(storable, "10"), line(other, "4")]).await;
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    let order = draft_order(&w, vec![line(storable, "10"), line(other, "4")]).await;
+    w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     // The other line legitimately delivered 4 through the inbound event path.
-    w.mark_delivered(order, company, &[(other, d("4"))]).await.unwrap();
+    w.mark_delivered(order, &[(other, d("4"))]).await.unwrap();
 
     // The engine over-delivered storable (12 done moves on a 10-line) and knows nothing of `other`.
     *port.figures.lock().unwrap() = vec![MoveDeliveryFigures {
@@ -332,14 +333,14 @@ async fn reconstruction_clamps_at_ordered_qty_and_absence_is_not_zero() {
     assert_eq!(st.reconstructed_delivered_qty, Some(d("12")), "the view shows the RAW over-delivery");
     assert_eq!(ot.reconstructed_delivered_qty, None, "no figure for the line = absence, not zero");
 
-    w.sync_delivered_from_moves(order, company, &port).await.unwrap();
+    w.sync_delivered_from_moves(order, &port).await.unwrap();
     assert_eq!(line_watermark(&pool, order, storable).await, d("10"), "clamped at the ordered quantity");
     assert_eq!(line_watermark(&pool, order, other).await, d("4"), "absent lines keep their watermark");
     assert_eq!(order_status(&pool, order).await, "to_bill", "both lines at their delivered bands");
 
     // No figures at all: a total no-op (this is exactly what the No-port adapter returns).
     port.figures.lock().unwrap().clear();
-    w.sync_delivered_from_moves(order, company, &NoStockFulfillmentPort).await.unwrap();
+    w.sync_delivered_from_moves(order, &NoStockFulfillmentPort).await.unwrap();
     assert_eq!(line_watermark(&pool, order, storable).await, d("10"));
     assert_eq!(line_watermark(&pool, order, other).await, d("4"));
 }
@@ -364,21 +365,20 @@ async fn cancel_logs_decrease_quantity_upstream_per_line() {
     let pool = pool().await;
     let sink = RecordingSink::default();
     let w = SellingWriteService::with_sink(pool.clone(), Arc::new(sink.clone()));
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let port = FakeStockPort::default();
     // The downpayment line carries a throwaway item: `mark_delivered` allocates an inbound
     // delivery across ALL of an item's lines in line order, so sharing the item would make how
     // much lands on the demand line depend on the two lines' random id ordering.
     let order = draft_order(
         &w,
-        company,
         vec![line(item, "10"), downpayment_line(Uuid::new_v4(), "1")],
     )
     .await;
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
-    w.mark_delivered(order, company, &[(item, d("4"))]).await.unwrap();
+    w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.mark_delivered(order, &[(item, d("4"))]).await.unwrap();
 
-    w.cancel_sales_order(order, company, &port).await.unwrap();
+    w.cancel_sales_order(order, &port).await.unwrap();
     assert_eq!(order_status(&pool, order).await, "cancelled");
 
     let logs = port.logs.lock().unwrap();
@@ -401,13 +401,13 @@ async fn failed_decrease_log_keeps_the_cancel_and_is_retriable() {
     let pool = pool().await;
     let sink = RecordingSink::default();
     let w = SellingWriteService::with_sink(pool.clone(), Arc::new(sink.clone()));
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let port = FakeStockPort::default();
-    let order = draft_order(&w, company, vec![line(item, "6")]).await;
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    let order = draft_order(&w, vec![line(item, "6")]).await;
+    w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     *port.log_err.lock().unwrap() = Some(FakeStockPort::err("engine_unavailable", "stock engine unreachable"));
-    match w.cancel_sales_order(order, company, &port).await.unwrap_err() {
+    match w.cancel_sales_order(order, &port).await.unwrap_err() {
         SellingError::DecreaseActivityFailed { code, .. } => assert_eq!(code, "engine_unavailable"),
         other => panic!("expected DecreaseActivityFailed, got {other:?}"),
     }
@@ -419,14 +419,14 @@ async fn failed_decrease_log_keeps_the_cancel_and_is_retriable() {
     assert_eq!(port.logs.lock().unwrap().len(), 1, "the failed attempt was recorded, not swallowed");
 
     // The retry completes the log with the same per-line figures.
-    w.retry_decrease_activities(order, company, &port).await.unwrap();
+    w.retry_decrease_activities(order, &port).await.unwrap();
     assert_eq!(port.logs.lock().unwrap().len(), 2);
     assert_eq!(port.logs.lock().unwrap()[1].lines[0].ordered_qty, d("6"));
 
     // A retry against an order that is NOT cancelled is a loud refusal, not a quiet no-op.
-    let live = draft_order(&w, company, vec![line(item, "2")]).await;
+    let live = draft_order(&w, vec![line(item, "2")]).await;
     assert!(matches!(
-        w.retry_decrease_activities(live, company, &port).await.unwrap_err(),
+        w.retry_decrease_activities(live, &port).await.unwrap_err(),
         SellingError::InvalidTransition { .. }
     ));
 }
@@ -437,10 +437,10 @@ async fn failed_decrease_log_keeps_the_cancel_and_is_retriable() {
 async fn billed_refusal_makes_no_port_call() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let port = FakeStockPort::default();
-    let order = draft_order(&w, company, vec![line(item, "3")]).await;
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    let order = draft_order(&w, vec![line(item, "3")]).await;
+    w.confirm_sales_order(order, &NoUnitCostPort, &port, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     sqlx::query("UPDATE selling.sales_order_items SET billed_qty=3 WHERE order_id=$1")
         .bind(order)
         .execute(&pool)
@@ -448,7 +448,7 @@ async fn billed_refusal_makes_no_port_call() {
         .unwrap();
 
     assert!(matches!(
-        w.cancel_sales_order(order, company, &port).await.unwrap_err(),
+        w.cancel_sales_order(order, &port).await.unwrap_err(),
         SellingError::OrderBilled
     ));
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");

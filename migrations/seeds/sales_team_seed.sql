@@ -6,7 +6,6 @@
 
 -- INSERT INTO selling.sales_teams (
 --     id,
---     company_id,
 --     name,
 --     description,
 --     metadata

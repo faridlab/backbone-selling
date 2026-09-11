@@ -18,7 +18,12 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use backbone_orm::company_scope;
+// The optional-scalar read twin lives only in the legacy `company_scope` module. Its
+// connection discipline is the request-dedicated connection when the composing service bound
+// one, plain pool otherwise. The legacy task-local branch is never taken: this module sets no
+// legacy scope of its own (ADR-0029).
+use backbone_orm::company_scope::{fetch_all_rows_scoped, fetch_optional_scalar_scoped};
+use backbone_orm::org_scope;
 
 use crate::domain::entity::ExpenseReinvoiceLink;
 
@@ -60,7 +65,6 @@ pub struct ExpenseReinvoiceLinkRow {
 /// The exact row an attach writes.
 pub struct NewExpenseReinvoiceLinkRow {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub order_id: Uuid,
     pub expense_id: Uuid,
     pub amount: Decimal,
@@ -70,7 +74,7 @@ pub struct NewExpenseReinvoiceLinkRow {
 /// 4-layer rule: services orchestrate and own the unit of work, repositories hold the SQL.
 impl ExpenseReinvoiceLinkRepository {
     /// Attach one rebillable expense to an order. Takes the CALLER'S connection so the insert
-    /// lands in the caller's transaction (company bound on it via `bind_company_on`).
+    /// lands in the caller's transaction (the caller relays the ambient org scope onto it).
     /// `state` is pinned `'pending'` — a link starts billable and only the host billing
     /// adapter's mark moves it. Returns the raw `sqlx::Error` deliberately: the caller maps a
     /// unique violation on (order_id, expense_id) to the duplicate-refusal (the pre-read
@@ -82,59 +86,55 @@ impl ExpenseReinvoiceLinkRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.expense_reinvoice_links
-                   (id, company_id, order_id, expense_id, amount, state)
-               VALUES ($1,$2,$3,$4,$5,'pending'::expense_reinvoice_state)"#,
+                   (id, order_id, expense_id, amount, state)
+               VALUES ($1,$2,$3,$4,'pending'::expense_reinvoice_state)"#,
         )
-        .bind(l.id).bind(l.company_id).bind(l.order_id).bind(l.expense_id).bind(l.amount)
+        .bind(l.id).bind(l.order_id).bind(l.expense_id).bind(l.amount)
         .execute(conn)
         .await?;
         Ok(())
     }
 
     /// Read the LIVE (order_id, expense_id) duplicate behind `attach_expense_reinvoice`'s
-    /// pre-read. Company-scoped: a wrong-tenant link is invisible (and could not exist — the
-    /// order guard already fenced the attach).
+    /// pre-read. Under a composed tenancy decorator a foreign link is invisible (and could not
+    /// exist — the order guard already fenced the attach).
     pub async fn find_live_link(
         &self,
         pool: &PgPool,
         order_id: Uuid,
         expense_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Option<Uuid>, sqlx::Error> {
-        let id: Option<Uuid> = company_scope::fetch_optional_scalar_scoped(
+        let id: Option<Uuid> = fetch_optional_scalar_scoped(
             pool,
             sqlx::query_scalar(
                 r#"SELECT id FROM selling.expense_reinvoice_links
-                   WHERE order_id=$1 AND expense_id=$2 AND company_id=$3
+                   WHERE order_id=$1 AND expense_id=$2
                      AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(order_id).bind(expense_id).bind(company_id),
+            .bind(order_id).bind(expense_id),
         ).await?;
         Ok(id)
     }
 
     /// List an order's links — the host billing adapter's pull read (it filters `pending`,
     /// adds invoice lines totaling the pending amounts, then marks each link invoiced).
-    /// Company-scoped through the caller's fence; ordered by creation for a stable bill order.
-    /// The billing adapter's pull read: one order's live links, oldest first. The explicit
-    /// `company_id` filter is defense-in-depth behind RLS (the fencing read in the service has
-    /// already proven the order is this company's).
+    /// Ordered by creation for a stable bill order; the service's order-existence probe has
+    /// already fenced the read (ADR-0029).
     pub async fn list_links_for_order(
         &self,
         pool: &PgPool,
         order_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Vec<ExpenseReinvoiceLinkRow>, sqlx::Error> {
-        let rows = company_scope::fetch_all_rows_scoped(
+        let rows = fetch_all_rows_scoped(
             pool,
             sqlx::query(
                 r#"SELECT id, order_id, expense_id, amount, state::text AS st,
                           (metadata->>'created_at')::timestamptz AS created_at
                    FROM selling.expense_reinvoice_links
-                   WHERE order_id=$1 AND company_id=$2 AND (metadata->>'deleted_at') IS NULL
+                   WHERE order_id=$1 AND (metadata->>'deleted_at') IS NULL
                    ORDER BY (metadata->>'created_at'), id"#,
             )
-            .bind(order_id).bind(company_id),
+            .bind(order_id),
         ).await?;
         Ok(rows.iter().map(|r| ExpenseReinvoiceLinkRow {
             id: r.get("id"),
@@ -154,37 +154,36 @@ impl ExpenseReinvoiceLinkRepository {
         &self,
         pool: &PgPool,
         link_id: Uuid,
-        company_id: Uuid,
     ) -> Result<bool, sqlx::Error> {
-        let result = company_scope::execute_scoped(
+        let result = org_scope::execute_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.expense_reinvoice_links
                    SET state='invoiced'::expense_reinvoice_state
-                   WHERE id=$1 AND company_id=$2
+                   WHERE id=$1
                      AND state='pending'::expense_reinvoice_state
                      AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(link_id).bind(company_id),
+            .bind(link_id),
         ).await?;
         Ok(result.rows_affected() > 0)
     }
 
     /// Post-refusal classification read for `mark_expense_reinvoice_invoiced`: the link's
-    /// current state, or `None` when the id is unknown/wrong-tenant/soft-deleted.
+    /// current state, or `None` when the id is unknown/soft-deleted (under a composed
+    /// decorator also a foreign id).
     pub async fn find_link_state(
         &self,
         pool: &PgPool,
         link_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Option<String>, sqlx::Error> {
-        let st: Option<String> = company_scope::fetch_optional_scalar_scoped(
+        let st: Option<String> = fetch_optional_scalar_scoped(
             pool,
             sqlx::query_scalar(
                 r#"SELECT state::text FROM selling.expense_reinvoice_links
-                   WHERE id=$1 AND company_id=$2 AND (metadata->>'deleted_at') IS NULL"#,
+                   WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(link_id).bind(company_id),
+            .bind(link_id),
         ).await?;
         Ok(st)
     }

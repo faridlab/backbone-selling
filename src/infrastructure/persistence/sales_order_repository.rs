@@ -13,7 +13,11 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use backbone_orm::company_scope;
+// The optional-row read/write twins ride the org-scope module; their connection discipline
+// is the request-dedicated connection when the composing service bound one, plain pool
+// otherwise. The legacy task-local branch is never taken: this module sets no legacy scope
+// of its own (ADR-0029).
+use backbone_orm::org_scope;
 
 use crate::domain::entity::SalesOrder;
 
@@ -50,7 +54,6 @@ pub struct NewSalesOrderRow<'a> {
     pub order_number: &'a str,
     pub quotation_id: Option<Uuid>,
     pub delivery_carrier_id: Option<Uuid>,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub order_date: chrono::NaiveDate,
@@ -65,7 +68,6 @@ pub struct NewSalesOrderRow<'a> {
 
 /// The `confirm_sales_order` guard's projection — what the `SalesOrderConfirmed` event carries.
 pub struct ConfirmedOrderRow {
-    pub company_id: Uuid,
     pub customer_id: Uuid,
     pub total: Decimal,
     pub currency: String,
@@ -74,14 +76,12 @@ pub struct ConfirmedOrderRow {
 /// The exported `SalesOrderRef`'s columns.
 pub struct SalesOrderRefRow {
     pub customer_id: Uuid,
-    pub company_id: Uuid,
     pub total: Decimal,
     pub currency: String,
 }
 
 /// The order header `create_invoice_from_order` copies into the invoice.
 pub struct InvoiceSourceOrderRow {
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub currency: String,
@@ -92,7 +92,6 @@ pub struct InvoiceSourceOrderRow {
 /// `build_invoice_request`) are built from. `status` is read as `::text` so an unknown state fails
 /// the draft check rather than panicking in a decode.
 pub struct OrderFulfillmentHeaderRow {
-    pub company_id: Uuid,
     pub customer_id: Uuid,
     pub currency: String,
     pub status: String,
@@ -108,25 +107,22 @@ pub struct CancelRefusalRow {
 /// What a successful cancel returns: the event's projection plus the order number the
 /// upstream decrease-quantity log keys its correspondence on.
 pub struct CancelledOrderRow {
-    pub company_id: Uuid,
     pub customer_id: Uuid,
     pub order_number: String,
 }
 
-/// The order header the stock-fulfillment paths read: tenant + customer identity, the
-/// order number (the procurement-group correspondence key), and the status text.
+/// The order header the stock-fulfillment paths read: customer identity, the order
+/// number (the procurement-group correspondence key), and the status text.
 pub struct OrderStockHeaderRow {
-    pub company_id: Uuid,
     pub customer_id: Uuid,
     pub order_number: String,
     pub status: String,
 }
 
-/// The order header the service-delivery confirm path builds its mint request from: tenant +
-/// customer identity, the order number (the minted per-order project's correspondence key),
-/// and the currency the order's money speaks.
+/// The order header the service-delivery confirm path builds its mint request from: customer
+/// identity, the order number (the minted per-order project's correspondence key), and the
+/// currency the order's money speaks.
 pub struct OrderDeliveryHeaderRow {
-    pub company_id: Uuid,
     pub customer_id: Uuid,
     pub order_number: String,
     pub currency: String,
@@ -143,9 +139,9 @@ pub struct InvoiceStatusHeaderRow {
 impl SalesOrderRepository {
     /// Insert a draft sales-order header.
     ///
-    /// Takes the CALLER'S connection so the header and its lines commit as ONE unit. The caller binds
-    /// the company on that connection (`bind_company_on`) before calling — don't re-bind here. The
-    /// explicit `company_id` bind stays as defense-in-depth behind the RLS fence (ADR-0008).
+    /// Takes the CALLER'S connection so the header and its lines commit as ONE unit. The caller
+    /// relays the ambient org scope onto that connection (`org_scope::bind_org_scope_on`) before
+    /// calling — don't re-bind here.
     ///
     /// Returns the raw `sqlx::Error` deliberately: the caller inspects it for a unique violation to
     /// turn a duplicate order number into a domain error.
@@ -156,13 +152,13 @@ impl SalesOrderRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.sales_orders
-                (id, order_number, quotation_id, delivery_carrier_id, company_id, branch_id,
+                (id, order_number, quotation_id, delivery_carrier_id, branch_id,
                  customer_id, status, order_date, delivery_date, currency, subtotal, tax_rate,
                  tax_amount, total, notes)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,'draft'::sales_order_status,$8,$9,$10,$11,$12,$13,$14,$15)"#,
+               VALUES ($1,$2,$3,$4,$5,$6,'draft'::sales_order_status,$7,$8,$9,$10,$11,$12,$13,$14)"#,
         )
         .bind(o.id).bind(o.order_number).bind(o.quotation_id).bind(o.delivery_carrier_id)
-        .bind(o.company_id).bind(o.branch_id)
+        .bind(o.branch_id)
         .bind(o.customer_id).bind(o.order_date).bind(o.delivery_date).bind(o.currency)
         .bind(o.subtotal).bind(o.tax_rate).bind(o.tax_amount).bind(o.total).bind(o.notes)
         .execute(conn)
@@ -170,32 +166,29 @@ impl SalesOrderRepository {
         Ok(())
     }
 
-    /// Confirm a draft order (draft → to_deliver_and_bill), returning what the event needs. `Ok(None)`
-    /// = no draft order of this company with that id, which is also how a wrong-tenant id looks — so
-    /// this does not leak whether the id exists.
+    /// Confirm a draft order (draft → to_deliver_and_bill), returning what the event needs.
+    /// `Ok(None)` = no draft order with that id — under a composed tenancy decorator that is
+    /// also how a foreign id looks (no existence leak; ADR-0029).
     ///
     /// Takes the CALLER'S connection: since the confirm-time unit-cost stamp landed, confirm is a
     /// multi-statement unit of work (stamp + guard in ONE transaction), so this runs inside the
-    /// caller's tx — the caller binds the company on it (`bind_company_on`) before calling, and the
-    /// explicit `company_id=$2` filter stays as defense-in-depth behind the RLS fence. The guard
+    /// caller's tx — the caller relays the ambient org scope onto it before calling. The guard
     /// statement itself is UNCHANGED from the single-statement era: one guarded
     /// `UPDATE ... WHERE status='draft' ... RETURNING`.
     pub async fn confirm_tx(
         &self,
         conn: &mut sqlx::PgConnection,
         order_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Option<ConfirmedOrderRow>, sqlx::Error> {
         let row = sqlx::query(
             r#"UPDATE selling.sales_orders SET status='to_deliver_and_bill'::sales_order_status
-               WHERE id=$1 AND company_id=$2 AND status='draft'::sales_order_status AND (metadata->>'deleted_at') IS NULL
-               RETURNING company_id, customer_id, total, currency"#,
+               WHERE id=$1 AND status='draft'::sales_order_status AND (metadata->>'deleted_at') IS NULL
+               RETURNING customer_id, total, currency"#,
         )
-        .bind(order_id).bind(company_id)
+        .bind(order_id)
         .fetch_optional(conn)
         .await?;
         Ok(row.map(|r| ConfirmedOrderRow {
-            company_id: r.get("company_id"),
             customer_id: r.get("customer_id"),
             total: r.get("total"),
             currency: r.get("currency"),
@@ -205,7 +198,8 @@ impl SalesOrderRepository {
     /// Set an order's delivery metadata (carrier choice + tracking number) in one guarded
     /// statement: refused only on `cancelled` (carrier/tracking are fulfillment metadata, NOT
     /// frozen money — writable on draft AND confirmed orders; tracking typically arrives after
-    /// ship). `Ok(None)` = guard refused (wrong tenant, absent, soft-deleted, or cancelled).
+    /// ship). `Ok(false)` = guard refused (wrong state, absent, soft-deleted — under a composed
+    /// decorator a foreign id reads the same, which is the point).
     /// The caller classifies the refusal afterwards (via [`Self::find_cancel_refusal`]).
     ///
     /// Each field is a (asked, value) pair — the patch convention that distinguishes KEEP from
@@ -215,7 +209,6 @@ impl SalesOrderRepository {
         &self,
         conn: &mut sqlx::PgConnection,
         order_id: Uuid,
-        company_id: Uuid,
         set_carrier: bool,
         delivery_carrier_id: Option<Uuid>,
         set_ref: bool,
@@ -223,15 +216,15 @@ impl SalesOrderRepository {
     ) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(
             r#"UPDATE selling.sales_orders SET
-                   delivery_carrier_id = CASE WHEN $3 THEN $4::uuid
+                   delivery_carrier_id = CASE WHEN $2 THEN $3::uuid
                                                ELSE selling.sales_orders.delivery_carrier_id END,
-                   tracking_ref = CASE WHEN $5 THEN $6::text
+                   tracking_ref = CASE WHEN $4 THEN $5::text
                                        ELSE selling.sales_orders.tracking_ref END
-               WHERE id=$1 AND company_id=$2
+               WHERE id=$1
                  AND status <> 'cancelled'::sales_order_status
                  AND (metadata->>'deleted_at') IS NULL"#,
         )
-        .bind(order_id).bind(company_id)
+        .bind(order_id)
         .bind(set_carrier).bind(delivery_carrier_id)
         .bind(set_ref).bind(tracking_ref)
         .execute(conn)
@@ -241,47 +234,45 @@ impl SalesOrderRepository {
 
     /// Read the exported `SalesOrderRef`'s columns.
     ///
-    /// ID-only: no company argument to scope from up front, so this read rides the REQUEST-dedicated
-    /// connection (established by `company_auth`), which carries the caller's `app.company_id` — RLS
-    /// fences the lookup so another company's order simply isn't found.
+    /// ID-only: no tenant argument. `org_scope::fetch_optional_row_scoped` rides the
+    /// request-dedicated connection when the composing service bound one (carrying the
+    /// decorator's fence variables), plainly on the pool otherwise (ADR-0029).
     pub async fn find_ref(
         &self,
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Option<SalesOrderRefRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT customer_id, company_id, total, currency FROM selling.sales_orders
+                r#"SELECT customer_id, total, currency FROM selling.sales_orders
                    WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
             .bind(order_id),
         ).await?;
         Ok(row.map(|r| SalesOrderRefRow {
             customer_id: r.get("customer_id"),
-            company_id: r.get("company_id"),
             total: r.get("total"),
             currency: r.get("currency"),
         }))
     }
 
     /// Read the order header `create_invoice_from_order` copies from. ID-only, same scoping as
-    /// [`Self::find_ref`]; the caller binds THIS order's company onto the invoice transaction after.
+    /// [`Self::find_ref`].
     pub async fn find_invoice_source(
         &self,
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Option<InvoiceSourceOrderRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT company_id, branch_id, customer_id, currency, tax_rate
+                r#"SELECT branch_id, customer_id, currency, tax_rate
                    FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
             .bind(order_id),
         ).await?;
         Ok(row.map(|r| InvoiceSourceOrderRow {
-            company_id: r.get("company_id"),
             branch_id: r.get("branch_id"),
             customer_id: r.get("customer_id"),
             currency: r.get("currency"),
@@ -296,16 +287,15 @@ impl SalesOrderRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Option<OrderFulfillmentHeaderRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT company_id, customer_id, currency, status::text AS st
+                r#"SELECT customer_id, currency, status::text AS st
                    FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
             .bind(order_id),
         ).await?;
         Ok(row.map(|r| OrderFulfillmentHeaderRow {
-            company_id: r.get("company_id"),
             customer_id: r.get("customer_id"),
             currency: r.get("currency"),
             status: r.get("st"),
@@ -313,24 +303,23 @@ impl SalesOrderRepository {
     }
 
     /// Read the order header the stock-fulfillment paths build their port requests from
-    /// (the confirm-time rule launch and the delivered-qty reconstruction): the tenant +
-    /// customer identity, the order number (the procurement-group correspondence key), and
-    /// the status text. ID-only, same scoping as [`Self::find_ref`].
+    /// (the confirm-time rule launch and the delivered-qty reconstruction): the customer
+    /// identity, the order number (the procurement-group correspondence key), and the status
+    /// text. ID-only, same scoping as [`Self::find_ref`].
     pub async fn find_stock_header(
         &self,
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Option<OrderStockHeaderRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT company_id, customer_id, order_number, status::text AS st
+                r#"SELECT customer_id, order_number, status::text AS st
                    FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
             .bind(order_id),
         ).await?;
         Ok(row.map(|r| OrderStockHeaderRow {
-            company_id: r.get("company_id"),
             customer_id: r.get("customer_id"),
             order_number: r.get("order_number"),
             status: r.get("st"),
@@ -338,24 +327,23 @@ impl SalesOrderRepository {
     }
 
     /// Read the order header the service-delivery confirm path builds its mint request from
-    /// (tenant + customer identity, the order number, the currency). ID-only — same scoping as
-    /// [`Self::find_stock_header`]: a wrong-tenant order reads None, which the confirm guard
-    /// types as `NotDraft` (no existence leak).
+    /// (customer identity, the order number, the currency). ID-only — same scoping as
+    /// [`Self::find_stock_header`]: a foreign id reads None, which the confirm guard types as
+    /// `NotDraft` (no existence leak).
     pub async fn find_delivery_header(
         &self,
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Option<OrderDeliveryHeaderRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT company_id, customer_id, order_number, currency
+                r#"SELECT customer_id, order_number, currency
                    FROM selling.sales_orders WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
             .bind(order_id),
         ).await?;
         Ok(row.map(|r| OrderDeliveryHeaderRow {
-            company_id: r.get("company_id"),
             customer_id: r.get("customer_id"),
             order_number: r.get("order_number"),
             currency: r.get("currency"),
@@ -367,14 +355,15 @@ impl SalesOrderRepository {
     /// are left alone. `next` binds as `&str` with a DB-side `::sales_order_status` cast, so a value
     /// outside the enum fails as a DB error rather than silently writing something else.
     ///
-    /// ID-only: no company argument — inherits the caller's scope (see `recompute_order_status`).
+    /// ID-only: no tenant argument — the read/write twins scope via the ambient org scope
+    /// (see `recompute_order_status`).
     pub async fn advance_status(
         &self,
         pool: &PgPool,
         order_id: Uuid,
         next: &str,
     ) -> Result<(), sqlx::Error> {
-        company_scope::execute_scoped(
+        org_scope::execute_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.sales_orders SET status=$2::sales_order_status
@@ -389,44 +378,42 @@ impl SalesOrderRepository {
     /// statement: the `NOT EXISTS` billed-lines subquery runs inside the same `UPDATE` as the flip,
     /// so a racing `mark_invoiced` (whose allocation takes `FOR UPDATE` on these same order lines)
     /// cannot slip a billed quantity between the check and the flip. Posted invoices are never
-    /// cancelled. `Ok(None)` = guard refused (wrong state, wrong tenant, billed, or absent).
+    /// cancelled. `Ok(None)` = guard refused (wrong state, billed, absent — under a composed
+    /// decorator a foreign id reads the same, which is the point).
     pub async fn cancel(
         &self,
         pool: &PgPool,
         order_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Option<CancelledOrderRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.sales_orders SET status='cancelled'::sales_order_status
-                   WHERE id=$1 AND company_id=$2
+                   WHERE id=$1
                      AND status = ANY(ARRAY['draft','to_deliver','to_bill','to_deliver_and_bill']::sales_order_status[])
                      AND (metadata->>'deleted_at') IS NULL
                      AND NOT EXISTS (
                        SELECT 1 FROM selling.sales_order_items soi
                        WHERE soi.order_id = $1 AND soi.billed_qty > 0
                          AND (soi.metadata->>'deleted_at') IS NULL)
-                   RETURNING company_id, customer_id, order_number"#,
+                   RETURNING customer_id, order_number"#,
             )
-            .bind(order_id).bind(company_id),
+            .bind(order_id),
         ).await?;
         Ok(row.map(|r| CancelledOrderRow {
-            company_id: r.get("company_id"),
             customer_id: r.get("customer_id"),
             order_number: r.get("order_number"),
         }))
     }
 
     /// Post-refusal classification read for `cancel_sales_order`: current state + whether a live
-    /// line is billed. `Ok(None)` = not found / wrong tenant.
+    /// line is billed. `Ok(None)` = not found (under a composed decorator also a foreign id).
     pub async fn find_cancel_refusal(
         &self,
         pool: &PgPool,
         order_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Option<CancelRefusalRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
                 r#"SELECT o.status::text AS st,
@@ -434,9 +421,9 @@ impl SalesOrderRepository {
                                  WHERE soi.order_id = o.id AND soi.billed_qty > 0
                                    AND (soi.metadata->>'deleted_at') IS NULL) AS has_billed
                    FROM selling.sales_orders o
-                   WHERE o.id=$1 AND o.company_id=$2 AND (o.metadata->>'deleted_at') IS NULL"#,
+                   WHERE o.id=$1 AND (o.metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(order_id).bind(company_id),
+            .bind(order_id),
         ).await?;
         Ok(row.map(|r| CancelRefusalRow {
             status: r.get("st"),
@@ -451,7 +438,7 @@ impl SalesOrderRepository {
         pool: &PgPool,
         order_id: Uuid,
     ) -> Result<Option<InvoiceStatusHeaderRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
                 r#"SELECT order_number, status::text AS st FROM selling.sales_orders

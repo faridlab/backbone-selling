@@ -38,9 +38,6 @@ pub struct CreateSalesOrderItemDto {
     #[serde(alias = "order_id")]
     pub order_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "item_id")]
     pub item_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 300)))]
@@ -86,9 +83,6 @@ pub struct UpdateSalesOrderItemDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "order_id")]
     pub order_id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "item_id")]
     pub item_id: Uuid,
@@ -136,9 +130,6 @@ pub struct PatchSalesOrderItemDto {
     #[serde(skip_serializing_if = "Option::is_none", alias = "order_id")]
     pub order_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
-    pub company_id: Option<Uuid>,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "item_id")]
     pub item_id: Option<Uuid>,
     #[cfg_attr(feature = "validation", validate(length(max = 300)))]
@@ -172,7 +163,7 @@ pub struct PatchSalesOrderItemDto {
 impl PatchSalesOrderItemDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.order_id.is_some() || self.company_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.unit_cost.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some() || self.invoice_policy.is_some() || self.is_downpayment.is_some() || self.project_id.is_some() || self.task_id.is_some()
+        self.order_id.is_some() || self.item_id.is_some() || self.description.is_some() || self.quantity.is_some() || self.unit_price.is_some() || self.line_discount.is_some() || self.line_amount.is_some() || self.unit_cost.is_some() || self.billed_qty.is_some() || self.delivered_qty.is_some() || self.invoice_policy.is_some() || self.is_downpayment.is_some() || self.project_id.is_some() || self.task_id.is_some()
     }
 }
 
@@ -192,8 +183,6 @@ pub struct SalesOrderItemResponseDto {
     pub id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub order_id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub item_id: Uuid,
     pub description: Option<String>,
@@ -267,8 +256,8 @@ impl SalesOrderItemListResponseDto {
 pub struct SalesOrderItemSummaryDto {
     pub id: Uuid,
     pub order_id: Uuid,
-    pub company_id: Uuid,
     pub item_id: Uuid,
+    pub description: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -281,7 +270,6 @@ impl From<SalesOrderItem> for SalesOrderItemResponseDto {
         Self {
             id: entity.id,
             order_id: entity.order_id,
-            company_id: entity.company_id,
             item_id: entity.item_id,
             description: entity.description,
             quantity: entity.quantity,
@@ -306,8 +294,8 @@ impl From<SalesOrderItem> for SalesOrderItemSummaryDto {
         Self {
             id: entity.id,
             order_id: entity.order_id,
-            company_id: entity.company_id,
             item_id: entity.item_id,
+            description: entity.description,
             created_at,
         }
     }
@@ -318,7 +306,6 @@ impl From<CreateSalesOrderItemDto> for SalesOrderItem {
         Self {
             id: Uuid::new_v4(),
             order_id: dto.order_id,
-            company_id: dto.company_id,
             item_id: dto.item_id,
             description: dto.description,
             quantity: dto.quantity,
@@ -342,7 +329,6 @@ impl From<&SalesOrderItem> for SalesOrderItemResponseDto {
         Self {
             id: entity.id.clone(),
             order_id: entity.order_id.clone(),
-            company_id: entity.company_id.clone(),
             item_id: entity.item_id.clone(),
             description: entity.description.clone(),
             quantity: entity.quantity.clone(),
@@ -370,7 +356,6 @@ impl backbone_core::FromCreateDto<CreateSalesOrderItemDto> for SalesOrderItem {
 impl backbone_core::ApplyUpdateDto<UpdateSalesOrderItemDto> for SalesOrderItem {
     fn apply_update(mut self, dto: UpdateSalesOrderItemDto) -> backbone_core::ServiceResult<Self> {
         self.order_id = dto.order_id;
-        self.company_id = dto.company_id;
         self.item_id = dto.item_id;
         self.description = dto.description;
         self.quantity = dto.quantity;

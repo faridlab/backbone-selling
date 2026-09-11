@@ -32,9 +32,6 @@ use crate::domain::entity::AuditMetadata;
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSalesTeamDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
@@ -56,9 +53,6 @@ pub struct CreateSalesTeamDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSalesTeamDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
@@ -80,9 +74,6 @@ pub struct UpdateSalesTeamDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct PatchSalesTeamDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
-    pub company_id: Option<Uuid>,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,7 +86,7 @@ pub struct PatchSalesTeamDto {
 impl PatchSalesTeamDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.company_id.is_some() || self.name.is_some() || self.description.is_some()
+        self.name.is_some() || self.description.is_some()
     }
 }
 
@@ -113,8 +104,6 @@ impl PatchSalesTeamDto {
 pub struct SalesTeamResponseDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
     pub description: Option<String>,
@@ -175,7 +164,6 @@ impl SalesTeamListResponseDto {
 #[serde(rename_all = "camelCase")]
 pub struct SalesTeamSummaryDto {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
@@ -189,7 +177,6 @@ impl From<SalesTeam> for SalesTeamResponseDto {
     fn from(entity: SalesTeam) -> Self {
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             name: entity.name,
             description: entity.description,
             metadata: entity.metadata,
@@ -202,7 +189,6 @@ impl From<SalesTeam> for SalesTeamSummaryDto {
         let created_at = backbone_core::PersistentEntity::created_at(&entity);
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             name: entity.name,
             description: entity.description,
             created_at,
@@ -214,7 +200,6 @@ impl From<CreateSalesTeamDto> for SalesTeam {
     fn from(dto: CreateSalesTeamDto) -> Self {
         Self {
             id: Uuid::new_v4(),
-            company_id: dto.company_id,
             name: dto.name,
             description: dto.description,
             metadata: AuditMetadata::default(),
@@ -226,7 +211,6 @@ impl From<&SalesTeam> for SalesTeamResponseDto {
     fn from(entity: &SalesTeam) -> Self {
         Self {
             id: entity.id.clone(),
-            company_id: entity.company_id.clone(),
             name: entity.name.clone(),
             description: entity.description.clone(),
             metadata: entity.metadata.clone(),
@@ -242,7 +226,6 @@ impl backbone_core::FromCreateDto<CreateSalesTeamDto> for SalesTeam {
 
 impl backbone_core::ApplyUpdateDto<UpdateSalesTeamDto> for SalesTeam {
     fn apply_update(mut self, dto: UpdateSalesTeamDto) -> backbone_core::ServiceResult<Self> {
-        self.company_id = dto.company_id;
         self.name = dto.name;
         self.description = dto.description;
         Ok(self)

@@ -35,9 +35,6 @@ use crate::domain::entity::ExpenseReinvoiceState;
 #[serde(rename_all = "camelCase")]
 pub struct CreateExpenseReinvoiceLinkDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "order_id")]
     pub order_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -60,9 +57,6 @@ pub struct CreateExpenseReinvoiceLinkDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateExpenseReinvoiceLinkDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "order_id")]
     pub order_id: Uuid,
@@ -87,9 +81,6 @@ pub struct UpdateExpenseReinvoiceLinkDto {
 #[serde(rename_all = "camelCase")]
 pub struct PatchExpenseReinvoiceLinkDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
-    pub company_id: Option<Uuid>,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "order_id")]
     pub order_id: Option<Uuid>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -104,7 +95,7 @@ pub struct PatchExpenseReinvoiceLinkDto {
 impl PatchExpenseReinvoiceLinkDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.company_id.is_some() || self.order_id.is_some() || self.expense_id.is_some() || self.amount.is_some() || self.state.is_some()
+        self.order_id.is_some() || self.expense_id.is_some() || self.amount.is_some() || self.state.is_some()
     }
 }
 
@@ -122,8 +113,6 @@ impl PatchExpenseReinvoiceLinkDto {
 pub struct ExpenseReinvoiceLinkResponseDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub order_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
@@ -187,9 +176,9 @@ impl ExpenseReinvoiceLinkListResponseDto {
 #[serde(rename_all = "camelCase")]
 pub struct ExpenseReinvoiceLinkSummaryDto {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub order_id: Uuid,
     pub expense_id: Uuid,
+    pub amount: Decimal,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -201,7 +190,6 @@ impl From<ExpenseReinvoiceLink> for ExpenseReinvoiceLinkResponseDto {
     fn from(entity: ExpenseReinvoiceLink) -> Self {
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             order_id: entity.order_id,
             expense_id: entity.expense_id,
             amount: entity.amount,
@@ -216,9 +204,9 @@ impl From<ExpenseReinvoiceLink> for ExpenseReinvoiceLinkSummaryDto {
         let created_at = backbone_core::PersistentEntity::created_at(&entity);
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             order_id: entity.order_id,
             expense_id: entity.expense_id,
+            amount: entity.amount,
             created_at,
         }
     }
@@ -228,7 +216,6 @@ impl From<CreateExpenseReinvoiceLinkDto> for ExpenseReinvoiceLink {
     fn from(dto: CreateExpenseReinvoiceLinkDto) -> Self {
         Self {
             id: Uuid::new_v4(),
-            company_id: dto.company_id,
             order_id: dto.order_id,
             expense_id: dto.expense_id,
             amount: dto.amount,
@@ -242,7 +229,6 @@ impl From<&ExpenseReinvoiceLink> for ExpenseReinvoiceLinkResponseDto {
     fn from(entity: &ExpenseReinvoiceLink) -> Self {
         Self {
             id: entity.id.clone(),
-            company_id: entity.company_id.clone(),
             order_id: entity.order_id.clone(),
             expense_id: entity.expense_id.clone(),
             amount: entity.amount.clone(),
@@ -260,7 +246,6 @@ impl backbone_core::FromCreateDto<CreateExpenseReinvoiceLinkDto> for ExpenseRein
 
 impl backbone_core::ApplyUpdateDto<UpdateExpenseReinvoiceLinkDto> for ExpenseReinvoiceLink {
     fn apply_update(mut self, dto: UpdateExpenseReinvoiceLinkDto) -> backbone_core::ServiceResult<Self> {
-        self.company_id = dto.company_id;
         self.order_id = dto.order_id;
         self.expense_id = dto.expense_id;
         self.amount = dto.amount;

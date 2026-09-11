@@ -7,7 +7,6 @@
 -- INSERT INTO selling.quotations (
 --     id,
 --     quotation_number,
---     company_id,
 --     branch_id,
 --     customer_id,
 --     status,

@@ -6,6 +6,11 @@
 //! consumer adds its own rule against them, and — critically — that consumer rule survives a
 //! regeneration of both modules because it lives in `user_owned` / `*_custom.rs` files, never in
 //! generated code. `tests/extension_contract.rs` demonstrates the round-trip.
+//!
+//! **Tenancy (ADR-0029).** The module is tenant-agnostic; every payload's `company_id` is the
+//! LEGACY TWIN: filled with the ambient org scope's legacy company echo (nil when none is
+//! bound) so still-company-fenced consumers keep a value on the wire. Nothing in this module
+//! keys a statement on it.
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -15,6 +20,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QuotationAccepted {
     pub quotation_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub customer_id: Uuid,
 }
@@ -23,6 +29,7 @@ pub struct QuotationAccepted {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QuotationSent {
     pub quotation_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
 }
 
@@ -30,6 +37,7 @@ pub struct QuotationSent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QuotationRejected {
     pub quotation_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub reason: Option<String>,
 }
@@ -39,6 +47,7 @@ pub struct QuotationRejected {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QuotationCancelled {
     pub quotation_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub reason: Option<String>,
 }
@@ -48,6 +57,7 @@ pub struct QuotationCancelled {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QuotationReDrafted {
     pub quotation_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
 }
 
@@ -56,6 +66,7 @@ pub struct QuotationReDrafted {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SalesOrderCancelled {
     pub order_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub customer_id: Uuid,
 }
@@ -65,6 +76,7 @@ pub struct SalesOrderCancelled {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SalesOrderConfirmed {
     pub order_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub customer_id: Uuid,
     pub grand_total: Decimal,
@@ -88,6 +100,7 @@ pub struct DeliveryRequestLine {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeliveryRequestEnvelope {
     pub order_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub customer_id: Uuid,
     pub currency: String,
@@ -111,6 +124,7 @@ pub struct InvoiceRequestLine {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InvoiceRequestEnvelope {
     pub order_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub customer_id: Uuid,
     pub currency: String,
@@ -138,6 +152,7 @@ pub enum SellingEvent {
 pub struct SalesOrderRef {
     pub id: Uuid,
     pub customer_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub grand_total: Decimal,
     pub currency: String,
@@ -148,6 +163,7 @@ pub struct SalesOrderRef {
 pub struct QuotationRef {
     pub id: Uuid,
     pub customer_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for unstripped consumers — see the module docs.
     pub company_id: Uuid,
     pub grand_total: Decimal,
     pub currency: String,

@@ -51,7 +51,6 @@ impl std::ops::Deref for ExpenseReinvoiceLinkId {
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ExpenseReinvoiceLink {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub order_id: Uuid,
     pub expense_id: Uuid,
     pub amount: Decimal,
@@ -68,10 +67,9 @@ impl ExpenseReinvoiceLink {
     }
 
     /// Create a new ExpenseReinvoiceLink with required fields
-    pub fn new(company_id: Uuid, order_id: Uuid, expense_id: Uuid, amount: Decimal, state: ExpenseReinvoiceState) -> Self {
+    pub fn new(order_id: Uuid, expense_id: Uuid, amount: Decimal, state: ExpenseReinvoiceState) -> Self {
         Self {
             id: Uuid::new_v4(),
-            company_id,
             order_id,
             expense_id,
             amount,
@@ -139,9 +137,6 @@ impl ExpenseReinvoiceLink {
     pub fn apply_patch(&mut self, fields: std::collections::HashMap<String, serde_json::Value>) {
         for (key, value) in fields {
             match key.as_str() {
-                "company_id" => {
-                    if let Ok(v) = serde_json::from_value(value) { self.company_id = v; }
-                }
                 "order_id" => {
                     if let Ok(v) = serde_json::from_value(value) { self.order_id = v; }
                 }
@@ -208,7 +203,6 @@ impl backbone_orm::EntityRepoMeta for ExpenseReinvoiceLink {
     fn column_types() -> std::collections::HashMap<String, String> {
         let mut m = std::collections::HashMap::new();
         m.insert("id".to_string(), "uuid".to_string());
-        m.insert("company_id".to_string(), "uuid".to_string());
         m.insert("order_id".to_string(), "uuid".to_string());
         m.insert("expense_id".to_string(), "uuid".to_string());
         m.insert("state".to_string(), "expense_reinvoice_state".to_string());
@@ -216,9 +210,6 @@ impl backbone_orm::EntityRepoMeta for ExpenseReinvoiceLink {
     }
     fn search_fields() -> &'static [&'static str] {
         &[]
-    }
-    fn company_field() -> Option<&'static str> {
-        Some("company_id")
     }
 }
 
@@ -228,7 +219,6 @@ impl backbone_orm::EntityRepoMeta for ExpenseReinvoiceLink {
 /// System fields (id, metadata, timestamps) are auto-initialized.
 #[derive(Debug, Clone, Default)]
 pub struct ExpenseReinvoiceLinkBuilder {
-    company_id: Option<Uuid>,
     order_id: Option<Uuid>,
     expense_id: Option<Uuid>,
     amount: Option<Decimal>,
@@ -236,12 +226,6 @@ pub struct ExpenseReinvoiceLinkBuilder {
 }
 
 impl ExpenseReinvoiceLinkBuilder {
-    /// Set the company_id field (required)
-    pub fn company_id(mut self, value: Uuid) -> Self {
-        self.company_id = Some(value);
-        self
-    }
-
     /// Set the order_id field (required)
     pub fn order_id(mut self, value: Uuid) -> Self {
         self.order_id = Some(value);
@@ -270,14 +254,12 @@ impl ExpenseReinvoiceLinkBuilder {
     ///
     /// Returns Err if any required field without a default is missing.
     pub fn build(self) -> Result<ExpenseReinvoiceLink, String> {
-        let company_id = self.company_id.ok_or_else(|| "company_id is required".to_string())?;
         let order_id = self.order_id.ok_or_else(|| "order_id is required".to_string())?;
         let expense_id = self.expense_id.ok_or_else(|| "expense_id is required".to_string())?;
         let amount = self.amount.ok_or_else(|| "amount is required".to_string())?;
 
         Ok(ExpenseReinvoiceLink {
             id: Uuid::new_v4(),
-            company_id,
             order_id,
             expense_id,
             amount,

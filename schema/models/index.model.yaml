@@ -14,9 +14,12 @@ version: 2
 schema: selling
 description: "Selling: Quotation -> Sales Order -> Sales Invoice. Owns order-to-cash intent; the sales invoice emits a revenue AccountingPost (Dr A/R - Cr Revenue - Cr PPN Output) into backbone-accounting via the GL-posting contract."
 
-# ADR-0014 company fence: every selling table is per-company RLS-fenced with a
-# NOT NULL company_id — no shared-blank or shared-tree rows exist in this module.
-company_fence: strict
+# Tenancy: none, by design (ADR-0029). The module is tenant-agnostic and reusable —
+# it ships no scoping column and no fence declaration. A composing backend-service
+# that wants these tables org-scoped declares them in its tenancy.yaml; the
+# decorator installs org_unit_id, the RLS policy, and the org-scoped per-unit
+# indexes (the customer/status listing indexes and the per-unit name uniques)
+# at composition time.
 
 config:
   database: postgresql

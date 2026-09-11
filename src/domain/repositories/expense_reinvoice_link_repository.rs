@@ -44,7 +44,6 @@ pub struct ExpenseReinvoiceLinkPaginatedResult {
 /// Filter parameters for list queries
 #[derive(Debug, Clone, Default)]
 pub struct ExpenseReinvoiceLinkFilter {
-    pub company_id: Option<Uuid>,
     pub order_id: Option<Uuid>,
     pub expense_id: Option<Uuid>,
     pub state: Option<ExpenseReinvoiceState>,
@@ -53,7 +52,7 @@ pub struct ExpenseReinvoiceLinkFilter {
 impl ExpenseReinvoiceLinkFilter {
     /// Check if any filter is set
     pub fn has_filters(&self) -> bool {
-        self.company_id.is_some() || self.order_id.is_some() || self.expense_id.is_some() || self.state.is_some()
+        self.order_id.is_some() || self.expense_id.is_some() || self.state.is_some()
     }
 }
 

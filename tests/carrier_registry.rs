@@ -6,8 +6,9 @@
 //! labels, or the DeliveryRequested envelope.
 //!
 //! Coverage map:
-//!   create + per-company duplicate-name refusal
-//!   update incl. clearing the tracking template; unknown/cross-tenant id ⇒ carrier_not_found
+//!   create + module-global duplicate-live-name refusal (the per-unit unique is the composing
+//!   decorator's — ADR-0029)
+//!   update incl. clearing the tracking template; unknown id ⇒ carrier_not_found
 //!   list active-only vs all (deactivated carriers stay readable)
 //!   set-delivery: draft AND confirmed writable, cancelled refused, unknown carrier ⇒ clean 404,
 //!     keep/clear/set patch semantics
@@ -44,37 +45,34 @@ fn line(item: Uuid) -> NewLine {
         quantity: d("1"), unit_price: d("1000"), line_discount: d("0"),
     }
 }
-async fn draft_order(w: &SellingWriteService, company: Uuid) -> Uuid {
+async fn draft_order(w: &SellingWriteService) -> Uuid {
     w.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None,
-        company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, branch_id: None, customer_id: Uuid::new_v4(),
         order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 25).unwrap(),
         delivery_date: None, currency: None, tax_rate: d("0"), notes: None,
         lines: vec![line(Uuid::new_v4())],
     }).await.unwrap()
 }
 
-// C1: create a carrier; a live duplicate name per company refuses; the SAME name is fine in
-// another company (the unique index is per company).
+// C1: create a carrier; a duplicate live name refuses (module-global service-side pre-read —
+// the module ships no unique of its own; under a composed tenancy decorator the decorator's
+// per-unit unique is the hard backstop, ADR-0029). A soft-deleted name stays reusable.
 #[tokio::test]
-async fn create_refuses_live_duplicate_names_per_company() {
+async fn create_refuses_live_duplicate_names() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let name = uq("SiCepat");
 
-    let id = w.create_delivery_carrier(company, &name, Some("https://track/{ref}")).await.unwrap();
+    let id = w.create_delivery_carrier(&name, Some("https://track/{ref}")).await.unwrap();
     let stored: Option<String> = sqlx::query_scalar(
-        "SELECT tracking_url_template FROM selling.delivery_carriers WHERE id=$1 AND company_id=$2")
-        .bind(id).bind(company).fetch_one(&pool).await.unwrap();
+        "SELECT tracking_url_template FROM selling.delivery_carriers WHERE id=$1")
+        .bind(id).fetch_one(&pool).await.unwrap();
     assert_eq!(stored.as_deref(), Some("https://track/{ref}"));
 
-    match w.create_delivery_carrier(company, &name, None).await.unwrap_err() {
+    match w.create_delivery_carrier(&name, None).await.unwrap_err() {
         SellingError::CarrierDuplicate(n) => assert_eq!(n, name),
         other => panic!("expected CarrierDuplicate, got {other:?}"),
     }
-    // another company owns its own registry — same name, no conflict.
-    w.create_delivery_carrier(Uuid::new_v4(), &name, None).await.unwrap();
 }
 
 // C2: update the master fields — rename, flip active, set AND CLEAR the tracking template; an
@@ -83,36 +81,32 @@ async fn create_refuses_live_duplicate_names_per_company() {
 async fn update_renames_deactivates_and_clears_the_template() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let id = w.create_delivery_carrier(company, &uq("JNE"), Some("https://jne/{ref}")).await.unwrap();
+    let id = w.create_delivery_carrier(&uq("JNE"), Some("https://jne/{ref}")).await.unwrap();
 
-    w.update_delivery_carrier(id, company, UpdateCarrierPatch {
+    w.update_delivery_carrier(id, UpdateCarrierPatch {
         name: Some(uq("JNE Express")),
         tracking_url_template: Some(Some("https://jne.co.id/{ref}".into())),
         ..Default::default()
     }).await.unwrap();
-    let after = w.list_delivery_carriers(company, false).await.unwrap().into_iter().find(|c| c.id == id).unwrap();
+    let after = w.list_delivery_carriers(false).await.unwrap().into_iter().find(|c| c.id == id).unwrap();
     assert_eq!(after.tracking_url_template.as_deref(), Some("https://jne.co.id/{ref}"));
 
     // explicit CLEAR: Some(None) writes NULL; the field set is distinguished from "not asked".
-    w.update_delivery_carrier(id, company, UpdateCarrierPatch {
+    w.update_delivery_carrier(id, UpdateCarrierPatch {
         tracking_url_template: Some(None), ..Default::default()
     }).await.unwrap();
-    let after = w.list_delivery_carriers(company, false).await.unwrap().into_iter().find(|c| c.id == id).unwrap();
+    let after = w.list_delivery_carriers(false).await.unwrap().into_iter().find(|c| c.id == id).unwrap();
     assert_eq!(after.tracking_url_template, None);
 
     // deactivate (the retirement path — no delete verb exists on the registry).
-    w.update_delivery_carrier(id, company, UpdateCarrierPatch { active: Some(false), ..Default::default() })
+    w.update_delivery_carrier(id, UpdateCarrierPatch { active: Some(false), ..Default::default() })
         .await.unwrap();
-    assert!(!w.list_delivery_carriers(company, false).await.unwrap().into_iter().find(|c| c.id == id).unwrap().active);
+    assert!(!w.list_delivery_carriers(false).await.unwrap().into_iter().find(|c| c.id == id).unwrap().active);
 
-    // unknown / cross-tenant ids refuse cleanly.
+    // an unknown id refuses cleanly (under a composed decorator a foreign id is
+    // indistinguishable — which is the point).
     assert!(matches!(
-        w.update_delivery_carrier(Uuid::new_v4(), company, UpdateCarrierPatch { name: Some("x".into()), ..Default::default() }).await.unwrap_err(),
-        SellingError::CarrierNotFound(_)
-    ));
-    assert!(matches!(
-        w.update_delivery_carrier(id, Uuid::new_v4(), UpdateCarrierPatch { name: Some("x".into()), ..Default::default() }).await.unwrap_err(),
+        w.update_delivery_carrier(Uuid::new_v4(), UpdateCarrierPatch { name: Some("x".into()), ..Default::default() }).await.unwrap_err(),
         SellingError::CarrierNotFound(_)
     ));
 }
@@ -123,19 +117,18 @@ async fn update_renames_deactivates_and_clears_the_template() {
 async fn list_defaults_to_active_and_can_include_retired() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let live = w.create_delivery_carrier(company, &uq("Live"), None).await.unwrap();
-    let retired = w.create_delivery_carrier(company, &uq("Retired"), None).await.unwrap();
-    w.update_delivery_carrier(retired, company, UpdateCarrierPatch { active: Some(false), ..Default::default() })
+    let live = w.create_delivery_carrier(&uq("Live"), None).await.unwrap();
+    let retired = w.create_delivery_carrier(&uq("Retired"), None).await.unwrap();
+    w.update_delivery_carrier(retired, UpdateCarrierPatch { active: Some(false), ..Default::default() })
         .await.unwrap();
 
     let ids_of = |rows: Vec<backbone_selling::application::service::selling_carrier::CarrierDto>| {
         rows.into_iter().map(|c| c.id).collect::<Vec<_>>()
     };
-    let active = ids_of(w.list_delivery_carriers(company, true).await.unwrap());
+    let active = ids_of(w.list_delivery_carriers(true).await.unwrap());
     assert!(active.contains(&live));
     assert!(!active.contains(&retired), "the retired carrier leaves the default pick-list");
-    let all = ids_of(w.list_delivery_carriers(company, false).await.unwrap());
+    let all = ids_of(w.list_delivery_carriers(false).await.unwrap());
     assert!(all.contains(&live) && all.contains(&retired), "history stays readable");
 }
 
@@ -146,12 +139,11 @@ async fn list_defaults_to_active_and_can_include_retired() {
 async fn set_delivery_writes_draft_and_confirmed_and_refuses_cancelled() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let carrier = w.create_delivery_carrier(company, &uq("AnterAja"), None).await.unwrap();
+    let carrier = w.create_delivery_carrier(&uq("AnterAja"), None).await.unwrap();
 
     // draft: set both.
-    let draft = draft_order(&w, company).await;
-    w.set_order_delivery(draft, company, Some(Some(carrier)), Some(Some("JTR-001".into()))).await.unwrap();
+    let draft = draft_order(&w).await;
+    w.set_order_delivery(draft, Some(Some(carrier)), Some(Some("JTR-001".into()))).await.unwrap();
     let (cid, tref): (Option<Uuid>, Option<String>) = sqlx::query(
         "SELECT delivery_carrier_id, tracking_ref FROM selling.sales_orders WHERE id=$1")
         .bind(draft).fetch_one(&pool).await.map(|r| (r.get("delivery_carrier_id"), r.get("tracking_ref"))).unwrap();
@@ -159,13 +151,13 @@ async fn set_delivery_writes_draft_and_confirmed_and_refuses_cancelled() {
     assert_eq!(tref.as_deref(), Some("JTR-001"));
 
     // keep/clear/set: a tracking-only update KEEPS the carrier; a null CLEARS it.
-    w.set_order_delivery(draft, company, None, Some(Some("JTR-002".into()))).await.unwrap();
+    w.set_order_delivery(draft, None, Some(Some("JTR-002".into()))).await.unwrap();
     let (cid, tref): (Option<Uuid>, Option<String>) = sqlx::query(
         "SELECT delivery_carrier_id, tracking_ref FROM selling.sales_orders WHERE id=$1")
         .bind(draft).fetch_one(&pool).await.map(|r| (r.get("delivery_carrier_id"), r.get("tracking_ref"))).unwrap();
     assert_eq!(cid, Some(carrier), "an unasked field keeps its stored value");
     assert_eq!(tref.as_deref(), Some("JTR-002"));
-    w.set_order_delivery(draft, company, Some(None), None).await.unwrap();
+    w.set_order_delivery(draft, Some(None), None).await.unwrap();
     let (cid, tref): (Option<Uuid>, Option<String>) = sqlx::query(
         "SELECT delivery_carrier_id, tracking_ref FROM selling.sales_orders WHERE id=$1")
         .bind(draft).fetch_one(&pool).await.map(|r| (r.get("delivery_carrier_id"), r.get("tracking_ref"))).unwrap();
@@ -173,14 +165,14 @@ async fn set_delivery_writes_draft_and_confirmed_and_refuses_cancelled() {
     assert_eq!(tref.as_deref(), Some("JTR-002"));
 
     // confirmed: still writable — tracking typically arrives only after ship.
-    let confirmed = draft_order(&w, company).await;
-    w.confirm_sales_order(confirmed, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
-    w.set_order_delivery(confirmed, company, Some(Some(carrier)), Some(Some("SHIP-9".into()))).await.unwrap();
+    let confirmed = draft_order(&w).await;
+    w.confirm_sales_order(confirmed, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.set_order_delivery(confirmed, Some(Some(carrier)), Some(Some("SHIP-9".into()))).await.unwrap();
 
     // cancelled: refused.
-    let cancelled = draft_order(&w, company).await;
-    w.cancel_sales_order(cancelled, company, &NoStockFulfillmentPort).await.unwrap();
-    match w.set_order_delivery(cancelled, company, Some(Some(carrier)), None).await.unwrap_err() {
+    let cancelled = draft_order(&w).await;
+    w.cancel_sales_order(cancelled, &NoStockFulfillmentPort).await.unwrap();
+    match w.set_order_delivery(cancelled, Some(Some(carrier)), None).await.unwrap_err() {
         SellingError::InvalidTransition { verb, current } => {
             assert_eq!(verb, "set_delivery");
             assert_eq!(current, "cancelled");
@@ -190,29 +182,28 @@ async fn set_delivery_writes_draft_and_confirmed_and_refuses_cancelled() {
 
     // unknown carrier ⇒ clean refusal (pre-read, never the FK violation's 500); unknown order too.
     assert!(matches!(
-        w.set_order_delivery(draft, company, Some(Some(Uuid::new_v4())), None).await.unwrap_err(),
+        w.set_order_delivery(draft, Some(Some(Uuid::new_v4())), None).await.unwrap_err(),
         SellingError::CarrierNotFound(_)
     ));
     assert!(matches!(
-        w.set_order_delivery(Uuid::new_v4(), company, Some(Some(carrier)), None).await.unwrap_err(),
+        w.set_order_delivery(Uuid::new_v4(), Some(Some(carrier)), None).await.unwrap_err(),
         SellingError::OrderNotFound(_)
     ));
 }
 
-// C5: a create-time carrier choice is validated BEFORE the order transaction — an unknown or
-// cross-tenant carrier id refuses `carrier_not_found` and leaves no order row behind.
+// C5: a create-time carrier choice is validated BEFORE the order transaction — an unknown
+// carrier id refuses `carrier_not_found` and leaves no order row behind.
 #[tokio::test]
 async fn create_order_validates_the_carrier_choice() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let carrier = w.create_delivery_carrier(company, &uq("Ninja"), None).await.unwrap();
+    let carrier = w.create_delivery_carrier(&uq("Ninja"), None).await.unwrap();
     let number = uq("SO");
 
     let err = w.create_sales_order(NewSalesOrder {
         order_number: number.clone(), quotation_id: None,
         delivery_carrier_id: Some(Uuid::new_v4()), // unknown carrier
-        company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
+        branch_id: None, customer_id: Uuid::new_v4(),
         order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 25).unwrap(),
         delivery_date: None, currency: None, tax_rate: d("0"), notes: None,
         lines: vec![line(Uuid::new_v4())],
@@ -225,8 +216,7 @@ async fn create_order_validates_the_carrier_choice() {
     // the happy path persists the choice.
     let oid = w.create_sales_order(NewSalesOrder {
         order_number: uq("SO"), quotation_id: None,
-        delivery_carrier_id: Some(carrier),
-        company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
+        delivery_carrier_id: Some(carrier), branch_id: None, customer_id: Uuid::new_v4(),
         order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 25).unwrap(),
         delivery_date: None, currency: None, tax_rate: d("0"), notes: None,
         lines: vec![line(Uuid::new_v4())],
@@ -234,14 +224,6 @@ async fn create_order_validates_the_carrier_choice() {
     let cid: Option<Uuid> = sqlx::query_scalar("SELECT delivery_carrier_id FROM selling.sales_orders WHERE id=$1")
         .bind(oid).fetch_one(&pool).await.unwrap();
     assert_eq!(cid, Some(carrier));
-
-    // cross-tenant carrier is indistinguishable from an unknown one (no leak).
-    let other_company = Uuid::new_v4();
-    let foreign = w.create_delivery_carrier(other_company, &uq("GoSend"), None).await.unwrap();
-    assert!(matches!(
-        w.set_order_delivery(oid, company, Some(Some(foreign)), None).await.unwrap_err(),
-        SellingError::CarrierNotFound(_)
-    ));
 }
 
 // ── route-level probes ───────────────────────────────────────────────────────
@@ -306,8 +288,10 @@ async fn send(
 #[tokio::test]
 async fn carrier_routes_serve_the_registry_and_demand_a_token() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let app = probe_app().await;
+    // The guarded routes verify the token's signature (authn); the claim values themselves are
+    // not read by these registry verbs, so any well-formed claim set decodes.
+    let company = Uuid::new_v4();
 
     // unauthenticated writes and reads-on-the-guarded-list are refused.
     for (method, uri, body) in [
@@ -335,7 +319,7 @@ async fn carrier_routes_serve_the_registry_and_demand_a_token() {
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert!(body.contains("duplicate_carrier_name"));
 
-    // the list serves the company's carriers with the template in camelCase.
+    // the list serves the registry's carriers with the template in camelCase.
     let (status, body) = send(app.clone(), "GET", "/delivery-carriers", None, Some(company)).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let list: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -364,7 +348,7 @@ async fn carrier_routes_serve_the_registry_and_demand_a_token() {
 
     // set-delivery through the route: happy path on a draft order.
     let w = SellingWriteService::new(pool.clone());
-    let order = draft_order(&w, company).await;
+    let order = draft_order(&w).await;
     let (status, body) = send(
         app.clone(), "POST", "/sales-orders/set-delivery",
         Some(format!(r#"{{"orderId":"{order}","deliveryCarrierId":"{id}","trackingRef":"RT-1"}}"#)),

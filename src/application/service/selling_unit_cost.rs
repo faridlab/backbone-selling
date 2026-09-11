@@ -23,6 +23,8 @@ use uuid::Uuid;
 /// The distinct items whose unit costs a confirm needs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UnitCostRequest {
+    /// Legacy tenant twin (ADR-0029) for the still-company-fenced catalog consumer — selling
+    /// fills it with the ambient org scope's echo and keys no statement on it.
     pub company_id: Uuid,
     pub item_ids: Vec<Uuid>,
 }

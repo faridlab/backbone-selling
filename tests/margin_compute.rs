@@ -53,10 +53,9 @@ fn line(item: Uuid, qty: &str, price: &str, discount: &str) -> NewLine {
         line_discount: d(discount),
     }
 }
-async fn draft_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewLine>) -> Uuid {
+async fn draft_order(w: &SellingWriteService, lines: Vec<NewLine>) -> Uuid {
     w.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None,
-        company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, branch_id: None, customer_id: Uuid::new_v4(),
         order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 25).unwrap(),
         delivery_date: None, currency: None, tax_rate: d("0"), notes: None, lines,
     }).await.unwrap()
@@ -122,11 +121,10 @@ fn pure_computes_total_basis_and_zero_amount_guard() {
 async fn null_cost_confirms_and_reads_as_absent() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let item = Uuid::new_v4();
-    let order = draft_order(&w, company, vec![line(item, "10", "1000", "0")]).await;
+    let order = draft_order(&w, vec![line(item, "10", "1000", "0")]).await;
 
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(status(&pool, order).await, "to_deliver_and_bill");
     assert_eq!(line_costs(&pool, order).await, vec![None], "no cost source ⇒ no snapshot");
 
@@ -146,16 +144,15 @@ async fn null_cost_confirms_and_reads_as_absent() {
 async fn port_failure_refuses_confirm_verbatim_and_is_not_sticky() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let item = Uuid::new_v4();
-    let order = draft_order(&w, company, vec![line(item, "1", "1000", "0")]).await;
+    let order = draft_order(&w, vec![line(item, "1", "1000", "0")]).await;
 
     let down = ScriptedCosts {
         costs: HashMap::new(),
         fail_with: Some(UnitCostError { code: "catalog_unavailable".into(), message: "catalog is down".into() }),
         omit: vec![],
     };
-    match w.confirm_sales_order(order, company, &down, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
+    match w.confirm_sales_order(order, &down, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
         SellingError::CostRejected { code, message } => {
             assert_eq!(code, "catalog_unavailable", "the port's code must ride through verbatim");
             assert_eq!(message, "catalog is down");
@@ -167,7 +164,7 @@ async fn port_failure_refuses_confirm_verbatim_and_is_not_sticky() {
 
     // Same order, healthy port: the confirm succeeds.
     let up = ScriptedCosts::healthy([(item, Some("500"))]);
-    w.confirm_sales_order(order, company, &up, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &up, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(status(&pool, order).await, "to_deliver_and_bill");
     assert_eq!(line_costs(&pool, order).await, vec![Some(d("500"))]);
 }
@@ -178,12 +175,11 @@ async fn port_failure_refuses_confirm_verbatim_and_is_not_sticky() {
 async fn omitted_item_refuses_confirm() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = draft_order(&w, company, vec![line(a, "1", "100", "0"), line(b, "1", "100", "0")]).await;
+    let order = draft_order(&w, vec![line(a, "1", "100", "0"), line(b, "1", "100", "0")]).await;
 
     let holey = ScriptedCosts { costs: HashMap::new(), fail_with: None, omit: vec![b] };
-    match w.confirm_sales_order(order, company, &holey, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
+    match w.confirm_sales_order(order, &holey, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
         SellingError::CostRejected { code, .. } => assert_eq!(code, "unit_cost_line_missing"),
         other => panic!("expected CostRejected(unit_cost_line_missing), got {other:?}"),
     }
@@ -196,12 +192,11 @@ async fn omitted_item_refuses_confirm() {
 async fn negative_cost_refuses_confirm() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let item = Uuid::new_v4();
-    let order = draft_order(&w, company, vec![line(item, "1", "100", "0")]).await;
+    let order = draft_order(&w, vec![line(item, "1", "100", "0")]).await;
 
     let negative = ScriptedCosts::healthy([(item, Some("-1"))]);
-    match w.confirm_sales_order(order, company, &negative, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
+    match w.confirm_sales_order(order, &negative, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err() {
         SellingError::CostRejected { code, .. } => assert_eq!(code, "unit_cost_negative"),
         other => panic!("expected CostRejected(unit_cost_negative), got {other:?}"),
     }
@@ -214,13 +209,12 @@ async fn negative_cost_refuses_confirm() {
 async fn confirm_stamps_costs_and_margin_view_computes() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let item = Uuid::new_v4();
     // 10 × 1000 = 10000.00 amount, cost 600 ⇒ margin 10000 − 6000 = 4000.00 (40.00%).
-    let order = draft_order(&w, company, vec![line(item, "10", "1000", "0")]).await;
+    let order = draft_order(&w, vec![line(item, "10", "1000", "0")]).await;
 
     let costs = ScriptedCosts::healthy([(item, Some("600"))]);
-    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(line_costs(&pool, order).await, vec![Some(d("600"))]);
 
     let view = w.order_margin_view(order).await.unwrap();
@@ -240,16 +234,15 @@ async fn confirm_stamps_costs_and_margin_view_computes() {
 async fn a_losing_confirm_rolls_its_stamp_back() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let item = Uuid::new_v4();
-    let order = draft_order(&w, company, vec![line(item, "2", "500", "0")]).await;
+    let order = draft_order(&w, vec![line(item, "2", "500", "0")]).await;
 
     let first = ScriptedCosts::healthy([(item, Some("100"))]);
-    w.confirm_sales_order(order, company, &first, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &first, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     let second = ScriptedCosts::healthy([(item, Some("999"))]);
     assert!(matches!(
-        w.confirm_sales_order(order, company, &second, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err(),
+        w.confirm_sales_order(order, &second, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err(),
         SellingError::NotDraft(_)
     ));
     assert_eq!(
@@ -265,12 +258,11 @@ async fn a_losing_confirm_rolls_its_stamp_back() {
 async fn rollup_covers_the_costed_subset_only() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = draft_order(&w, company, vec![line(a, "5", "1000", "0"), line(b, "1", "777", "0")]).await;
+    let order = draft_order(&w, vec![line(a, "5", "1000", "0"), line(b, "1", "777", "0")]).await;
 
     let costs = ScriptedCosts::healthy([(a, Some("200")), (b, None)]);
-    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     let view = w.order_margin_view(order).await.unwrap();
     assert_eq!(view.margin_lines_costed, 1);
@@ -291,16 +283,14 @@ async fn rollup_covers_the_costed_subset_only() {
 async fn negative_margins_are_reported_not_clamped() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let (loss_item, free_item) = (Uuid::new_v4(), Uuid::new_v4());
     let order = draft_order(
         &w,
-        company,
         vec![line(loss_item, "2", "100", "0"), line(free_item, "3", "0", "0")],
     ).await;
 
     let costs = ScriptedCosts::healthy([(loss_item, Some("150")), (free_item, Some("150"))]);
-    w.confirm_sales_order(order, company, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(order, &costs, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
 
     let view = w.order_margin_view(order).await.unwrap();
     let loss = view.lines.iter().find(|l| l.item_id == loss_item).unwrap();
@@ -391,9 +381,10 @@ async fn send(
 #[tokio::test]
 async fn client_authored_cost_and_margin_injection_is_ignored() {
     let pool = pool().await;
-    let company = Uuid::new_v4();
     let item = Uuid::new_v4();
     let app = probe_app(ScriptedCosts::healthy([(item, Some("100"))])).await;
+    // The guarded routes verify the token's signature (authn); no claim is read further.
+    let company = Uuid::new_v4();
 
     // The injected `unitCost`/`margin` fields ride the body; the API takes no notice.
     let body = format!(

@@ -48,7 +48,6 @@ impl std::ops::Deref for QuotationTemplateId {
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct QuotationTemplate {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub name: String,
     pub validity_days: i32,
     pub default_notes: Option<String>,
@@ -64,10 +63,9 @@ impl QuotationTemplate {
     }
 
     /// Create a new QuotationTemplate with required fields
-    pub fn new(company_id: Uuid, name: String, validity_days: i32) -> Self {
+    pub fn new(name: String, validity_days: i32) -> Self {
         Self {
             id: Uuid::new_v4(),
-            company_id,
             name,
             validity_days,
             default_notes: None,
@@ -144,9 +142,6 @@ impl QuotationTemplate {
     pub fn apply_patch(&mut self, fields: std::collections::HashMap<String, serde_json::Value>) {
         for (key, value) in fields {
             match key.as_str() {
-                "company_id" => {
-                    if let Ok(v) = serde_json::from_value(value) { self.company_id = v; }
-                }
                 "name" => {
                     if let Ok(v) = serde_json::from_value(value) { self.name = v; }
                 }
@@ -210,14 +205,10 @@ impl backbone_orm::EntityRepoMeta for QuotationTemplate {
     fn column_types() -> std::collections::HashMap<String, String> {
         let mut m = std::collections::HashMap::new();
         m.insert("id".to_string(), "uuid".to_string());
-        m.insert("company_id".to_string(), "uuid".to_string());
         m
     }
     fn search_fields() -> &'static [&'static str] {
         &["name"]
-    }
-    fn company_field() -> Option<&'static str> {
-        Some("company_id")
     }
 }
 
@@ -227,19 +218,12 @@ impl backbone_orm::EntityRepoMeta for QuotationTemplate {
 /// System fields (id, metadata, timestamps) are auto-initialized.
 #[derive(Debug, Clone, Default)]
 pub struct QuotationTemplateBuilder {
-    company_id: Option<Uuid>,
     name: Option<String>,
     validity_days: Option<i32>,
     default_notes: Option<String>,
 }
 
 impl QuotationTemplateBuilder {
-    /// Set the company_id field (required)
-    pub fn company_id(mut self, value: Uuid) -> Self {
-        self.company_id = Some(value);
-        self
-    }
-
     /// Set the name field (required)
     pub fn name(mut self, value: String) -> Self {
         self.name = Some(value);
@@ -262,12 +246,10 @@ impl QuotationTemplateBuilder {
     ///
     /// Returns Err if any required field without a default is missing.
     pub fn build(self) -> Result<QuotationTemplate, String> {
-        let company_id = self.company_id.ok_or_else(|| "company_id is required".to_string())?;
         let name = self.name.ok_or_else(|| "name is required".to_string())?;
 
         Ok(QuotationTemplate {
             id: Uuid::new_v4(),
-            company_id,
             name,
             validity_days: self.validity_days.unwrap_or(30),
             default_notes: self.default_notes,

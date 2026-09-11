@@ -44,10 +44,9 @@ fn line() -> NewLine {
         quantity: d("1"), unit_price: d("1000"), line_discount: d("0"),
     }
 }
-async fn draft_order(w: &SellingWriteService, company: Uuid) -> Uuid {
+async fn draft_order(w: &SellingWriteService) -> Uuid {
     w.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None,
-        company_id: company, branch_id: None, customer_id: Uuid::new_v4(),
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, branch_id: None, customer_id: Uuid::new_v4(),
         order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 25).unwrap(),
         delivery_date: None, currency: None, tax_rate: d("0"), notes: None,
         lines: vec![line()],
@@ -60,11 +59,10 @@ async fn draft_order(w: &SellingWriteService, company: Uuid) -> Uuid {
 async fn attach_creates_a_pending_link_and_guards_the_amount() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let order = draft_order(&w, company).await;
+    let order = draft_order(&w).await;
     let expense = Uuid::new_v4(); // on faith — an arbitrary id is exactly the contract
 
-    let link = w.attach_expense_reinvoice(order, expense, d("150000.00"), company).await.unwrap();
+    let link = w.attach_expense_reinvoice(order, expense, d("150000.00")).await.unwrap();
     let (amount, state): (Decimal, String) = sqlx::query(
         "SELECT amount, state::text FROM selling.expense_reinvoice_links WHERE id=$1")
         .bind(link).fetch_one(&pool).await
@@ -73,11 +71,11 @@ async fn attach_creates_a_pending_link_and_guards_the_amount() {
     assert_eq!(state, "pending");
 
     assert!(matches!(
-        w.attach_expense_reinvoice(order, Uuid::new_v4(), d("0"), company).await.unwrap_err(),
+        w.attach_expense_reinvoice(order, Uuid::new_v4(), d("0")).await.unwrap_err(),
         SellingError::InvalidReinvoiceAmount
     ));
     assert!(matches!(
-        w.attach_expense_reinvoice(order, Uuid::new_v4(), d("-1"), company).await.unwrap_err(),
+        w.attach_expense_reinvoice(order, Uuid::new_v4(), d("-1")).await.unwrap_err(),
         SellingError::InvalidReinvoiceAmount
     ));
 }
@@ -88,46 +86,40 @@ async fn attach_creates_a_pending_link_and_guards_the_amount() {
 async fn duplicate_order_expense_pair_refuses() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let order = draft_order(&w, company).await;
+    let order = draft_order(&w).await;
     let expense = Uuid::new_v4();
 
-    w.attach_expense_reinvoice(order, expense, d("10.00"), company).await.unwrap();
+    w.attach_expense_reinvoice(order, expense, d("10.00")).await.unwrap();
     assert!(matches!(
-        w.attach_expense_reinvoice(order, expense, d("20.00"), company).await.unwrap_err(),
+        w.attach_expense_reinvoice(order, expense, d("20.00")).await.unwrap_err(),
         SellingError::DuplicateReinvoice
     ));
     // a different expense on the same order, or the same expense on another order: both fine.
-    w.attach_expense_reinvoice(order, Uuid::new_v4(), d("5.00"), company).await.unwrap();
-    let other = draft_order(&w, company).await;
-    w.attach_expense_reinvoice(other, expense, d("10.00"), company).await.unwrap();
+    w.attach_expense_reinvoice(order, Uuid::new_v4(), d("5.00")).await.unwrap();
+    let other = draft_order(&w).await;
+    w.attach_expense_reinvoice(other, expense, d("10.00")).await.unwrap();
 }
 
 // R3: attach refuses on a CANCELLED order (`invalid_transition` — nothing may rebill against a
-// dead order) and on an unknown/wrong-tenant order (`order_not_found`, no leak).
+// dead order) and on an unknown order (`order_not_found`, no leak).
 #[tokio::test]
 async fn attach_refuses_cancelled_and_unknown_orders() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let cancelled = draft_order(&w, company).await;
-    w.cancel_sales_order(cancelled, company, &NoStockFulfillmentPort).await.unwrap();
+    let cancelled = draft_order(&w).await;
+    w.cancel_sales_order(cancelled, &NoStockFulfillmentPort).await.unwrap();
 
-    match w.attach_expense_reinvoice(cancelled, Uuid::new_v4(), d("10.00"), company).await.unwrap_err() {
+    match w.attach_expense_reinvoice(cancelled, Uuid::new_v4(), d("10.00")).await.unwrap_err() {
         SellingError::InvalidTransition { verb, current } => {
             assert_eq!(verb, "attach_expense_reinvoice");
             assert_eq!(current, "cancelled");
         }
         other => panic!("expected InvalidTransition, got {other:?}"),
     }
-    // unknown order and cross-tenant order are both plain not-found.
+    // an unknown order is plain not-found (under a composed tenancy decorator a foreign id is
+    // indistinguishable — which is the point, ADR-0029).
     assert!(matches!(
-        w.attach_expense_reinvoice(Uuid::new_v4(), Uuid::new_v4(), d("10.00"), company).await.unwrap_err(),
-        SellingError::OrderNotFound(_)
-    ));
-    let foreign_order = draft_order(&w, Uuid::new_v4()).await;
-    assert!(matches!(
-        w.attach_expense_reinvoice(foreign_order, Uuid::new_v4(), d("10.00"), company).await.unwrap_err(),
+        w.attach_expense_reinvoice(Uuid::new_v4(), Uuid::new_v4(), d("10.00")).await.unwrap_err(),
         SellingError::OrderNotFound(_)
     ));
 }
@@ -138,16 +130,15 @@ async fn attach_refuses_cancelled_and_unknown_orders() {
 async fn mark_invoiced_flips_once_and_refuses_loudly_on_repeat() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let order = draft_order(&w, company).await;
-    let link = w.attach_expense_reinvoice(order, Uuid::new_v4(), d("75.50"), company).await.unwrap();
+    let order = draft_order(&w).await;
+    let link = w.attach_expense_reinvoice(order, Uuid::new_v4(), d("75.50")).await.unwrap();
 
-    w.mark_expense_reinvoice_invoiced(link, company).await.unwrap();
+    w.mark_expense_reinvoice_invoiced(link).await.unwrap();
     let state: String = sqlx::query_scalar("SELECT state::text FROM selling.expense_reinvoice_links WHERE id=$1")
         .bind(link).fetch_one(&pool).await.unwrap();
     assert_eq!(state, "invoiced");
 
-    match w.mark_expense_reinvoice_invoiced(link, company).await.unwrap_err() {
+    match w.mark_expense_reinvoice_invoiced(link).await.unwrap_err() {
         SellingError::InvalidTransition { verb, current } => {
             assert_eq!(verb, "mark_invoiced");
             assert_eq!(current, "invoiced");
@@ -155,46 +146,36 @@ async fn mark_invoiced_flips_once_and_refuses_loudly_on_repeat() {
         other => panic!("expected InvalidTransition, got {other:?}"),
     }
     assert!(matches!(
-        w.mark_expense_reinvoice_invoiced(Uuid::new_v4(), company).await.unwrap_err(),
-        SellingError::ReinvoiceNotFound(_)
-    ));
-    // cross-tenant mark is indistinguishable from unknown.
-    assert!(matches!(
-        w.mark_expense_reinvoice_invoiced(link, Uuid::new_v4()).await.unwrap_err(),
+        w.mark_expense_reinvoice_invoiced(Uuid::new_v4()).await.unwrap_err(),
         SellingError::ReinvoiceNotFound(_)
     ));
 }
 
 // R5: the list returns the order's links (the billing adapter's pull read); an unknown order
-// refuses, and another company's order id yields no listings.
+// id refuses.
 #[tokio::test]
-async fn list_serves_an_orders_links_and_fences_unknown_orders() {
+async fn list_serves_an_orders_links_and_refuses_unknown_orders() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let order = draft_order(&w, company).await;
+    let order = draft_order(&w).await;
     let e1 = Uuid::new_v4();
     let e2 = Uuid::new_v4();
-    let first = w.attach_expense_reinvoice(order, e1, d("10.00"), company).await.unwrap();
-    let second = w.attach_expense_reinvoice(order, e2, d("20.00"), company).await.unwrap();
-    w.mark_expense_reinvoice_invoiced(first, company).await.unwrap();
+    let first = w.attach_expense_reinvoice(order, e1, d("10.00")).await.unwrap();
+    let second = w.attach_expense_reinvoice(order, e2, d("20.00")).await.unwrap();
+    w.mark_expense_reinvoice_invoiced(first).await.unwrap();
 
-    let links = w.list_expense_reinvoices(order, company).await.unwrap();
+    let links = w.list_expense_reinvoices(order).await.unwrap();
     assert_eq!(links.len(), 2);
     assert_eq!(links.iter().find(|l| l.id == first).unwrap().state, "invoiced");
     assert_eq!(links.iter().find(|l| l.id == second).unwrap().state, "pending");
     assert_eq!(links.iter().find(|l| l.id == second).unwrap().amount, d("20.00"));
 
     assert!(matches!(
-        w.list_expense_reinvoices(Uuid::new_v4(), company).await.unwrap_err(),
+        w.list_expense_reinvoices(Uuid::new_v4()).await.unwrap_err(),
         SellingError::OrderNotFound(_)
     ));
-    // the explicit company filter fences even without RLS binding (superuser pool).
-    let foreign = draft_order(&w, Uuid::new_v4()).await;
-    assert!(matches!(
-        w.list_expense_reinvoices(foreign, company).await.unwrap_err(),
-        SellingError::OrderNotFound(_)
-    ));
+    // Row isolation between orders is the composing tenancy decorator's concern (ADR-0029) —
+    // pinned, for the module's own posture, in tests/tenancy_posture_probe.rs.
 }
 
 // ── route-level probe ────────────────────────────────────────────────────────
@@ -255,15 +236,17 @@ async fn send(
 }
 
 // The three verbs served through the guarded routes, in the billing adapter's order: attach →
-// list (pending) → mark-invoiced; every step demands a token; a foreign tenant sees nothing.
+// list (pending) → mark-invoiced; every step demands a token.
 #[tokio::test]
 async fn reinvoice_routes_serve_the_billing_adapter_pull() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
-    let order = draft_order(&w, company).await;
+    let order = draft_order(&w).await;
     let expense = Uuid::new_v4();
     let app = probe_app().await;
+    // The guarded routes verify the token's signature (authn); these verbs read no claim, so
+    // any well-formed claim set decodes.
+    let company = Uuid::new_v4();
 
     // token demanded on every verb.
     for (method, uri, body) in [
@@ -299,15 +282,9 @@ async fn reinvoice_routes_serve_the_billing_adapter_pull() {
     assert_eq!(mine["state"], "pending");
     assert_eq!(mine["expenseId"], expense.to_string());
 
-    // a foreign tenant neither lists nor marks the victim's link.
-    let (status, _) = send(
-        app.clone(), "GET", &format!("/sales-orders/{order}/expense-reinvoices"), None, Some(Uuid::new_v4()),
-    ).await;
-    assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "a foreign tenant must not see the order's links");
-    let (status, _) = send(
-        app.clone(), "POST", &format!("/expense-reinvoices/{link}/mark-invoiced"), None, Some(Uuid::new_v4()),
-    ).await;
-    assert_eq!(status, axum::http::StatusCode::NOT_FOUND, "a foreign tenant must not mark the link");
+    // Row isolation between callers is the composing tenancy decorator's concern (ADR-0029);
+    // the module's own posture (armed flags, zero policies) is pinned in
+    // tests/tenancy_posture_probe.rs.
 
     // mark through the route; the double mark is loud.
     let (status, body) = send(

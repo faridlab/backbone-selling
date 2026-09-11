@@ -59,7 +59,6 @@ pub struct ServiceDeliveryLine {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ServiceDeliveryRequest {
     pub order_id: Uuid,
-    pub company_id: Uuid,
     pub customer_id: Uuid,
     /// The order number — the human correspondence key on the minted project.
     pub order_number: String,

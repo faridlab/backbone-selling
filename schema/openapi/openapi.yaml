@@ -3331,15 +3331,11 @@ components:
       type: object
       required:
         - id
-        - company_id
         - name
         - active
         - metadata
       properties:
         id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         name:
@@ -3370,14 +3366,10 @@ components:
     CreateDeliveryCarrierRequest:
       type: object
       required:
-        - company_id
         - name
         - active
         - metadata
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -3393,14 +3385,10 @@ components:
     UpdateDeliveryCarrierRequest:
       type: object
       required:
-        - company_id
         - name
         - active
         - metadata
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -3416,9 +3404,6 @@ components:
     PatchDeliveryCarrierRequest:
       type: object
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -3445,7 +3430,6 @@ components:
       type: object
       required:
         - id
-        - company_id
         - order_id
         - expense_id
         - amount
@@ -3453,9 +3437,6 @@ components:
         - metadata
       properties:
         id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         order_id:
@@ -3487,16 +3468,12 @@ components:
     CreateExpenseReinvoiceLinkRequest:
       type: object
       required:
-        - company_id
         - order_id
         - expense_id
         - amount
         - state
         - metadata
       properties:
-        company_id:
-          type: string
-          format: uuid
         order_id:
           type: string
           format: uuid
@@ -3513,16 +3490,12 @@ components:
     UpdateExpenseReinvoiceLinkRequest:
       type: object
       required:
-        - company_id
         - order_id
         - expense_id
         - amount
         - state
         - metadata
       properties:
-        company_id:
-          type: string
-          format: uuid
         order_id:
           type: string
           format: uuid
@@ -3539,9 +3512,6 @@ components:
     PatchExpenseReinvoiceLinkRequest:
       type: object
       properties:
-        company_id:
-          type: string
-          format: uuid
         order_id:
           type: string
           format: uuid
@@ -3570,7 +3540,6 @@ components:
       required:
         - id
         - quotation_number
-        - company_id
         - customer_id
         - status
         - quotation_date
@@ -3587,9 +3556,6 @@ components:
         quotation_number:
           type: string
           maxLength: 40
-        company_id:
-          type: string
-          format: uuid
         branch_id:
           nullable: true
           type: string
@@ -3649,7 +3615,6 @@ components:
       type: object
       required:
         - quotation_number
-        - company_id
         - customer_id
         - status
         - quotation_date
@@ -3663,9 +3628,6 @@ components:
         quotation_number:
           type: string
           maxLength: 40
-        company_id:
-          type: string
-          format: uuid
         branch_id:
           nullable: true
           type: string
@@ -3712,7 +3674,6 @@ components:
       type: object
       required:
         - quotation_number
-        - company_id
         - customer_id
         - status
         - quotation_date
@@ -3726,9 +3687,6 @@ components:
         quotation_number:
           type: string
           maxLength: 40
-        company_id:
-          type: string
-          format: uuid
         branch_id:
           nullable: true
           type: string
@@ -3777,9 +3735,6 @@ components:
         quotation_number:
           type: string
           maxLength: 40
-        company_id:
-          type: string
-          format: uuid
         branch_id:
           nullable: true
           type: string
@@ -3837,7 +3792,6 @@ components:
       required:
         - id
         - quotation_id
-        - company_id
         - item_id
         - quantity
         - unit_price
@@ -3851,9 +3805,6 @@ components:
           type: string
           format: uuid
         quotation_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         item_id:
@@ -3895,7 +3846,6 @@ components:
       type: object
       required:
         - quotation_id
-        - company_id
         - item_id
         - quantity
         - unit_price
@@ -3906,9 +3856,6 @@ components:
         - metadata
       properties:
         quotation_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         item_id:
@@ -3937,7 +3884,6 @@ components:
       type: object
       required:
         - quotation_id
-        - company_id
         - item_id
         - quantity
         - unit_price
@@ -3948,9 +3894,6 @@ components:
         - metadata
       properties:
         quotation_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         item_id:
@@ -3979,9 +3922,6 @@ components:
       type: object
       properties:
         quotation_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         item_id:
@@ -4020,15 +3960,11 @@ components:
       type: object
       required:
         - id
-        - company_id
         - name
         - validity_days
         - metadata
       properties:
         id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         name:
@@ -4060,14 +3996,10 @@ components:
     CreateQuotationTemplateRequest:
       type: object
       required:
-        - company_id
         - name
         - validity_days
         - metadata
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -4084,14 +4016,10 @@ components:
     UpdateQuotationTemplateRequest:
       type: object
       required:
-        - company_id
         - name
         - validity_days
         - metadata
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -4108,9 +4036,6 @@ components:
     PatchQuotationTemplateRequest:
       type: object
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -4139,7 +4064,6 @@ components:
       required:
         - id
         - order_number
-        - company_id
         - customer_id
         - status
         - order_date
@@ -4168,9 +4092,6 @@ components:
           nullable: true
           type: string
           maxLength: 120
-        company_id:
-          type: string
-          format: uuid
         branch_id:
           nullable: true
           type: string
@@ -4222,7 +4143,6 @@ components:
       type: object
       required:
         - order_number
-        - company_id
         - customer_id
         - status
         - order_date
@@ -4248,9 +4168,6 @@ components:
           nullable: true
           type: string
           maxLength: 120
-        company_id:
-          type: string
-          format: uuid
         branch_id:
           nullable: true
           type: string
@@ -4289,7 +4206,6 @@ components:
       type: object
       required:
         - order_number
-        - company_id
         - customer_id
         - status
         - order_date
@@ -4315,9 +4231,6 @@ components:
           nullable: true
           type: string
           maxLength: 120
-        company_id:
-          type: string
-          format: uuid
         branch_id:
           nullable: true
           type: string
@@ -4370,9 +4283,6 @@ components:
           nullable: true
           type: string
           maxLength: 120
-        company_id:
-          type: string
-          format: uuid
         branch_id:
           nullable: true
           type: string
@@ -4422,7 +4332,6 @@ components:
       required:
         - id
         - order_id
-        - company_id
         - item_id
         - quantity
         - unit_price
@@ -4438,9 +4347,6 @@ components:
           type: string
           format: uuid
         order_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         item_id:
@@ -4497,7 +4403,6 @@ components:
       type: object
       required:
         - order_id
-        - company_id
         - item_id
         - quantity
         - unit_price
@@ -4510,9 +4415,6 @@ components:
         - metadata
       properties:
         order_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         item_id:
@@ -4556,7 +4458,6 @@ components:
       type: object
       required:
         - order_id
-        - company_id
         - item_id
         - quantity
         - unit_price
@@ -4569,9 +4470,6 @@ components:
         - metadata
       properties:
         order_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         item_id:
@@ -4615,9 +4513,6 @@ components:
       type: object
       properties:
         order_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         item_id:
@@ -4671,14 +4566,10 @@ components:
       type: object
       required:
         - id
-        - company_id
         - name
         - metadata
       properties:
         id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         name:
@@ -4707,13 +4598,9 @@ components:
     CreateSalesTeamRequest:
       type: object
       required:
-        - company_id
         - name
         - metadata
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -4727,13 +4614,9 @@ components:
     UpdateSalesTeamRequest:
       type: object
       required:
-        - company_id
         - name
         - metadata
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -4747,9 +4630,6 @@ components:
     PatchSalesTeamRequest:
       type: object
       properties:
-        company_id:
-          type: string
-          format: uuid
         name:
           type: string
           maxLength: 120
@@ -4775,7 +4655,6 @@ components:
       required:
         - id
         - order_id
-        - company_id
         - sales_person_id
         - allocated_pct
         - metadata
@@ -4784,9 +4663,6 @@ components:
           type: string
           format: uuid
         order_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         sales_person_id:
@@ -4818,15 +4694,11 @@ components:
       type: object
       required:
         - order_id
-        - company_id
         - sales_person_id
         - allocated_pct
         - metadata
       properties:
         order_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         sales_person_id:
@@ -4845,15 +4717,11 @@ components:
       type: object
       required:
         - order_id
-        - company_id
         - sales_person_id
         - allocated_pct
         - metadata
       properties:
         order_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         sales_person_id:
@@ -4872,9 +4740,6 @@ components:
       type: object
       properties:
         order_id:
-          type: string
-          format: uuid
-        company_id:
           type: string
           format: uuid
         sales_person_id:

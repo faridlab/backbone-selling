@@ -6,7 +6,6 @@
 
 -- INSERT INTO selling.delivery_carriers (
 --     id,
---     company_id,
 --     name,
 --     active,
 --     tracking_url_template,

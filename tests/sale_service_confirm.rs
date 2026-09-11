@@ -6,7 +6,7 @@
 //! the point of the ports):
 //!
 //!   confirm MINTS service delivery per non-downpayment line — the request carries the order's
-//!   identity (id, company, customer, number, currency) and one entry per live non-downpayment
+//!   identity (id, customer, number, currency) and one entry per live non-downpayment
 //!   line with its resolved rung and anchors; the mint's outcomes are STAMPED back onto exactly
 //!   the lines that minted (manual/untracked lines and downpayments keep NULL); a task-in-project
 //!   order's lines share ONE project; a second confirm of a confirmed order refuses (selling
@@ -51,7 +51,7 @@ use backbone_selling::application::service::selling_write_service::{
 
 // ── the scripted fakes (the composition's adapter stand-ins) ───────────────────
 
-/// One recorded catalog call: (company, distinct item ids asked for).
+/// One recorded catalog call: (legacy tenant twin, distinct item ids asked for).
 type CatalogCall = (Uuid, Vec<Uuid>);
 /// The mint's per-line record: sale line -> (project id, task id).
 type MintedIds = HashMap<Uuid, (Uuid, Option<Uuid>)>;
@@ -199,13 +199,12 @@ fn downpayment_line(item: Uuid, qty: &str) -> NewLine {
         line_discount: Decimal::ZERO,
     }
 }
-async fn draft_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewLine>) -> Uuid {
+async fn draft_order(w: &SellingWriteService, lines: Vec<NewLine>) -> Uuid {
     let n = uq("SO");
     w.create_sales_order(NewSalesOrder {
         order_number: n,
         quotation_id: None,
         delivery_carrier_id: None,
-        company_id: company,
         branch_id: None,
         customer_id: Uuid::new_v4(),
         order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 29).unwrap(),
@@ -242,7 +241,7 @@ async fn line_backrefs(pool: &PgPool, order: Uuid) -> Vec<(Uuid, Option<Uuid>, O
 
 // ── (a) confirm mints service delivery per line and stamps the backrefs ──────
 
-// Request shape + stamping: the mint request models the order's identity (id, company,
+// Request shape + stamping: the mint request models the order's identity (id,
 // customer, number, currency) with ONE entry per live NON-DOWNPAYMENT line carrying its
 // resolved rung + anchors; duplicate items are resolved once; the outcomes are stamped onto
 // exactly the minted lines — a task-in-project order's lines share ONE project, each line
@@ -252,7 +251,6 @@ async fn line_backrefs(pool: &PgPool, order: Uuid) -> Vec<(Uuid, Option<Uuid>, O
 async fn confirm_mints_per_line_and_stamps_backrefs() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let (svc, fixed, plain) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
     let (template_id, fixed_project_id) = (Uuid::new_v4(), Uuid::new_v4());
     let cat = FakeCatalog::default();
@@ -277,7 +275,6 @@ async fn confirm_mints_per_line_and_stamps_backrefs() {
     // one untracked product + a downpayment.
     let order = draft_order(
         &w,
-        company,
         vec![
             line(svc, "10"),
             line(svc, "4"),
@@ -295,7 +292,7 @@ async fn confirm_mints_per_line_and_stamps_backrefs() {
     .await
     .unwrap();
 
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+    w.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap();
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
@@ -304,7 +301,9 @@ async fn confirm_mints_per_line_and_stamps_backrefs() {
     {
         let calls = cat.calls.lock().unwrap();
         assert_eq!(calls.len(), 1, "one policy resolution per confirm");
-        assert_eq!(calls[0].0, company);
+        // The catalog request's company is the legacy tenant twin (ADR-0029): the ambient org
+        // scope's echo — nil on this undecorated deployment.
+        assert_eq!(calls[0].0, Uuid::nil());
         let mut asked = calls[0].1.clone();
         asked.sort_unstable();
         let mut expected = vec![svc, fixed, plain];
@@ -318,7 +317,6 @@ async fn confirm_mints_per_line_and_stamps_backrefs() {
         assert_eq!(mints.len(), 1, "one mint request per confirm");
         let req = &mints[0];
         assert_eq!(req.order_id, order);
-        assert_eq!(req.company_id, company);
         assert_eq!(req.order_number, order_number);
         assert_eq!(req.currency, "IDR", "the order's default currency rides the request");
         assert_eq!(req.lines.len(), 4, "the downpayment line never drives delivery work");
@@ -380,7 +378,7 @@ async fn confirm_mints_per_line_and_stamps_backrefs() {
     // harmless. Assert exactly that — the re-mint minted NOTHING new.
     let minted_before = del.line_ids.lock().unwrap().clone();
     match w
-        .confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+        .confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap_err()
     {
@@ -411,7 +409,7 @@ async fn confirm_mints_per_line_and_stamps_backrefs() {
 async fn manual_and_untracked_products_mint_nothing() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let cat = FakeCatalog::default();
     *cat.info.lock().unwrap() = vec![ServiceTrackingInfo {
         item_id: item,
@@ -421,8 +419,8 @@ async fn manual_and_untracked_products_mint_nothing() {
     }];
     let del = FakeDelivery::default();
 
-    let order = draft_order(&w, company, vec![line(item, "3")]).await;
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+    let order = draft_order(&w, vec![line(item, "3")]).await;
+    w.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap();
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
@@ -445,7 +443,7 @@ async fn manual_and_untracked_products_mint_nothing() {
 async fn mint_refusal_refuses_confirm_and_is_retryable() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let cat = FakeCatalog::default();
     *cat.info.lock().unwrap() = vec![ServiceTrackingInfo {
         item_id: item,
@@ -457,9 +455,9 @@ async fn mint_refusal_refuses_confirm_and_is_retryable() {
     *del.err.lock().unwrap() =
         Some(FakeDelivery::err("fixed_project_missing", "the product names no fixed project"));
 
-    let order = draft_order(&w, company, vec![line(item, "5")]).await;
+    let order = draft_order(&w, vec![line(item, "5")]).await;
     match w
-        .confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+        .confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap_err()
     {
@@ -482,7 +480,7 @@ async fn mint_refusal_refuses_confirm_and_is_retryable() {
     assert_eq!(stamped, 0, "a refused mint writes no cost stamp either (stamps ride the confirm tx)");
 
     // Not sticky: the armed error is consumed; the retry mints and confirms.
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+    w.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap();
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
@@ -495,7 +493,7 @@ async fn mint_refusal_refuses_confirm_and_is_retryable() {
 async fn catalog_refusal_refuses_confirm_before_any_mint() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
+    let item = Uuid::new_v4();
     let cat = FakeCatalog::default();
     *cat.err.lock().unwrap() = Some(ServiceCatalogError {
         code: "surface_unreadable".into(),
@@ -503,9 +501,9 @@ async fn catalog_refusal_refuses_confirm_before_any_mint() {
     });
     let del = FakeDelivery::default();
 
-    let order = draft_order(&w, company, vec![line(item, "5")]).await;
+    let order = draft_order(&w, vec![line(item, "5")]).await;
     match w
-        .confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+        .confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap_err()
     {
@@ -526,11 +524,10 @@ async fn catalog_refusal_refuses_confirm_before_any_mint() {
 async fn unwired_composition_matches_pre_seam_behavior() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, item) = (Uuid::new_v4(), Uuid::new_v4());
-    let order = draft_order(&w, company, vec![line(item, "6")]).await;
+    let item = Uuid::new_v4();
+    let order = draft_order(&w, vec![line(item, "6")]).await;
     w.confirm_sales_order(
         order,
-        company,
         &NoUnitCostPort,
         &NoStockFulfillmentPort,
         &NoServiceCatalog,

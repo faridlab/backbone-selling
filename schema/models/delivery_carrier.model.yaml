@@ -3,8 +3,8 @@
 # Entity: DeliveryCarrier
 # Description: Delivery-carrier master — registry only. No rates, no labels, no
 # carrier API surface (a later wave may add them; this pass is the name book +
-# the order link). Per-tenant master data; company_id is a logical FK
-# (ADR-0010 direct-fencing pattern).
+# the order link). Per-tenant master data under the composing service's org
+# scoping (ADR-0029); the module itself ships no tenancy column.
 # =============================================================================
 
 models:
@@ -17,11 +17,6 @@ models:
         type: uuid
         attributes: ["@id", "@default(uuid)"]
         description: "Unique delivery-carrier identifier"
-
-      company_id:
-        type: uuid
-        attributes: ["@required", "@exclude_from_foreign_key_check"]
-        description: "Books owner # logical FK organization.Company.id (direct fencing, ADR-0010)"
 
       name:
         type: string
@@ -44,8 +39,6 @@ models:
         description: "Audit metadata"
 
     indexes:
-      - type: unique
-        fields: [company_id, name]
-        where: "deleted_at IS NULL"
-      - type: index
-        fields: [company_id]
+      # No tenancy indexes (ADR-0029): the module is tenant-agnostic. The per-unit
+      # carrier-name unique is installed by the composing service's tenancy decorator
+      # (org_unit_id-leading), not declared here.

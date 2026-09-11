@@ -30,8 +30,17 @@
 //! - [`super::selling_invoice_seam`] — `build_invoice_request`, `mark_invoiced` (order-to-cash
 //!   mirror; capacity-checked `FOR UPDATE` allocation rejects `OverBilled`).
 //!
+//! **Tenancy (ADR-0029).** The module is tenant-agnostic: its tables carry no scoping column and
+//! the module keys no statement on a tenant. A composing service's tenancy decorator installs the
+//! org-unit axis; this service only re-binds the caller's ambient org scope onto the transactions
+//! it opens itself (the scope is task-local and does not survive a fresh pool transaction). Wire
+//! shapes consumed by still-company-fenced callers (the durable-outbox record, port requests to
+//! unstripped modules) carry a legacy company id echoed from that ambient scope — nil when none
+//! is bound.
+//!
 //! Money: `NUMERIC` in the DB; `Decimal` here; half-up to 2dp so `Σ credit == debit` exactly.
 
+use backbone_orm::org_scope;
 use rust_decimal::{Decimal, RoundingStrategy};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -49,6 +58,31 @@ use super::selling_events::{LoggingSink, SellingEventSink};
 /// Round to 2 decimal places, half away from zero (IDR money convention).
 pub(super) fn money(v: Decimal) -> Decimal {
     v.round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
+}
+
+/// The legacy tenancy twin echo (ADR-0029): outbound wire shapes that still carry a `company_id`
+/// (the durable-outbox record, port requests to unstripped consumer modules) get the ambient org
+/// scope's legacy company id when the composing service bound one; nil otherwise. Nothing in this
+/// module keys a statement on it, and an undecorated deployment is unfenced by design.
+pub(super) fn legacy_company_echo() -> Uuid {
+    org_scope::current_org_scope()
+        .and_then(|s| s.legacy_company_id())
+        .unwrap_or(Uuid::nil())
+}
+
+/// Re-bind the caller's ambient org scope onto a transaction this service opened itself — the
+/// scope is task-local and a fresh pool transaction carries none of it. With no ambient scope
+/// (standalone deployment, jobs) the transaction stays plain: the module is tenant-agnostic and
+/// the composed decorator owns isolation.
+pub(super) async fn relay_ambient_scope(
+    tx: &mut sqlx::PgConnection,
+) -> Result<(), SellingError> {
+    if let Some(scope) = org_scope::current_org_scope() {
+        org_scope::bind_org_scope_on(tx, &scope)
+            .await
+            .map_err(SellingError::Db)?;
+    }
+    Ok(())
 }
 
 // --- input structs -----------------------------------------------------------
@@ -73,7 +107,6 @@ pub struct NewLine {
 #[derive(Debug, Clone)]
 pub struct NewQuotation {
     pub quotation_number: String,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub quotation_date: chrono::NaiveDate,
@@ -93,10 +126,9 @@ pub struct NewQuotation {
 pub struct NewSalesOrder {
     pub order_number: String,
     pub quotation_id: Option<Uuid>,
-    /// Carrier chosen at create time (validated against the company's carrier registry before
+    /// Carrier chosen at create time (validated against the module's carrier registry before
     /// the insert; the tracking number is verb-only — `set_order_delivery`).
     pub delivery_carrier_id: Option<Uuid>,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub order_date: chrono::NaiveDate,
@@ -125,11 +157,10 @@ pub struct CartOrderLine {
 pub struct NewCartSalesOrder {
     pub order_number: String,
     /// Carrier chosen before the mint (the storefront stamps it on the
-    /// cart under the checkout lock). Validated against the company's
+    /// cart under the checkout lock). Validated against the module's
     /// carrier registry exactly like `NewSalesOrder`'s field — the plain
     /// and priced create paths share one validation shape.
     pub delivery_carrier_id: Option<Uuid>,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub customer_group_id: Option<Uuid>,
@@ -205,13 +236,15 @@ pub enum SellingError {
     /// roll the flip back). The order IS cancelled; this error says the stock side was not
     /// told — re-invoke the retry verb with a healthy engine. Never silently swallowed.
     DecreaseActivityFailed { code: String, message: String },
-    /// Unknown or cross-tenant delivery-carrier id (create-with-carrier / set-delivery /
-    /// carrier update). Never surfaced via the FK violation's 500 — a company-scoped pre-read
-    /// classifies it.
+    /// Unknown delivery-carrier id (create-with-carrier / set-delivery / carrier update). Never
+    /// surfaced via the FK violation's 500 — a pre-read classifies it. Under a composed tenancy
+    /// decorator another tenant's carrier is indistinguishable from a missing one, which is the
+    /// point.
     CarrierNotFound(Uuid),
-    /// A live carrier of this name already exists for the company (mirrors `TemplateDuplicate`).
+    /// A live carrier of this name already exists (mirrors `TemplateDuplicate`).
     CarrierDuplicate(String),
-    /// Unknown, wrong-tenant, or soft-deleted expense-reinvoice link.
+    /// Unknown or soft-deleted expense-reinvoice link (under a composed tenancy decorator,
+    /// another tenant's link is indistinguishable from a missing one — which is the point).
     ReinvoiceNotFound(Uuid),
     /// This expense is already rebilled on this order (a live link exists — the double-bill guard).
     DuplicateReinvoice,

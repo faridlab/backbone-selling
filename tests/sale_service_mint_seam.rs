@@ -20,8 +20,8 @@
 //!            selling launches the mint before its draft guard) re-invokes the port and still
 //!            mints nothing new.
 //!
-//!   SSMS-3 (fail-closed refusal): a fixed-project line whose anchor lives in ANOTHER company is
-//!            invisible to the company-scoped mint — the port refuses, the whole confirm refuses,
+//!   SSMS-3 (fail-closed refusal): a fixed-project line whose anchor is not a LIVE project in
+//!            scope is invisible to the mint — the port refuses, the whole confirm refuses,
 //!            the order stays draft, and no project work exists.
 //!
 //! Requires DATABASE_URL pointing at a scratch DB with BOTH the selling and the project
@@ -100,7 +100,6 @@ impl ProjectFulfillmentPort for RealProjectFulfillment {
         // The DTO mapping IS the seam: same wire vocabulary, duplicated per side by design.
         let mapped = backbone_project::application::service::project_write_service::ServiceDeliveryRequest {
             order_id: req.order_id,
-            company_id: req.company_id,
             customer_id: req.customer_id,
             order_number: req.order_number.clone(),
             currency: req.currency.clone(),
@@ -215,13 +214,12 @@ fn downpayment_line(item: Uuid, qty: &str) -> NewLine {
         line_discount: Decimal::ZERO,
     }
 }
-async fn draft_order(w: &SellingWriteService, company: Uuid, lines: Vec<NewLine>) -> Uuid {
+async fn draft_order(w: &SellingWriteService, lines: Vec<NewLine>) -> Uuid {
     let n = uq("SO");
     w.create_sales_order(NewSalesOrder {
         order_number: n,
         quotation_id: None,
         delivery_carrier_id: None,
-        company_id: company,
         branch_id: None,
         customer_id: Uuid::new_v4(),
         order_date: chrono::NaiveDate::from_ymd_opt(2026, 8, 29).unwrap(),
@@ -257,24 +255,22 @@ async fn line_backrefs(pool: &PgPool, order: Uuid) -> Vec<(Uuid, Option<Uuid>, O
 }
 
 /// Seed one active project template (project_type `external`) with two blueprint tasks.
-async fn seed_template(pool: &PgPool, company: Uuid) -> Uuid {
+async fn seed_template(pool: &PgPool) -> Uuid {
     let id = Uuid::new_v4();
     sqlx::query(
-        r#"INSERT INTO project.project_templates (id, company_id, template_name, project_type, status)
-           VALUES ($1,$2,'Installation blueprint','external','active')"#,
+        r#"INSERT INTO project.project_templates (id, template_name, project_type, status)
+           VALUES ($1,'Installation blueprint','external','active')"#,
     )
     .bind(id)
-    .bind(company)
     .execute(pool)
     .await
     .unwrap();
     for (subject, seq) in [("Site survey", 1), ("Commissioning", 2)] {
         sqlx::query(
-            r#"INSERT INTO project.project_template_tasks (template_id, company_id, subject, expected_time, sequence)
-               VALUES ($1,$2,$3,0,$4)"#,
+            r#"INSERT INTO project.project_template_tasks (template_id, subject, expected_time, sequence)
+               VALUES ($1,$2,0,$3)"#,
         )
         .bind(id)
-        .bind(company)
         .bind(subject)
         .bind(seq)
         .execute(pool)
@@ -286,11 +282,10 @@ async fn seed_template(pool: &PgPool, company: Uuid) -> Uuid {
 
 /// The live project minted for a sales order (NULL when the order minted none), plus the live
 /// task count under a project (blueprint tasks have NULL origin lines; line tasks carry theirs).
-async fn order_project(pool: &PgPool, company: Uuid, order: Uuid) -> Option<Uuid> {
+async fn order_project(pool: &PgPool, order: Uuid) -> Option<Uuid> {
     sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM project.projects WHERE company_id=$1 AND source_so_id=$2",
+        "SELECT id FROM project.projects WHERE source_so_id=$1",
     )
-    .bind(company)
     .bind(order)
     .fetch_optional(pool)
     .await
@@ -319,15 +314,13 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
     let projects = ProjectWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let (tpl_item, fixed_item, plain_item) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
 
     // The product surface: a template-forking per-order service, a fixed-project service, and an
     // untracked product (absent from the resolution — the manual policy).
-    let template_id = seed_template(&pool, company).await;
+    let template_id = seed_template(&pool).await;
     let fixed_project = projects
         .create_project(NewProject {
-            company_id: company,
             project_name: "Global service desk".into(),
             project_type: "internal".into(),
             customer_id: None,
@@ -358,7 +351,6 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
     // fixed-project line + one untracked line + a downpayment.
     let order = draft_order(
         &w,
-        company,
         vec![
             line(tpl_item, "10"),
             line(tpl_item, "4"),
@@ -377,7 +369,7 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
     .unwrap();
 
     // SSMS-1 — the confirm drives the REAL mint and stamps its outcomes.
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+    w.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap();
     assert_eq!(order_status(&pool, order).await, "to_deliver_and_bill");
@@ -386,12 +378,11 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
     assert_eq!(carried.len(), 1, "one mint request per confirm");
     let req = carried[0].clone();
     assert_eq!(req.order_id, order);
-    assert_eq!(req.company_id, company);
     assert_eq!(req.lines.len(), 4, "the downpayment line never drives delivery work");
 
     // The per-order project exists ONCE, keyed by the sales order, named after it, for its
     // customer, in the order's currency, and forked with the template's project type.
-    let minted_project = order_project(&pool, company, order)
+    let minted_project = order_project(&pool, order)
         .await
         .expect("the order minted its project");
     {
@@ -451,10 +442,11 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
 
     // SSMS-2 — the idempotent repeat: the SAME request through the SAME adapter returns the SAME
     // stable ids with minted:false everywhere, and mints nothing new.
+    let order_proj = order_project(&pool, order).await.expect("the order's minted project");
     let total_tasks_before: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM project.tasks WHERE company_id=$1",
+        "SELECT count(*) FROM project.tasks WHERE project_id=$1",
     )
-    .bind(company)
+    .bind(order_proj)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -480,14 +472,14 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
         }
     }
     assert_eq!(
-        order_project(&pool, company, order).await,
+        order_project(&pool, order).await,
         Some(minted_project),
         "still exactly the one order project"
     );
     let total_tasks_after: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM project.tasks WHERE company_id=$1",
+        "SELECT count(*) FROM project.tasks WHERE project_id=$1",
     )
-    .bind(company)
+    .bind(order_proj)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -496,7 +488,7 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
     // And the re-CONFIRM (the crash-window shape): selling re-launches the mint BEFORE its draft
     // guard refuses — the port contract must make that re-mint harmless.
     match w
-        .confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+        .confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap_err()
     {
@@ -507,9 +499,9 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
     // re-confirm's re-mint — which launched before the guard refused and minted nothing.
     assert_eq!(del.carried().len(), 3, "the re-confirm re-minted before its guard refused");
     let total_tasks_reconfirm: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM project.tasks WHERE company_id=$1",
+        "SELECT count(*) FROM project.tasks WHERE project_id=$1",
     )
-    .bind(company)
+    .bind(order_proj)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -529,21 +521,19 @@ async fn confirm_mints_real_project_work_and_the_repeat_mints_nothing() {
 // soft-deleted is simply not found, the port refuses, and the whole confirm refuses BEFORE any
 // work exists — the order stays draft and no project/task row appears for it.
 //
-// (The CROSS-company anchor case is the same not-found refusal, but its invisibility is enforced
-// by the row-level-security fence — `app.company_id` policy — not by a SQL filter, so it is only
-// observable under a fenced role; module test pools run as the migration superuser and bypass
-// RLS. The composed host runs fenced; that is where that arm holds.)
+// (A FOREIGN-unit anchor is the same not-found refusal under a composed tenancy decorator:
+// the decorator's org fence makes it invisible. Module test pools run undecorated and as the
+// migration owner, bypassing any row-level security — so that arm is observable only in the
+// composing service's decorator probes.)
 #[tokio::test]
 async fn soft_deleted_fixed_anchor_refuses_confirm_fail_closed() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
     let projects = ProjectWriteService::new(pool.clone());
-    let company = Uuid::new_v4();
     let item = Uuid::new_v4();
 
     let anchor = projects
         .create_project(NewProject {
-            company_id: company,
             project_name: "Retired service desk".into(),
             project_type: "internal".into(),
             customer_id: None,
@@ -566,9 +556,9 @@ async fn soft_deleted_fixed_anchor_refuses_confirm_fail_closed() {
     }];
     let del = RealProjectFulfillment::new(pool.clone());
 
-    let order = draft_order(&w, company, vec![line(item, "5")]).await;
+    let order = draft_order(&w, vec![line(item, "5")]).await;
     match w
-        .confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
+        .confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &cat, &del)
         .await
         .unwrap_err()
     {
@@ -578,15 +568,16 @@ async fn soft_deleted_fixed_anchor_refuses_confirm_fail_closed() {
         other => panic!("expected ServiceDeliveryRejected, got {other:?}"),
     }
     assert_eq!(order_status(&pool, order).await, "draft", "the order stays draft");
-    assert!(order_project(&pool, company, order).await.is_none(), "no project was minted");
-    let seeded_tasks: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM project.tasks WHERE company_id=$1",
+    assert!(order_project(&pool, order).await.is_none(), "no project was minted");
+    let minted_tasks: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM project.tasks WHERE origin_sale_line_id IN \
+         (SELECT id FROM selling.sales_order_items WHERE order_id=$1)",
     )
-    .bind(company)
+    .bind(order)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(seeded_tasks, 0, "no task was minted");
+    assert_eq!(minted_tasks, 0, "no task was minted for the refused order");
     for r in line_backrefs(&pool, order).await {
         assert_eq!((r.1, r.2), (None, None), "a refused mint writes no backref");
     }

@@ -32,9 +32,6 @@ use crate::domain::entity::AuditMetadata;
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateQuotationTemplateDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
@@ -59,9 +56,6 @@ pub struct CreateQuotationTemplateDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateQuotationTemplateDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
@@ -86,9 +80,6 @@ pub struct UpdateQuotationTemplateDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct PatchQuotationTemplateDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
-    pub company_id: Option<Uuid>,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -104,7 +95,7 @@ pub struct PatchQuotationTemplateDto {
 impl PatchQuotationTemplateDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.company_id.is_some() || self.name.is_some() || self.validity_days.is_some() || self.default_notes.is_some()
+        self.name.is_some() || self.validity_days.is_some() || self.default_notes.is_some()
     }
 }
 
@@ -122,8 +113,6 @@ impl PatchQuotationTemplateDto {
 pub struct QuotationTemplateResponseDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
     #[cfg_attr(feature = "openapi", schema(example = 42))]
@@ -186,9 +175,9 @@ impl QuotationTemplateListResponseDto {
 #[serde(rename_all = "camelCase")]
 pub struct QuotationTemplateSummaryDto {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub name: String,
     pub validity_days: i32,
+    pub default_notes: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -200,7 +189,6 @@ impl From<QuotationTemplate> for QuotationTemplateResponseDto {
     fn from(entity: QuotationTemplate) -> Self {
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             name: entity.name,
             validity_days: entity.validity_days,
             default_notes: entity.default_notes,
@@ -214,9 +202,9 @@ impl From<QuotationTemplate> for QuotationTemplateSummaryDto {
         let created_at = backbone_core::PersistentEntity::created_at(&entity);
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             name: entity.name,
             validity_days: entity.validity_days,
+            default_notes: entity.default_notes,
             created_at,
         }
     }
@@ -226,7 +214,6 @@ impl From<CreateQuotationTemplateDto> for QuotationTemplate {
     fn from(dto: CreateQuotationTemplateDto) -> Self {
         Self {
             id: Uuid::new_v4(),
-            company_id: dto.company_id,
             name: dto.name,
             validity_days: dto.validity_days,
             default_notes: dto.default_notes,
@@ -239,7 +226,6 @@ impl From<&QuotationTemplate> for QuotationTemplateResponseDto {
     fn from(entity: &QuotationTemplate) -> Self {
         Self {
             id: entity.id.clone(),
-            company_id: entity.company_id.clone(),
             name: entity.name.clone(),
             validity_days: entity.validity_days.clone(),
             default_notes: entity.default_notes.clone(),
@@ -256,7 +242,6 @@ impl backbone_core::FromCreateDto<CreateQuotationTemplateDto> for QuotationTempl
 
 impl backbone_core::ApplyUpdateDto<UpdateQuotationTemplateDto> for QuotationTemplate {
     fn apply_update(mut self, dto: UpdateQuotationTemplateDto) -> backbone_core::ServiceResult<Self> {
-        self.company_id = dto.company_id;
         self.name = dto.name;
         self.validity_days = dto.validity_days;
         self.default_notes = dto.default_notes;

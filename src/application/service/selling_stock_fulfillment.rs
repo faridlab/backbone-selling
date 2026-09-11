@@ -69,6 +69,8 @@ pub struct StockRuleLine {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StockRuleRequest {
     pub order_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for the still-company-fenced stock consumer — selling
+    /// fills it with the ambient org scope's echo and keys no statement on it.
     pub company_id: Uuid,
     pub customer_id: Uuid,
     /// The order number is the group's human correspondence key — moves minted for this
@@ -107,6 +109,8 @@ pub struct DeliveredQtyLineRef {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeliveredQtyRequest {
+    /// Legacy tenant twin (ADR-0029) for the still-company-fenced stock consumer — selling
+    /// fills it with the ambient org scope's echo and keys no statement on it.
     pub company_id: Uuid,
     pub order_id: Uuid,
     pub lines: Vec<DeliveredQtyLineRef>,
@@ -148,6 +152,8 @@ pub struct DecreaseQuantityLine {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DecreaseQuantityRequest {
     pub order_id: Uuid,
+    /// Legacy tenant twin (ADR-0029) for the still-company-fenced stock consumer — selling
+    /// fills it with the ambient org scope's echo and keys no statement on it.
     pub company_id: Uuid,
     pub order_number: String,
     pub lines: Vec<DecreaseQuantityLine>,

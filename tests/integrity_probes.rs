@@ -1,11 +1,14 @@
 //! Route-level probes: the guarded surface validates creates and does NOT expose generic mutation
-//! (create/update/delete/bulk) on selling documents — closing the CRUD-bypass — and every validated
-//! write derives its tenant from a signed token rather than the request body. Requires
-//! DATABASE_URL (:5433/backbone_selling).
+//! (create/update/delete/bulk) on selling documents — closing the CRUD-bypass — and every write
+//! demands a signed Bearer token (authn only: the module is tenant-agnostic, ADR-0029, and keys
+//! nothing on the token's tenant). Requires DATABASE_URL (:5433/backbone_selling).
 //!
-//! IGC-1..IGC-8  the CRUD-bypass and validated-write invariants.
-//! IGT-1..IGT-8  the tenancy invariants (mirrors the TG-* cases backbone-pos proved). IGT-8 runs
-//!               the app on a restricted (non-BYPASSRLS) probe role — see its comment for why.
+//! IGC-*  the CRUD-bypass and validated-write invariants.
+//! IGT-*  the authn invariants that remain provable at module level. The cross-tenant
+//!        data-isolation legs this suite once carried (foreign-id refusals on every verb, the
+//!        restricted-role RLS probe) retired with the company strip (ADR-0029): an undecorated
+//!        deployment is unfenced by design, so row isolation is proven by the composing service's
+//!        decorator probes plus the undecorated half-fence pin in tests/tenancy_posture_probe.rs.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -98,15 +101,17 @@ async fn req(app: axum::Router, method: &str, uri: &str, body: Option<String>) -
     req_with(app, method, uri, body, None).await
 }
 
-/// Request authenticated as a principal of `company`.
+/// Request authenticated as some principal. The token still carries a company claim — the auth
+/// guard demands one — but nothing server-side keys on it (ADR-0029): the module is
+/// tenant-agnostic and the composing service's tenancy decorator scopes whatever a request
+/// touches.
 async fn req_as(
     app: axum::Router,
-    company: Uuid,
     method: &str,
     uri: &str,
     body: Option<String>,
 ) -> (StatusCode, String) {
-    req_with(app, method, uri, body, Some(token(Some(company)))).await
+    req_with(app, method, uri, body, Some(token(Some(Uuid::new_v4())))).await
 }
 
 fn uq(p: &str) -> String { format!("{p}-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]) }
@@ -173,90 +178,53 @@ async fn guarded_write_rejects_token_without_company_id() {
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a token with no tenant must not write");
 }
 
-// IGT-4: authentication is not ownership. A principal of company A must not be able to confirm
-// company B's order by knowing its id — that would fire B's downstream billing and GL posting from
-// A's token. The tenant scopes the row lookup, so a foreign order is indistinguishable from a
-// missing one (404-shaped `not_draft`), which also avoids leaking whether the id exists.
-#[tokio::test]
-async fn a_principal_cannot_confirm_another_tenants_order() {
-    let pool = pool().await;
-    let m = module(&pool).await;
-    let victim_company = uuid::Uuid::new_v4();
-    let attacker_company = uuid::Uuid::new_v4();
+// (IGT-4 — "a principal cannot confirm another tenant's order" — retired with the company strip
+// (ADR-0029): the module no longer carries the tenant key the fence was cut on, and an undecorated
+// deployment is unfenced by design. Row isolation is proven by the composing service's decorator
+// probes; the module-side half-fence is pinned in tests/tenancy_posture_probe.rs.)
 
-    // The victim's order, created legitimately under the victim's own token.
-    let number = uq("SO");
-    let body = format!(
-        r#"{{"orderNumber":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
-             "lines":[{{"itemId":"{}","revenueAccountId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
-        number, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-    );
-    let (status, created) = req_as(app(&pool, &m), victim_company, "POST", "/sales-orders", Some(body)).await;
-    assert_eq!(status, StatusCode::CREATED, "victim order should be created: {created}");
-    let order_id: Uuid = serde_json::from_str::<serde_json::Value>(&created)
-        .unwrap()["id"].as_str().unwrap().parse().unwrap();
-
-    // The attacker authenticates as their own tenant and aims at the victim's order id.
-    let (status, _) = req_as(
-        app(&pool, &m), attacker_company, "POST", "/sales-orders/confirm",
-        Some(format!(r#"{{"orderId":"{order_id}"}}"#)),
-    ).await;
-    assert_ne!(status, StatusCode::OK, "a foreign tenant must not confirm this order");
-
-    // And the order is untouched — still draft, not advanced into the billing flow.
-    let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
-        .bind(order_id)
-        .fetch_one(&pool)
-        .await
-        .expect("order row");
-    assert_eq!(st, "draft", "the victim's order must remain draft after a foreign confirm attempt");
-}
-
-// IGT-3: a `companyId` smuggled in the body is ignored — the persisted tenant is the token's. This is
-// the regression that motivated the change: the body must not be able to name the tenant. (Re-pointed
-// from invoices to sales-orders when the invoice route was removed.)
+// IGT-3: a `companyId` smuggled in the body cannot break the write. Post-strip (ADR-0029) the
+// selling tables carry no tenant column at all — the module cannot name a tenant, so the
+// persisted-tenant-is-the-token's proof lives in the composing service's decorator probes. What
+// this leg still proves at module level: the smuggled body field is TOLERATED (the create
+// succeeds) and cannot corrupt the document. (Re-pointed from invoices to sales-orders when the
+// invoice route was removed.)
 #[tokio::test]
 async fn body_company_id_cannot_override_the_token_tenant() {
     let pool = pool().await;
     let m = module(&pool).await;
-    let token_company = uuid::Uuid::new_v4();
-    let attacker_company = uuid::Uuid::new_v4();
     let number = uq("SO");
     let body = format!(
         r#"{{"orderNumber":"{}","companyId":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
              "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
-        number, attacker_company, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
+        number, uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
     );
-    let (status, _) = req_as(app(&pool, &m), token_company, "POST", "/sales-orders", Some(body)).await;
+    let (status, _) = req_as(app(&pool, &m), "POST", "/sales-orders", Some(body)).await;
     assert_eq!(status, StatusCode::CREATED);
 
-    let persisted: Uuid =
-        sqlx::query_scalar("SELECT company_id FROM selling.sales_orders WHERE order_number = $1")
-            .bind(&number)
-            .fetch_one(&pool)
-            .await
-            .expect("order row");
-    assert_eq!(persisted, token_company, "tenant must come from the token, not the body");
-    assert_ne!(persisted, attacker_company, "the body's companyId must be ignored");
+    sqlx::query_scalar::<_, Uuid>("SELECT id FROM selling.sales_orders WHERE order_number = $1")
+        .bind(&number)
+        .fetch_one(&pool)
+        .await
+        .expect("order row created despite the smuggled body field");
 }
 
 // IGC-6: the quotation-template master is exposed on the guarded surface — create, list, and the
-// per-tenant duplicate-name refusal (422 `duplicate_template_name`, never a silent merge).
+// duplicate-name refusal (422 `duplicate_template_name`, never a silent merge).
 #[tokio::test]
 async fn template_routes_create_list_and_refuse_duplicates() {
     let pool = pool().await;
     let m = module(&pool).await;
-    let company = uuid::Uuid::new_v4();
     let name = uq("Standard offer");
 
     let (status, body) = req_as(
-        app(&pool, &m), company, "POST", "/quotation-templates",
+        app(&pool, &m), "POST", "/quotation-templates",
         Some(format!(r#"{{"name":"{name}","validityDays":21,"defaultNotes":"Excludes VAT."}}"#)),
     ).await;
     assert_eq!(status, StatusCode::CREATED, "template create: {body}");
     let id: Uuid = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"].as_str().unwrap().parse().unwrap();
 
-    let (status, body) = req_as(app(&pool, &m), company, "GET", "/quotation-templates", None).await;
+    let (status, body) = req_as(app(&pool, &m), "GET", "/quotation-templates", None).await;
     assert_eq!(status, StatusCode::OK);
     let list: serde_json::Value = serde_json::from_str(&body).unwrap();
     let found = list.as_array().unwrap().iter().find(|t| t["id"] == id.to_string()).expect("listed");
@@ -264,18 +232,21 @@ async fn template_routes_create_list_and_refuse_duplicates() {
     assert_eq!(found["name"], name);
 
     let (status, body) = req_as(
-        app(&pool, &m), company, "POST", "/quotation-templates",
+        app(&pool, &m), "POST", "/quotation-templates",
         Some(format!(r#"{{"name":"{name}"}}"#)),
     ).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "duplicate name must refuse 422: {body}");
     assert!(body.contains("duplicate_template_name"));
 
-    // A template never crosses tenants on the wire.
-    let (status, _) = req_as(
-        app(&pool, &m), uuid::Uuid::new_v4(), "POST", "/quotation-templates",
+    // The duplicate refusal is module-global until a decorator composes: the module ships no
+    // per-unit unique of its own (ADR-0029) — the service-side name pre-read is the only guard,
+    // and a different token's create with the same live name refuses exactly the same way.
+    let (status, body) = req_as(
+        app(&pool, &m), "POST", "/quotation-templates",
         Some(format!(r#"{{"name":"{name}"}}"#)),
     ).await;
-    assert_eq!(status, StatusCode::CREATED, "the unique index is per company");
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "the live-name guard is module-global: {body}");
+    assert!(body.contains("duplicate_template_name"));
 }
 
 // IGC-7: the invoicing-policy read model is served by its guarded route with the computed fields in
@@ -284,7 +255,6 @@ async fn template_routes_create_list_and_refuse_duplicates() {
 async fn invoice_status_route_serves_the_policy_compute() {
     let pool = pool().await;
     let m = module(&pool).await;
-    let company = uuid::Uuid::new_v4();
     let item = uuid::Uuid::new_v4();
 
     let body = format!(
@@ -292,16 +262,16 @@ async fn invoice_status_route_serves_the_policy_compute() {
              "lines":[{{"itemId":"{item}","quantity":"10","unitPrice":"1000","invoicePolicy":"delivery"}}]}}"#,
         uq("SO"), uuid::Uuid::new_v4(),
     );
-    let (status, created) = req_as(app(&pool, &m), company, "POST", "/sales-orders", Some(body)).await;
+    let (status, created) = req_as(app(&pool, &m), "POST", "/sales-orders", Some(body)).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let order_id: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
     let (status, _) = req_as(
-        app(&pool, &m), company, "POST", "/sales-orders/confirm",
+        app(&pool, &m), "POST", "/sales-orders/confirm",
         Some(format!(r#"{{"orderId":"{order_id}"}}"#)),
     ).await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, body) = req_as(app(&pool, &m), company, "GET", &format!("/sales-orders/{order_id}/invoice-status"), None).await;
+    let (status, body) = req_as(app(&pool, &m), "GET", &format!("/sales-orders/{order_id}/invoice-status"), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let view: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(view["invoiceStatus"], "no", "delivery policy with zero delivery: nothing billable");
@@ -316,7 +286,6 @@ async fn invoice_status_route_serves_the_policy_compute() {
 async fn line_freeze_holds_through_the_route() {
     let pool = pool().await;
     let m = module(&pool).await;
-    let company = uuid::Uuid::new_v4();
     let item = uuid::Uuid::new_v4();
 
     let body = format!(
@@ -324,80 +293,43 @@ async fn line_freeze_holds_through_the_route() {
              "lines":[{{"itemId":"{item}","quantity":"10","unitPrice":"1000"}}]}}"#,
         uq("SO"), uuid::Uuid::new_v4(),
     );
-    let (status, created) = req_as(app(&pool, &m), company, "POST", "/sales-orders", Some(body)).await;
+    let (status, created) = req_as(app(&pool, &m), "POST", "/sales-orders", Some(body)).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let order_id: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
-    req_as(app(&pool, &m), company, "POST", "/sales-orders/confirm",
+    req_as(app(&pool, &m), "POST", "/sales-orders/confirm",
         Some(format!(r#"{{"orderId":"{order_id}"}}"#))).await;
     let line_id: Uuid = sqlx::query_scalar("SELECT id FROM selling.sales_order_items WHERE order_id=$1")
         .bind(order_id).fetch_one(&pool).await.unwrap();
 
     let (status, body) = req_as(
-        app(&pool, &m), company, "PATCH", &format!("/sales-orders/lines/{line_id}"),
+        app(&pool, &m), "PATCH", &format!("/sales-orders/lines/{line_id}"),
         Some(r#"{"quantity":"5"}"#.into()),
     ).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "frozen field must refuse: {body}");
     assert!(body.contains("order_line_frozen"));
 
     let (status, _) = req_as(
-        app(&pool, &m), company, "PATCH", &format!("/sales-orders/lines/{line_id}"),
+        app(&pool, &m), "PATCH", &format!("/sales-orders/lines/{line_id}"),
         Some(r#"{"description":"relabeled"}"#.into()),
     ).await;
     assert_eq!(status, StatusCode::OK, "description stays editable after confirmation");
 }
 
-// IGT-5: the machine verbs are tenant-scoped — a principal of company A cannot move company B's
-// quotation through its lifecycle by knowing the id.
+// (IGT-5 — "a principal cannot move another tenant's quotation through its lifecycle" — retired
+// with the company strip (ADR-0029): an undecorated deployment is unfenced by design. The
+// machine-verb route coverage itself lives in IGT-6/IGT-7 and tests/quotation_machine.rs; row
+// isolation is proven by the composing service's decorator probes and the half-fence pin in
+// tests/tenancy_posture_probe.rs.)
+
+// IGT-6: accept_quotation route transitions draft/sent → accepted and refuses a double accept.
 #[tokio::test]
-async fn a_principal_cannot_send_another_tenants_quotation() {
+async fn accept_route_moves_draft_or_sent_to_accepted() {
     let pool = pool().await;
     let m = module(&pool).await;
-    let victim = uuid::Uuid::new_v4();
-    let attacker = uuid::Uuid::new_v4();
 
+    // Create a draft quotation.
     let (status, created) = req_as(
-        app(&pool, &m), victim, "POST", "/quotations",
-        Some(format!(
-            r#"{{"quotationNumber":"{}","customerId":"{}","quotationDate":"2026-07-03","taxRate":"0",
-                 "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
-            uq("QUO"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-        )),
-    ).await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-    let qid: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
-
-    for (uri, body) in [
-        ("/quotations/send", format!(r#"{{"quotationId":"{qid}"}}"#)),
-        ("/quotations/cancel", format!(r#"{{"quotationId":"{qid}"}}"#)),
-        ("/quotations/re-draft", format!(r#"{{"quotationId":"{qid}"}}"#)),
-    ] {
-        let (status, _) = req_as(app(&pool, &m), attacker, "POST", uri, Some(body)).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "a foreign machine verb must not find the quotation");
-    }
-    // the victim's quotation is untouched.
-    let st: String = sqlx::query_scalar("SELECT status::text FROM selling.quotations WHERE id=$1")
-        .bind(qid).fetch_one(&pool).await.unwrap();
-    assert_eq!(st, "draft");
-
-    // and the owner's own verb works through the route.
-    let (status, _) = req_as(
-        app(&pool, &m), victim, "POST", "/quotations/send",
-        Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
-    ).await;
-    assert_eq!(status, StatusCode::OK);
-}
-
-// IGT-6: accept_quotation route transitions draft/sent → accepted and is tenant-scoped.
-#[tokio::test]
-async fn accept_route_moves_draft_or_sent_to_accepted_and_is_tenant_scoped() {
-    let pool = pool().await;
-    let m = module(&pool).await;
-    let victim = uuid::Uuid::new_v4();
-    let attacker = uuid::Uuid::new_v4();
-
-    // Create a draft quotation as the victim.
-    let (status, created) = req_as(
-        app(&pool, &m), victim, "POST", "/quotations",
+        app(&pool, &m), "POST", "/quotations",
         Some(format!(
             r#"{{"quotationNumber":"{}","customerId":"{}","quotationDate":"2026-07-03","taxRate":"0",
                  "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
@@ -409,7 +341,7 @@ async fn accept_route_moves_draft_or_sent_to_accepted_and_is_tenant_scoped() {
 
     // Happy path: accept from draft → accepted.
     let (status, _) = req_as(
-        app(&pool, &m), victim, "POST", "/quotations/accept",
+        app(&pool, &m), "POST", "/quotations/accept",
         Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
     ).await;
     assert_eq!(status, StatusCode::OK);
@@ -420,12 +352,12 @@ async fn accept_route_moves_draft_or_sent_to_accepted_and_is_tenant_scoped() {
     // Reset and test accept from sent → accepted.
     sqlx::query("UPDATE selling.quotations SET status='draft' WHERE id=$1").bind(qid).execute(&pool).await.unwrap();
     let (status, _) = req_as(
-        app(&pool, &m), victim, "POST", "/quotations/send",
+        app(&pool, &m), "POST", "/quotations/send",
         Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
     ).await;
     assert_eq!(status, StatusCode::OK);
     let (status, _) = req_as(
-        app(&pool, &m), victim, "POST", "/quotations/accept",
+        app(&pool, &m), "POST", "/quotations/accept",
         Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
     ).await;
     assert_eq!(status, StatusCode::OK);
@@ -435,18 +367,11 @@ async fn accept_route_moves_draft_or_sent_to_accepted_and_is_tenant_scoped() {
 
     // Refusal: accept on already-accepted → 422 invalid_transition.
     let (status, body) = req_as(
-        app(&pool, &m), victim, "POST", "/quotations/accept",
+        app(&pool, &m), "POST", "/quotations/accept",
         Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
     ).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "already accepted must refuse: {body}");
     assert!(body.contains("invalid_transition") || body.contains("not_draft"));
-
-    // Tenant scoping: attacker cannot accept victim's quotation.
-    let (status, _) = req_as(
-        app(&pool, &m), attacker, "POST", "/quotations/accept",
-        Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
-    ).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "foreign tenant must not find the quotation");
 }
 
 // IGT-7: convert_quotation_to_order route transitions accepted → ordered and creates the order.
@@ -454,11 +379,10 @@ async fn accept_route_moves_draft_or_sent_to_accepted_and_is_tenant_scoped() {
 async fn convert_route_transitions_accepted_to_ordered_and_creates_order() {
     let pool = pool().await;
     let m = module(&pool).await;
-    let company = uuid::Uuid::new_v4();
 
     // Create and accept a quotation.
     let (status, created) = req_as(
-        app(&pool, &m), company, "POST", "/quotations",
+        app(&pool, &m), "POST", "/quotations",
         Some(format!(
             r#"{{"quotationNumber":"{}","customerId":"{}","quotationDate":"2026-07-03","taxRate":"0",
                  "lines":[{{"itemId":"{}","quantity":"2","unitPrice":"1500"}}]}}"#,
@@ -468,7 +392,7 @@ async fn convert_route_transitions_accepted_to_ordered_and_creates_order() {
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let qid: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
     let (status, _) = req_as(
-        app(&pool, &m), company, "POST", "/quotations/accept",
+        app(&pool, &m), "POST", "/quotations/accept",
         Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
     ).await;
     assert_eq!(status, StatusCode::OK);
@@ -476,7 +400,7 @@ async fn convert_route_transitions_accepted_to_ordered_and_creates_order() {
     // Happy path: convert accepted → creates order and marks quotation ordered.
     let order_number = uq("SO");
     let (status, body) = req_as(
-        app(&pool, &m), company, "POST", "/quotations/convert-to-order",
+        app(&pool, &m), "POST", "/quotations/convert-to-order",
         Some(format!(r#"{{"quotationId":"{qid}","orderNumber":"{order_number}"}}"#)),
     ).await;
     assert_eq!(status, StatusCode::CREATED, "convert must create order: {body}");
@@ -502,7 +426,7 @@ async fn convert_route_transitions_accepted_to_ordered_and_creates_order() {
 
     // Refusal: convert a non-accepted quotation → 422.
     let (status, body) = req_as(
-        app(&pool, &m), company, "POST", "/quotations/convert-to-order",
+        app(&pool, &m), "POST", "/quotations/convert-to-order",
         Some(format!(r#"{{"quotationId":"{qid}","orderNumber":"{}"}}"#, uq("SO"))),
     ).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "ordered quotation must refuse: {body}");
@@ -510,7 +434,7 @@ async fn convert_route_transitions_accepted_to_ordered_and_creates_order() {
 
     // Refusal: convert a draft quotation → 422.
     let (status, created2) = req_as(
-        app(&pool, &m), company, "POST", "/quotations",
+        app(&pool, &m), "POST", "/quotations",
         Some(format!(
             r#"{{"quotationNumber":"{}","customerId":"{}","quotationDate":"2026-07-03","taxRate":"0",
                  "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
@@ -520,131 +444,16 @@ async fn convert_route_transitions_accepted_to_ordered_and_creates_order() {
     assert_eq!(status, StatusCode::CREATED);
     let qid2: Uuid = serde_json::from_str::<serde_json::Value>(&created2).unwrap()["id"].as_str().unwrap().parse().unwrap();
     let (status, body) = req_as(
-        app(&pool, &m), company, "POST", "/quotations/convert-to-order",
+        app(&pool, &m), "POST", "/quotations/convert-to-order",
         Some(format!(r#"{{"quotationId":"{qid2}","orderNumber":"{}"}}"#, uq("SO"))),
     ).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "draft quotation must refuse: {body}");
     assert!(body.contains("quotation_not_accepted"));
 }
 
-// The restricted probe role for the RLS-dependent probe below: NOSUPERUSER NOBYPASSRLS — the only
-// session posture under which Row-Level Security policies actually bind (superusers and BYPASSRLS
-// roles always bypass them). Minted idempotently by the admin test pool, following the same pattern
-// as backbone-billing's fence suite.
-const PROBE_ROLE: &str = "selling_fence_probe";
-const PROBE_PASSWORD: &str = "probe";
-
-/// Rebuild DATABASE_URL aimed at the probe role, keeping its host/port/database.
-fn restricted_url(admin_url: &str) -> String {
-    let rest = admin_url
-        .trim_start_matches("postgresql://")
-        .trim_start_matches("postgres://");
-    let (authority, path) = rest.split_once('/').expect("DATABASE_URL must name a database");
-    // Drop any userinfo before the host (take the LAST '@' so IPv6 literals cannot confuse it).
-    let hostport = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
-    let db = path.split('?').next().unwrap_or("backbone_selling");
-    format!("postgresql://{PROBE_ROLE}:{PROBE_PASSWORD}@{hostport}/{db}")
-}
-
-/// A pool connected as the restricted probe role, minted and granted by the admin pool.
-async fn restricted_pool(admin: &PgPool) -> PgPool {
-    let url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5433/backbone_selling".to_string());
-    let db = url
-        .trim_start_matches("postgresql://")
-        .trim_start_matches("postgres://")
-        .split_once('/')
-        .and_then(|(_, path)| path.split('?').next())
-        .unwrap_or("backbone_selling")
-        .to_string();
-
-    // Serialize mint + grants across parallel tests (shared-catalog DDL does not tolerate
-    // concurrent GRANTs), then tolerate losing the race — the winner made the same role.
-    sqlx::query("SELECT pg_advisory_lock(hashtext('selling_fence_probe'))")
-        .execute(admin)
-        .await
-        .expect("take probe mint lock");
-    // Tolerate losing the race (or a prior run's role): a duplicate-role error here means the
-    // role already exists with the same shape; a real failure surfaces at the GRANTs below.
-    let _ = sqlx::query(&format!(
-        "CREATE ROLE {PROBE_ROLE} LOGIN PASSWORD '{PROBE_PASSWORD}' \
-           NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE"
-    ))
-    .execute(admin)
-    .await;
-    // One statement per execute (a multi-command string is not a legal prepared statement). The
-    // grants cover exactly the document tables the guarded write path touches — no more.
-    for grant in [
-        format!(r#"GRANT CONNECT ON DATABASE "{db}" TO {PROBE_ROLE}"#),
-        format!("GRANT USAGE ON SCHEMA selling TO {PROBE_ROLE}"),
-        format!("GRANT SELECT, INSERT, UPDATE ON TABLE selling.quotations TO {PROBE_ROLE}"),
-        format!("GRANT SELECT, INSERT, UPDATE ON TABLE selling.quotation_items TO {PROBE_ROLE}"),
-        format!("GRANT SELECT, INSERT, UPDATE ON TABLE selling.sales_orders TO {PROBE_ROLE}"),
-        format!("GRANT SELECT, INSERT, UPDATE ON TABLE selling.sales_order_items TO {PROBE_ROLE}"),
-    ] {
-        sqlx::query(&grant).execute(admin).await.expect("grant probe role");
-    }
-    sqlx::query("SELECT pg_advisory_unlock(hashtext('selling_fence_probe'))")
-        .execute(admin)
-        .await
-        .expect("release probe mint lock");
-
-    PgPool::connect(&restricted_url(&url)).await.expect("connect as restricted probe")
-}
-
-// IGT-8: convert-to-order is tenant-fenced. Unlike the machine verbs above — whose guarded
-// statements carry an explicit `company_id` filter as defense-in-depth — the conversion source read
-// is ID-only (no company in the query text), so its cross-tenant fence is Row-Level Security alone.
-// RLS only binds for a non-BYPASSRLS session, so this probe runs the whole app on the restricted
-// probe role: under it, a foreign tenant aiming at an accepted quotation must get a 404 and the
-// victim's quotation must stay accepted with no order derived. (Run against a superuser pool the
-// same request would SUCCEED — superusers bypass RLS — which is why the deployment contract
-// requires the app to connect as a non-superuser role.)
-#[tokio::test]
-async fn a_principal_cannot_convert_another_tenants_quotation() {
-    let admin = pool().await;
-    let restricted = restricted_pool(&admin).await;
-    let m = module(&restricted).await;
-    let victim = uuid::Uuid::new_v4();
-    let attacker = uuid::Uuid::new_v4();
-
-    // The victim's quotation, created and accepted through the route on the restricted pool.
-    let (status, created) = req_as(
-        app(&restricted, &m), victim, "POST", "/quotations",
-        Some(format!(
-            r#"{{"quotationNumber":"{}","customerId":"{}","quotationDate":"2026-07-03","taxRate":"0",
-                 "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
-            uq("QUO"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-        )),
-    ).await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-    let qid: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
-    let (status, body) = req_as(
-        app(&restricted, &m), victim, "POST", "/quotations/accept",
-        Some(format!(r#"{{"quotationId":"{qid}"}}"#)),
-    ).await;
-    assert_eq!(status, StatusCode::OK, "owner accepts on the restricted pool: {body}");
-
-    // The attacker aims at the victim's accepted quotation.
-    let (status, body) = req_as(
-        app(&restricted, &m), attacker, "POST", "/quotations/convert-to-order",
-        Some(format!(r#"{{"quotationId":"{qid}","orderNumber":"{}"}}"#, uq("SO"))),
-    ).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "a foreign convert must not find the quotation: {body}");
-    assert!(body.contains("quotation_not_found"), "{body}");
-
-    // The victim's quotation is untouched — still accepted, no order derived from it.
-    let st: String = sqlx::query_scalar("SELECT status::text FROM selling.quotations WHERE id=$1")
-        .bind(qid).fetch_one(&admin).await.unwrap();
-    assert_eq!(st, "accepted");
-    let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM selling.sales_orders WHERE quotation_id=$1")
-        .bind(qid).fetch_one(&admin).await.unwrap();
-    assert_eq!(orders, 0, "a refused convert must not derive an order");
-
-    // And the owner's own convert still works on the restricted pool.
-    let (status, body) = req_as(
-        app(&restricted, &m), victim, "POST", "/quotations/convert-to-order",
-        Some(format!(r#"{{"quotationId":"{qid}","orderNumber":"{}"}}"#, uq("SO"))),
-    ).await;
-    assert_eq!(status, StatusCode::CREATED, "owner converts: {body}");
-}
+// (IGT-8 — the restricted-role convert fence probe — retired with the company strip (ADR-0029):
+// the module no longer declares the fence that probe pinned, and an undecorated deployment is
+// unfenced by design — even the owner's own writes default-deny on a restricted role now. The
+// half-fence posture itself (armed flags, zero module policies) is pinned in
+// tests/tenancy_posture_probe.rs; row isolation belongs to the composing service's decorator
+// probes.)

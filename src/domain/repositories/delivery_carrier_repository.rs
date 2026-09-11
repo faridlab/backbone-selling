@@ -7,7 +7,6 @@
 
 use async_trait::async_trait;
 use anyhow::Result;
-use uuid::Uuid;
 
 use crate::domain::entity::DeliveryCarrier;
 
@@ -44,7 +43,6 @@ pub struct DeliveryCarrierPaginatedResult {
 /// Filter parameters for list queries
 #[derive(Debug, Clone, Default)]
 pub struct DeliveryCarrierFilter {
-    pub company_id: Option<Uuid>,
     pub name: Option<String>,
     pub active: Option<bool>,
     pub tracking_url_template: Option<String>,
@@ -53,7 +51,7 @@ pub struct DeliveryCarrierFilter {
 impl DeliveryCarrierFilter {
     /// Check if any filter is set
     pub fn has_filters(&self) -> bool {
-        self.company_id.is_some() || self.name.is_some() || self.active.is_some() || self.tracking_url_template.is_some()
+        self.name.is_some() || self.active.is_some() || self.tracking_url_template.is_some()
     }
 }
 

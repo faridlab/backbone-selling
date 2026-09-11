@@ -58,10 +58,12 @@ user_owned:
   - "src/infrastructure/persistence/expense_reinvoice_link_repository.rs"
 
   # Behavior tests (the golden oracle) + route probes + seam + extension-contract round-trip + BDD
-  # + the margin/carrier/reinvoice suites.
+  # + the margin/carrier/reinvoice suites + the tenancy posture probe (half-fence pin:
+  # RLS flags armed, module ships no policy — ADR-0029).
   - "tests/selling_golden_cases.rs"
   - "tests/gl_posting_seam.rs"
   - "tests/integrity_probes.rs"
+  - "tests/tenancy_posture_probe.rs"
   - "tests/extension_contract.rs"
   - "tests/order_to_cash.rs"
   - "tests/delivery_seam.rs"
@@ -86,6 +88,11 @@ user_owned:
   # confirm-mint's per-line delivery backrefs) — hand-owned ALTER pair.
   - "migrations/20260829000100_selling_service_delivery_backrefs.up.sql"
   - "migrations/20260829000100_selling_service_delivery_backrefs.down.sql"
+
+  # The guarded company-artifact strip — the strip's ordering guard is hand-authored logic
+  # (decorator-first: never drop the last tenancy key on a populated table).
+  - "migrations/20260911130000_strip_tenancy.up.sql"
+  - "migrations/20260911130000_strip_tenancy.down.sql"
 
   # Hand-authored module documentation.
   - "docs/**"

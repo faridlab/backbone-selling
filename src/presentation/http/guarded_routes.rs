@@ -20,7 +20,9 @@
 //! [`crate::application::service::selling_stock_fulfillment::NoStockFulfillmentPort`] to opt out
 //! explicitly. The generic CRUD read routers for the carrier registry and the
 //! expense-reinvoice link are merged unauthenticated (same posture as the document reads); every
-//! WRITE below rides `company_auth` and derives its tenant from the signed token.
+//! WRITE below still rides `company_auth`, so only an authenticated caller gets in. The module
+//! itself is tenant-agnostic (ADR-0029) — the composing service's tenancy decorator scopes
+//! whatever the request touches, and the handlers pass no tenant at all.
 //!
 //! `SellingWriteService` is stateless over the pool, so it is constructed here rather than pulled
 //! from the generated `SellingModule` struct — the guarded surface survives a regen of the module.
@@ -136,9 +138,9 @@ impl From<LineBody> for NewLine {
 #[serde(rename_all = "camelCase")]
 struct CreateQuotationBody {
     quotation_number: String,
-    // No `company_id` / `branch_id`: the tenant is derived from the signed token via
-    // `CompanyContext`, never from the request body — a client must not be able to name the tenant
-    // it writes into.
+    // No tenant anywhere in the body (ADR-0029) — the composing service's tenancy decorator
+    // scopes whatever this write touches. branch_id is a business column, not the tenancy
+    // axis; it still comes off the token.
     customer_id: Uuid,
     quotation_date: chrono::NaiveDate,
     #[serde(default)]
@@ -166,7 +168,7 @@ async fn create_quotation(
 ) -> axum::response::Response {
     let q = NewQuotation {
         quotation_number: b.quotation_number,
-        company_id: tenant.company_id,
+        // branch_id is a business column, not the tenancy axis — it still comes off the token.
         branch_id: tenant.branch_id,
         customer_id: b.customer_id,
         quotation_date: b.quotation_date,
@@ -190,7 +192,7 @@ struct CreateSalesOrderBody {
     order_number: String,
     #[serde(default)]
     quotation_id: Option<Uuid>,
-    // Tenant comes from the signed token (`CompanyContext`), not the body.
+    // No tenant anywhere in the body (ADR-0029).
     customer_id: Uuid,
     order_date: chrono::NaiveDate,
     #[serde(default)]
@@ -201,8 +203,8 @@ struct CreateSalesOrderBody {
     tax_rate: Decimal,
     #[serde(default)]
     notes: Option<String>,
-    /// Optional create-time delivery carrier — must name one of THIS company's carriers (an
-    /// unknown or cross-tenant id refuses `carrier_not_found`, never the FK violation's 500).
+    /// Optional create-time delivery carrier — must name a LIVE carrier (an unknown id refuses
+    /// `carrier_not_found`, never the FK violation's 500).
     #[serde(default)]
     delivery_carrier_id: Option<Uuid>,
     lines: Vec<LineBody>,
@@ -215,7 +217,7 @@ async fn create_sales_order(
     let o = NewSalesOrder {
         order_number: b.order_number,
         quotation_id: b.quotation_id,
-        company_id: tenant.company_id,
+        // branch_id is a business column, not the tenancy axis — it still comes off the token.
         branch_id: tenant.branch_id,
         customer_id: b.customer_id,
         order_date: b.order_date,
@@ -239,21 +241,20 @@ struct ConfirmOrderBody {
 }
 async fn confirm_sales_order(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<ConfirmOrderBody>,
 ) -> axum::response::Response {
-    // The tenant scopes the lookup: authentication alone would let a principal of company A confirm
-    // company B's order by id, firing B's downstream billing and GL posting. The cost port comes
-    // from the composition (the host's catalog adapter) — a failing port refuses the confirm with
-    // `cost_rejected`, it never confirms with a silently unknown cost. The stock port comes from
-    // the composition the same way (the host's stock-engine adapter) — a failing launch refuses
-    // with `fulfillment_rejected`, it never confirms an order whose fulfillment silently never
-    // launched.
+    // No tenant passed: the module is tenant-agnostic (ADR-0029) — under a composed tenancy
+    // decorator the request's fence scopes the lookup, so a foreign order id reads as missing.
+    // The cost port comes from the composition (the host's catalog adapter) — a failing port
+    // refuses the confirm with `cost_rejected`, it never confirms with a silently unknown cost.
+    // The stock port comes from the composition the same way (the host's stock-engine adapter) —
+    // a failing launch refuses with `fulfillment_rejected`, it never confirms an order whose
+    // fulfillment silently never launched.
     match st
         .svc
         .confirm_sales_order(
             b.order_id,
-            tenant.company_id,
             st.costs.as_ref(),
             st.stock.as_ref(),
             st.catalog.as_ref(),
@@ -284,50 +285,50 @@ struct QuotationReasonBody {
 }
 async fn send_quotation(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<QuotationVerbBody>,
 ) -> axum::response::Response {
-    match st.svc.send_quotation(b.quotation_id, tenant.company_id).await {
+    match st.svc.send_quotation(b.quotation_id).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.quotation_id })).into_response(),
         Err(e) => err_response(e),
     }
 }
 async fn redraft_quotation(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<QuotationVerbBody>,
 ) -> axum::response::Response {
-    match st.svc.redraft_quotation(b.quotation_id, tenant.company_id).await {
+    match st.svc.redraft_quotation(b.quotation_id).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.quotation_id })).into_response(),
         Err(e) => err_response(e),
     }
 }
 async fn reject_quotation(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<QuotationReasonBody>,
 ) -> axum::response::Response {
-    match st.svc.reject_quotation(b.quotation_id, tenant.company_id, b.reason).await {
+    match st.svc.reject_quotation(b.quotation_id, b.reason).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.quotation_id })).into_response(),
         Err(e) => err_response(e),
     }
 }
 async fn cancel_quotation(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<QuotationReasonBody>,
 ) -> axum::response::Response {
-    match st.svc.cancel_quotation(b.quotation_id, tenant.company_id, b.reason).await {
+    match st.svc.cancel_quotation(b.quotation_id, b.reason).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.quotation_id })).into_response(),
         Err(e) => err_response(e),
     }
 }
 async fn accept_quotation(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<QuotationVerbBody>,
 ) -> axum::response::Response {
-    match st.svc.accept_quotation(b.quotation_id, tenant.company_id).await {
+    match st.svc.accept_quotation(b.quotation_id).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.quotation_id })).into_response(),
         Err(e) => err_response(e),
     }
@@ -366,13 +367,13 @@ struct OrderVerbBody {
 }
 async fn cancel_sales_order(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<OrderVerbBody>,
 ) -> axum::response::Response {
     // On success the cancel also logs decrease-quantity activities upstream through the stock
     // port — a log failure returns `decrease_activity_failed` with the cancellation
     // already committed; the composition retries with the retry verb once its engine is healthy.
-    match st.svc.cancel_sales_order(b.order_id, tenant.company_id, st.stock.as_ref()).await {
+    match st.svc.cancel_sales_order(b.order_id, st.stock.as_ref()).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.order_id })).into_response(),
         Err(e) => err_response(e),
     }
@@ -382,10 +383,10 @@ async fn cancel_sales_order(
 /// call failed (`decrease_activity_failed`). Idempotent; refuses an order that is not cancelled.
 async fn retry_decrease_activities(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    match st.svc.retry_decrease_activities(order_id, tenant.company_id, st.stock.as_ref()).await {
+    match st.svc.retry_decrease_activities(order_id, st.stock.as_ref()).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: order_id })).into_response(),
         Err(e) => err_response(e),
     }
@@ -408,10 +409,10 @@ async fn order_delivery_status(
 }
 async fn sync_delivered_from_moves(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    match st.svc.sync_delivered_from_moves(order_id, tenant.company_id, st.stock.as_ref()).await {
+    match st.svc.sync_delivered_from_moves(order_id, st.stock.as_ref()).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: order_id })).into_response(),
         Err(e) => err_response(e),
     }
@@ -433,13 +434,13 @@ struct UpdateOrderLineBody {
 }
 async fn update_order_line(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Path(line_id): Path<Uuid>,
     Json(b): Json<UpdateOrderLineBody>,
 ) -> axum::response::Response {
     // On a confirmed order only the description is editable — the service refuses item/qty/price/
     // discount with `order_line_frozen` once the status has left `draft`.
-    match st.svc.update_order_line(line_id, tenant.company_id, UpdateOrderLinePatch {
+    match st.svc.update_order_line(line_id, UpdateOrderLinePatch {
         description: b.description,
         item_id: b.item_id,
         quantity: b.quantity,
@@ -521,14 +522,13 @@ struct CreateTemplateBody {
 }
 async fn create_quotation_template(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<CreateTemplateBody>,
 ) -> axum::response::Response {
-    // Validity defaults to 30 days when omitted; the write itself is fenced to the caller's
-    // tenant and a duplicate name refuses with `duplicate_template_name`.
+    // Validity defaults to 30 days when omitted; a duplicate live name refuses with
+    // `duplicate_template_name`.
     match st.svc
         .create_quotation_template(
-            tenant.company_id,
             &b.name,
             b.validity_days.unwrap_or(30),
             b.default_notes.as_deref(),
@@ -541,9 +541,9 @@ async fn create_quotation_template(
 }
 async fn list_quotation_templates(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
 ) -> axum::response::Response {
-    match st.svc.list_quotation_templates(tenant.company_id).await {
+    match st.svc.list_quotation_templates().await {
         Ok(rows) => {
             let list: Vec<TemplateResponse> = rows.into_iter().map(Into::into).collect();
             (StatusCode::OK, Json(list)).into_response()
@@ -563,11 +563,11 @@ struct CreateCarrierBody {
 }
 async fn create_carrier(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<CreateCarrierBody>,
 ) -> axum::response::Response {
     match st.svc
-        .create_delivery_carrier(tenant.company_id, &b.name, b.tracking_url_template.as_deref())
+        .create_delivery_carrier(&b.name, b.tracking_url_template.as_deref())
         .await
     {
         Ok(id) => (StatusCode::CREATED, Json(IdResponse { id })).into_response(),
@@ -585,10 +585,10 @@ struct CarrierListQuery {
 }
 async fn list_carriers(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Query(q): Query<CarrierListQuery>,
 ) -> axum::response::Response {
-    match st.svc.list_delivery_carriers(tenant.company_id, q.active_only.unwrap_or(true)).await {
+    match st.svc.list_delivery_carriers(q.active_only.unwrap_or(true)).await {
         Ok(rows) => (StatusCode::OK, Json(rows)).into_response(),
         Err(e) => err_response(e),
     }
@@ -607,13 +607,13 @@ struct UpdateCarrierBody {
 }
 async fn update_carrier(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Path(carrier_id): Path<Uuid>,
     Json(b): Json<UpdateCarrierBody>,
 ) -> axum::response::Response {
     // Retirement is deactivate-don't-delete: `{"active": false}`. A hard delete would break the
     // orders that reference the carrier through the FK.
-    match st.svc.update_delivery_carrier(carrier_id, tenant.company_id, UpdateCarrierPatch {
+    match st.svc.update_delivery_carrier(carrier_id, UpdateCarrierPatch {
         name: b.name,
         active: b.active,
         tracking_url_template: b.tracking_url_template,
@@ -627,8 +627,8 @@ async fn update_carrier(
 #[serde(rename_all = "camelCase")]
 struct SetDeliveryBody {
     order_id: Uuid,
-    /// MISSING keeps the stored carrier; `null` CLEARS it; a value SETS it (and must name one of
-    /// this company's carriers — `carrier_not_found`, never an FK 500).
+    /// MISSING keeps the stored carrier; `null` CLEARS it; a value SETS it (and must name a
+    /// live carrier — `carrier_not_found`, never an FK 500).
     #[serde(default, deserialize_with = "double_option")]
     delivery_carrier_id: Option<Option<Uuid>>,
     /// MISSING keeps the stored tracking ref; `null` CLEARS it; a value SETS it.
@@ -637,13 +637,13 @@ struct SetDeliveryBody {
 }
 async fn set_order_delivery(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Json(b): Json<SetDeliveryBody>,
 ) -> axum::response::Response {
     // Fulfillment metadata, not frozen money: writable on draft AND confirmed orders (tracking
     // typically arrives only after ship), refused on cancelled ones.
     match st.svc
-        .set_order_delivery(b.order_id, tenant.company_id, b.delivery_carrier_id, b.tracking_ref)
+        .set_order_delivery(b.order_id, b.delivery_carrier_id, b.tracking_ref)
         .await
     {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: b.order_id })).into_response(),
@@ -663,12 +663,12 @@ struct AttachReinvoiceBody {
 }
 async fn attach_expense_reinvoice(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Path(order_id): Path<Uuid>,
     Json(b): Json<AttachReinvoiceBody>,
 ) -> axum::response::Response {
     match st.svc
-        .attach_expense_reinvoice(order_id, b.expense_id, b.amount, tenant.company_id)
+        .attach_expense_reinvoice(order_id, b.expense_id, b.amount)
         .await
     {
         Ok(id) => (StatusCode::CREATED, Json(IdResponse { id })).into_response(),
@@ -677,22 +677,22 @@ async fn attach_expense_reinvoice(
 }
 async fn list_expense_reinvoices(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    match st.svc.list_expense_reinvoices(order_id, tenant.company_id).await {
+    match st.svc.list_expense_reinvoices(order_id).await {
         Ok(rows) => (StatusCode::OK, Json(rows)).into_response(),
         Err(e) => err_response(e),
     }
 }
 async fn mark_expense_reinvoice_invoiced(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _tenant: CompanyContext,
     Path(link_id): Path<Uuid>,
 ) -> axum::response::Response {
     // Called by the host billing adapter after its invoice post acked. A double mark is a LOUD
     // refusal (`invalid_transition`), not a silent success.
-    match st.svc.mark_expense_reinvoice_invoiced(link_id, tenant.company_id).await {
+    match st.svc.mark_expense_reinvoice_invoiced(link_id).await {
         Ok(()) => (StatusCode::OK, Json(IdResponse { id: link_id })).into_response(),
         Err(e) => err_response(e),
     }
@@ -727,8 +727,10 @@ fn create_selling_write_routes(state: SellingWriteState, verifier: CompanyVerifi
         .route("/delivery-carriers", post(create_carrier).get(list_carriers))
         .route("/delivery-carriers/:id", patch(update_carrier))
         .route("/sales-orders/set-delivery", post(set_order_delivery))
-        // Every write above is tenant-scoped: `company_auth` rejects a request whose token is absent,
-        // invalid, or carries no `company_id`, so a handler only ever runs with a proven tenant.
+        // Every write above demands a signed Bearer token: `company_auth` rejects a request whose
+        // token is absent, invalid, or carries no `company_id`. The module itself is
+        // tenant-agnostic (ADR-0029) — the composing service's tenancy decorator scopes what the
+        // request touches.
         //
         // `route_layer`, not `layer`: `layer` would also wrap this router's fallback, so once merged
         // every *unmatched* path (e.g. the generic CRUD paths this surface deliberately does not
@@ -738,11 +740,13 @@ fn create_selling_write_routes(state: SellingWriteState, verifier: CompanyVerifi
         .with_state(state)
 }
 
-/// Mount the selling module: read all documents + validated, tenant-scoped creates. Generic mutation
+/// Mount the selling module: read all documents + validated creates. Generic mutation
 /// is not mounted. **Prefer this over `SellingModule::all_crud_routes()` for any real deployment.**
 ///
-/// The composing service builds one [`CompanyVerifier`] from its JWT secret and passes it here; the
-/// write surface derives `company_id` from the token, so no tenant crosses the wire in a body.
+/// The composing service builds one [`CompanyVerifier`] from its JWT secret and passes it here:
+/// every write still demands a signed Bearer token (`company_auth`), and no tenant crosses the
+/// wire in a body — the module is tenant-agnostic (ADR-0029); the composing service's tenancy
+/// decorator scopes whatever a request touches.
 ///
 /// `unit_cost` is REQUIRED: the cost source behind the confirm-time margin snapshot (the catalog
 /// standard-cost seam). Pass [`crate::application::service::selling_unit_cost::NoUnitCostPort`]

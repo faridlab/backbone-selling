@@ -13,7 +13,11 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use backbone_orm::company_scope;
+// The optional-row read/write twins ride the org-scope module; their connection discipline
+// is the request-dedicated connection when the composing service bound one, plain pool
+// otherwise. The legacy task-local branch is never taken: this module sets no legacy scope
+// of its own (ADR-0029).
+use backbone_orm::org_scope;
 
 use crate::domain::entity::Quotation;
 
@@ -48,7 +52,6 @@ impl QuotationRepository {
 pub struct NewQuotationRow<'a> {
     pub id: Uuid,
     pub quotation_number: &'a str,
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub quotation_date: chrono::NaiveDate,
@@ -65,13 +68,7 @@ pub struct NewQuotationRow<'a> {
 
 /// The `accept_quotation` guard's projection — who the now-accepted quotation belongs to.
 pub struct AcceptedQuotationRow {
-    pub company_id: Uuid,
     pub customer_id: Uuid,
-}
-
-/// A machine verb's guard projection — who the quotation belongs to (for the event payloads).
-pub struct QuotationGuardRow {
-    pub company_id: Uuid,
 }
 
 /// The post-refusal classification read: what state the quotation is in. `status` is read as
@@ -90,7 +87,6 @@ pub struct QuotationInvoiceHeaderRow {
 /// quotation in a state this build does not know about fails the `accepted` check rather than
 /// panicking in a decode.
 pub struct QuotationConversionRow {
-    pub company_id: Uuid,
     pub branch_id: Option<Uuid>,
     pub customer_id: Uuid,
     pub currency: String,
@@ -103,9 +99,9 @@ pub struct QuotationConversionRow {
 impl QuotationRepository {
     /// Insert a draft quotation header.
     ///
-    /// Takes the CALLER'S connection so the header and its lines commit as ONE unit. The caller binds
-    /// the company on that connection (`bind_company_on`) before calling — don't re-bind here. The
-    /// explicit `company_id` bind stays as defense-in-depth behind the RLS fence (ADR-0008).
+    /// Takes the CALLER'S connection so the header and its lines commit as ONE unit. The caller
+    /// relays the ambient org scope onto that connection (`org_scope::bind_org_scope_on`) before
+    /// calling — don't re-bind here.
     ///
     /// Returns the raw `sqlx::Error` deliberately: the caller inspects it for a unique violation to
     /// turn a duplicate quotation number into a domain error.
@@ -116,12 +112,12 @@ impl QuotationRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"INSERT INTO selling.quotations
-                (id, quotation_number, company_id, branch_id, customer_id, status, quotation_date,
+                (id, quotation_number, branch_id, customer_id, status, quotation_date,
                  valid_until, currency, subtotal, tax_rate, tax_amount, total, notes,
                  opportunity_id, status_reason)
-               VALUES ($1,$2,$3,$4,$5,'draft'::quotation_status,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)"#,
+               VALUES ($1,$2,$3,$4,'draft'::quotation_status,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)"#,
         )
-        .bind(q.id).bind(q.quotation_number).bind(q.company_id).bind(q.branch_id).bind(q.customer_id)
+        .bind(q.id).bind(q.quotation_number).bind(q.branch_id).bind(q.customer_id)
         .bind(q.quotation_date).bind(q.valid_until).bind(q.currency)
         .bind(q.subtotal).bind(q.tax_rate).bind(q.tax_amount).bind(q.total).bind(q.notes)
         .bind(q.opportunity_id).bind(q.status_reason)
@@ -131,53 +127,51 @@ impl QuotationRepository {
     }
 
     /// Accept a quotation (draft/sent → accepted), returning who it belongs to. `Ok(None)` = no
-    /// quotation of this company is in an acceptable state, which is also how a wrong-tenant id looks.
+    /// quotation in an acceptable state — under a composed tenancy decorator that is also how a
+    /// foreign id looks (no existence leak; ADR-0029).
     ///
-    /// A write outside any transaction: takes the pool and runs `fetch_optional_row_scoped` so the RLS
-    /// fence (ADR-0008) applies. The caller wraps this in `with_company_scope(Some(company_id))` — the
-    /// company is on the parameter. The explicit `company_id=$2` filter stays as defense-in-depth.
+    /// A write outside any transaction: takes the pool and runs `org_scope::fetch_optional_row_scoped`
+    /// so the read rides the request-dedicated connection when the composing service bound one
+    /// (carrying the decorator's fence variables), plainly on the pool otherwise.
     pub async fn accept(
         &self,
         pool: &PgPool,
         quotation_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Option<AcceptedQuotationRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.quotations SET status='accepted'::quotation_status
-                   WHERE id=$1 AND company_id=$2 AND status = ANY(ARRAY['draft','sent']::quotation_status[])
+                   WHERE id=$1 AND status = ANY(ARRAY['draft','sent']::quotation_status[])
                      AND (metadata->>'deleted_at') IS NULL
-                   RETURNING company_id, customer_id"#,
+                   RETURNING customer_id"#,
             )
-            .bind(quotation_id).bind(company_id),
+            .bind(quotation_id),
         ).await?;
         Ok(row.map(|r| AcceptedQuotationRow {
-            company_id: r.get("company_id"),
             customer_id: r.get("customer_id"),
         }))
     }
 
     /// Read the header `convert_quotation_to_order` copies into the new order.
     ///
-    /// ID-only: no company argument to scope from up front, so this read rides the REQUEST-dedicated
-    /// connection (established by `company_auth`), which carries the caller's `app.company_id` — RLS
-    /// fences the lookup so another company's quotation simply isn't found.
+    /// ID-only: no tenant argument. `org_scope::fetch_optional_row_scoped` rides the
+    /// request-dedicated connection when the composing service bound one (carrying the
+    /// decorator's fence variables), plainly on the pool otherwise (ADR-0029).
     pub async fn find_conversion_source(
         &self,
         pool: &PgPool,
         quotation_id: Uuid,
     ) -> Result<Option<QuotationConversionRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
-                r#"SELECT company_id, branch_id, customer_id, currency, tax_rate, status::text AS st
+                r#"SELECT branch_id, customer_id, currency, tax_rate, status::text AS st
                    FROM selling.quotations WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
             .bind(quotation_id),
         ).await?;
         Ok(row.map(|r| QuotationConversionRow {
-            company_id: r.get("company_id"),
             branch_id: r.get("branch_id"),
             customer_id: r.get("customer_id"),
             currency: r.get("currency"),
@@ -193,7 +187,7 @@ impl QuotationRepository {
         pool: &PgPool,
         quotation_id: Uuid,
     ) -> Result<(), sqlx::Error> {
-        company_scope::execute_scoped(
+        org_scope::execute_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.quotations SET status='ordered'::quotation_status WHERE id=$1"#,
@@ -205,25 +199,23 @@ impl QuotationRepository {
 
     // -- quotation state machine (guarded single-statement flips; the WHERE clause IS the guard) --
 
-    /// Send a quotation (draft → sent). `Ok(None)` = no draft quotation of this company with that
-    /// id, which is also how a wrong-tenant or wrong-state id looks — no existence leak.
+    /// Send a quotation (draft → sent). `Ok(None)` = no draft quotation with that id — under a
+    /// composed tenancy decorator that is also how a foreign id looks (no existence leak).
     pub async fn send(
         &self,
         pool: &PgPool,
         quotation_id: Uuid,
-        company_id: Uuid,
-    ) -> Result<Option<QuotationGuardRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+    ) -> Result<bool, sqlx::Error> {
+        let n = org_scope::execute_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.quotations SET status='sent'::quotation_status
-                   WHERE id=$1 AND company_id=$2 AND status='draft'::quotation_status
-                     AND (metadata->>'deleted_at') IS NULL
-                   RETURNING company_id"#,
+                   WHERE id=$1 AND status='draft'::quotation_status
+                     AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(quotation_id).bind(company_id),
+            .bind(quotation_id),
         ).await?;
-        Ok(row.map(|r| QuotationGuardRow { company_id: r.get("company_id") }))
+        Ok(n.rows_affected() > 0)
     }
 
     /// Return a quotation to draft (sent/cancelled/rejected → draft), clearing any recorded
@@ -233,21 +225,19 @@ impl QuotationRepository {
         &self,
         pool: &PgPool,
         quotation_id: Uuid,
-        company_id: Uuid,
-    ) -> Result<Option<QuotationGuardRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+    ) -> Result<bool, sqlx::Error> {
+        let n = org_scope::execute_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.quotations
                    SET status='draft'::quotation_status, status_reason=NULL
-                   WHERE id=$1 AND company_id=$2
+                   WHERE id=$1
                      AND status = ANY(ARRAY['sent','cancelled','rejected']::quotation_status[])
-                     AND (metadata->>'deleted_at') IS NULL
-                   RETURNING company_id"#,
+                     AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(quotation_id).bind(company_id),
+            .bind(quotation_id),
         ).await?;
-        Ok(row.map(|r| QuotationGuardRow { company_id: r.get("company_id") }))
+        Ok(n.rows_affected() > 0)
     }
 
     /// Reject a quotation (sent → rejected), persisting the optional reason.
@@ -255,21 +245,19 @@ impl QuotationRepository {
         &self,
         pool: &PgPool,
         quotation_id: Uuid,
-        company_id: Uuid,
         reason: Option<&str>,
-    ) -> Result<Option<QuotationGuardRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+    ) -> Result<bool, sqlx::Error> {
+        let n = org_scope::execute_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.quotations
-                   SET status='rejected'::quotation_status, status_reason=$3
-                   WHERE id=$1 AND company_id=$2 AND status='sent'::quotation_status
-                     AND (metadata->>'deleted_at') IS NULL
-                   RETURNING company_id"#,
+                   SET status='rejected'::quotation_status, status_reason=$2
+                   WHERE id=$1 AND status='sent'::quotation_status
+                     AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(quotation_id).bind(company_id).bind(reason),
+            .bind(quotation_id).bind(reason),
         ).await?;
-        Ok(row.map(|r| QuotationGuardRow { company_id: r.get("company_id") }))
+        Ok(n.rows_affected() > 0)
     }
 
     /// Cancel a quotation (draft/sent/accepted → cancelled), persisting the optional reason.
@@ -278,39 +266,37 @@ impl QuotationRepository {
         &self,
         pool: &PgPool,
         quotation_id: Uuid,
-        company_id: Uuid,
         reason: Option<&str>,
-    ) -> Result<Option<QuotationGuardRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+    ) -> Result<bool, sqlx::Error> {
+        let n = org_scope::execute_scoped(
             pool,
             sqlx::query(
                 r#"UPDATE selling.quotations
-                   SET status='cancelled'::quotation_status, status_reason=$3
-                   WHERE id=$1 AND company_id=$2
+                   SET status='cancelled'::quotation_status, status_reason=$2
+                   WHERE id=$1
                      AND status = ANY(ARRAY['draft','sent','accepted']::quotation_status[])
-                     AND (metadata->>'deleted_at') IS NULL
-                   RETURNING company_id"#,
+                     AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(quotation_id).bind(company_id).bind(reason),
+            .bind(quotation_id).bind(reason),
         ).await?;
-        Ok(row.map(|r| QuotationGuardRow { company_id: r.get("company_id") }))
+        Ok(n.rows_affected() > 0)
     }
 
-    /// Read a quotation's current status (company-scoped) — the post-refusal classification read
-    /// that turns a failed guarded flip into a precise error. `Ok(None)` = not found / wrong tenant.
+    /// Read a quotation's current status — the post-refusal classification read that turns a
+    /// failed guarded flip into a precise error. `Ok(None)` = not found (under a composed
+    /// decorator also a foreign id).
     pub async fn find_status(
         &self,
         pool: &PgPool,
         quotation_id: Uuid,
-        company_id: Uuid,
     ) -> Result<Option<QuotationStatusRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
                 r#"SELECT status::text AS st FROM selling.quotations
-                   WHERE id=$1 AND company_id=$2 AND (metadata->>'deleted_at') IS NULL"#,
+                   WHERE id=$1 AND (metadata->>'deleted_at') IS NULL"#,
             )
-            .bind(quotation_id).bind(company_id),
+            .bind(quotation_id),
         ).await?;
         Ok(row.map(|r| QuotationStatusRow { status: r.get("st") }))
     }
@@ -322,7 +308,7 @@ impl QuotationRepository {
         pool: &PgPool,
         quotation_id: Uuid,
     ) -> Result<Option<QuotationInvoiceHeaderRow>, sqlx::Error> {
-        let row = company_scope::fetch_optional_row_scoped(
+        let row = org_scope::fetch_optional_row_scoped(
             pool,
             sqlx::query(
                 r#"SELECT quotation_number, status::text AS st FROM selling.quotations

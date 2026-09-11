@@ -49,10 +49,10 @@ fn line(revenue: Uuid, qty: &str, price: &str, discount: &str) -> NewLine {
 async fn quotation_order_confirm_flow() {
     let pool = pool().await;
     let w = SellingWriteService::new(pool.clone());
-    let (company, customer, rev) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let (customer, rev) = (Uuid::new_v4(), Uuid::new_v4());
 
     let qid = w.create_quotation(NewQuotation { opportunity_id: None, template_id: None,
-        quotation_number: uq("QUO"), company_id: company, branch_id: None, customer_id: customer,
+        quotation_number: uq("QUO"), branch_id: None, customer_id: customer,
         quotation_date: day(2026, 7, 1), valid_until: Some(day(2026, 7, 31)), currency: None,
         tax_rate: d("11"), notes: None,
         lines: vec![line(rev, "10", "100000", "0")],
@@ -62,17 +62,17 @@ async fn quotation_order_confirm_flow() {
     assert_eq!(qtotal, d("1110000.00")); // 1,000,000 + 11%
 
     let oid = w.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: Some(qid), delivery_carrier_id: None, company_id: company, branch_id: None,
+        order_number: uq("SO"), quotation_id: Some(qid), delivery_carrier_id: None, branch_id: None,
         customer_id: customer, order_date: day(2026, 7, 2), delivery_date: None, currency: None,
         tax_rate: d("11"), notes: None,
         lines: vec![line(rev, "10", "100000", "0")],
     }).await.unwrap();
 
-    w.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    w.confirm_sales_order(oid, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(oid).fetch_one(&pool).await.unwrap();
     assert_eq!(st, "to_deliver_and_bill"); // ADR-003: confirmed order awaits both delivery and billing (inventory live)
 
     // confirming again (not draft) is rejected.
-    assert!(matches!(w.confirm_sales_order(oid, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err(), SellingError::NotDraft(_)));
+    assert!(matches!(w.confirm_sales_order(oid, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap_err(), SellingError::NotDraft(_)));
 }

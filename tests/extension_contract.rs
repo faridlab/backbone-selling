@@ -32,9 +32,9 @@ async fn pool() -> PgPool {
     PgPool::connect(&url).await.expect("connect DB")
 }
 
-async fn make_order(w: &SellingWriteService, company: Uuid, customer: Uuid, total_price: &str) -> Uuid {
+async fn make_order(w: &SellingWriteService, customer: Uuid, total_price: &str) -> Uuid {
     w.create_sales_order(NewSalesOrder {
-        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, company_id: company, branch_id: None,
+        order_number: uq("SO"), quotation_id: None, delivery_carrier_id: None, branch_id: None,
         customer_id: customer, order_date: day(2026, 7, 3), delivery_date: None, currency: None,
         tax_rate: Decimal::ZERO, notes: None,
         lines: vec![NewLine { invoice_policy: None, is_downpayment: None, item_id: Uuid::new_v4(), revenue_account_id: None, description: None,
@@ -47,7 +47,7 @@ async fn make_order(w: &SellingWriteService, company: Uuid, customer: Uuid, tota
 #[tokio::test]
 async fn consumer_rule_rides_domain_event() {
     let pool = pool().await;
-    let (company, customer) = (Uuid::new_v4(), Uuid::new_v4());
+    let customer = Uuid::new_v4();
 
     // The consumer wires its rule as the event sink (a real deployment wires a bus adapter).
     let consumer = Arc::new(CreditWatchConsumer::new(d("5000000"))); // 5,000,000 credit limit
@@ -55,13 +55,13 @@ async fn consumer_rule_rides_domain_event() {
     let w = SellingWriteService::with_sink(pool.clone(), consumer);
 
     // Under the limit → confirmed, no breach recorded.
-    let ok_order = make_order(&w, company, customer, "1000000").await;
-    w.confirm_sales_order(ok_order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    let ok_order = make_order(&w, customer, "1000000").await;
+    w.confirm_sales_order(ok_order, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     assert_eq!(breaches.lock().unwrap().len(), 0, "under-limit order does not breach");
 
     // Over the limit → confirmed, consumer records a breach (its own concept, not selling's).
-    let big_order = make_order(&w, company, customer, "9000000").await;
-    w.confirm_sales_order(big_order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    let big_order = make_order(&w, customer, "9000000").await;
+    w.confirm_sales_order(big_order, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     let recorded = breaches.lock().unwrap();
     assert_eq!(recorded.len(), 1, "over-limit order breaches");
     assert_eq!(recorded[0].order_id, big_order);
@@ -74,10 +74,10 @@ async fn consumer_rule_rides_domain_event() {
 #[tokio::test]
 async fn selling_works_without_any_consumer() {
     let pool = pool().await;
-    let (company, customer) = (Uuid::new_v4(), Uuid::new_v4());
+    let customer = Uuid::new_v4();
     let w = SellingWriteService::new(pool.clone()); // default LoggingSink, no consumer
-    let order = make_order(&w, company, customer, "9000000").await;
-    w.confirm_sales_order(order, company, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
+    let order = make_order(&w, customer, "9000000").await;
+    w.confirm_sales_order(order, &NoUnitCostPort, &NoStockFulfillmentPort, &NoServiceCatalog, &NoServiceDelivery).await.unwrap();
     let st: String = sqlx::query_scalar("SELECT status::text FROM selling.sales_orders WHERE id=$1")
         .bind(order).fetch_one(&pool).await.unwrap();
     assert_eq!(st, "to_deliver_and_bill");

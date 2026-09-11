@@ -32,9 +32,6 @@ use crate::domain::entity::AuditMetadata;
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateDeliveryCarrierDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
@@ -58,9 +55,6 @@ pub struct CreateDeliveryCarrierDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDeliveryCarrierDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(alias = "company_id")]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
@@ -84,9 +78,6 @@ pub struct UpdateDeliveryCarrierDto {
 #[cfg_attr(feature = "validation", derive(Validate))]
 #[serde(rename_all = "camelCase")]
 pub struct PatchDeliveryCarrierDto {
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    #[serde(skip_serializing_if = "Option::is_none", alias = "company_id")]
-    pub company_id: Option<Uuid>,
     #[cfg_attr(feature = "validation", validate(length(max = 120)))]
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,7 +93,7 @@ pub struct PatchDeliveryCarrierDto {
 impl PatchDeliveryCarrierDto {
     /// Check if any field is set
     pub fn has_changes(&self) -> bool {
-        self.company_id.is_some() || self.name.is_some() || self.active.is_some() || self.tracking_url_template.is_some()
+        self.name.is_some() || self.active.is_some() || self.tracking_url_template.is_some()
     }
 }
 
@@ -120,8 +111,6 @@ impl PatchDeliveryCarrierDto {
 pub struct DeliveryCarrierResponseDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     pub id: Uuid,
-    #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
-    pub company_id: Uuid,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
     #[cfg_attr(feature = "openapi", schema(example = true))]
@@ -184,9 +173,9 @@ impl DeliveryCarrierListResponseDto {
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryCarrierSummaryDto {
     pub id: Uuid,
-    pub company_id: Uuid,
     pub name: String,
     pub active: bool,
+    pub tracking_url_template: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
 }
 
@@ -198,7 +187,6 @@ impl From<DeliveryCarrier> for DeliveryCarrierResponseDto {
     fn from(entity: DeliveryCarrier) -> Self {
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             name: entity.name,
             active: entity.active,
             tracking_url_template: entity.tracking_url_template,
@@ -212,9 +200,9 @@ impl From<DeliveryCarrier> for DeliveryCarrierSummaryDto {
         let created_at = backbone_core::PersistentEntity::created_at(&entity);
         Self {
             id: entity.id,
-            company_id: entity.company_id,
             name: entity.name,
             active: entity.active,
+            tracking_url_template: entity.tracking_url_template,
             created_at,
         }
     }
@@ -224,7 +212,6 @@ impl From<CreateDeliveryCarrierDto> for DeliveryCarrier {
     fn from(dto: CreateDeliveryCarrierDto) -> Self {
         Self {
             id: Uuid::new_v4(),
-            company_id: dto.company_id,
             name: dto.name,
             active: dto.active,
             tracking_url_template: dto.tracking_url_template,
@@ -237,7 +224,6 @@ impl From<&DeliveryCarrier> for DeliveryCarrierResponseDto {
     fn from(entity: &DeliveryCarrier) -> Self {
         Self {
             id: entity.id.clone(),
-            company_id: entity.company_id.clone(),
             name: entity.name.clone(),
             active: entity.active.clone(),
             tracking_url_template: entity.tracking_url_template.clone(),
@@ -254,7 +240,6 @@ impl backbone_core::FromCreateDto<CreateDeliveryCarrierDto> for DeliveryCarrier 
 
 impl backbone_core::ApplyUpdateDto<UpdateDeliveryCarrierDto> for DeliveryCarrier {
     fn apply_update(mut self, dto: UpdateDeliveryCarrierDto) -> backbone_core::ServiceResult<Self> {
-        self.company_id = dto.company_id;
         self.name = dto.name;
         self.active = dto.active;
         self.tracking_url_template = dto.tracking_url_template;

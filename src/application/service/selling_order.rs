@@ -20,11 +20,17 @@
 //! silently un-reserving; `update_order_line` is the order lock — frozen fields refuse
 //! once the order is confirmed; `sales_order_ref` loads the cross-module DTO.
 //!
+//! **Tenancy (ADR-0029).** The module is tenant-agnostic: under a composed tenancy decorator the
+//! request's fence scopes every read and write (a foreign id matches zero rows and reads as
+//! not-found); on an undecorated deployment the same statements run unfenced. This file only
+//! relays the caller's ambient org scope onto transactions it opens itself. Port requests to
+//! still-company-fenced consumers (stock, cost, pricing) carry a legacy company id echoed from
+//! that ambient scope — nil when none is bound.
+//!
 //! Per the module's 4-layer rule this file holds no SQL — the statements live on
 //! `SalesOrderRepository` / `SalesOrderItemRepository` (and `QuotationRepository` /
 //! `QuotationItemRepository` for the conversion read).
 
-use backbone_orm::company_scope;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -40,8 +46,8 @@ use super::selling_stock_fulfillment::{
 };
 use super::selling_unit_cost::{ItemUnitCost, UnitCostPort, UnitCostRequest};
 use super::selling_write_service::{
-    is_dup, money, price_document, NewCartSalesOrder, NewLine, NewSalesOrder, SellingError,
-    SellingWriteService,
+    is_dup, legacy_company_echo, money, price_document, relay_ambient_scope, NewCartSalesOrder,
+    NewLine, NewSalesOrder, SellingError, SellingWriteService,
 };
 
 /// One order-line edit. All-`None` = a no-op; `description` alone stays allowed on a confirmed
@@ -65,22 +71,21 @@ impl UpdateOrderLinePatch {
 impl SellingWriteService {
     pub async fn create_sales_order(&self, o: NewSalesOrder) -> Result<Uuid, SellingError> {
         let (priced, subtotal, tax_amount, total) = price_document(&o.lines, o.tax_rate)?;
-        // A create-time carrier choice must name one of THIS company's carriers (a clean 404,
-        // never the FK violation's 500) — validated before the transaction opens.
-        let delivery_carrier_id = self
-            .carrier_id_or_refuse(&o.company_id, o.delivery_carrier_id)
-            .await?;
+        // A create-time carrier choice must name a LIVE carrier (a clean 404, never the FK
+        // violation's 500) — validated before the transaction opens.
+        let delivery_carrier_id = self.carrier_id_or_refuse(o.delivery_carrier_id).await?;
         let id = Uuid::new_v4();
         let currency = o.currency.unwrap_or_else(|| "IDR".into());
-        // RLS scope (ADR-0008): bind the order's company onto the header+lines transaction.
+        // One transaction for header + lines. The ambient org scope (when the composing service
+        // bound one) is relayed onto the connection so the decorator's RLS sees it; on an
+        // undecorated deployment the transaction stays plain.
         let mut tx = self.db_pool.begin().await?;
-        company_scope::bind_company_on(&mut tx, o.company_id).await?;
+        relay_ambient_scope(&mut tx).await?;
         let r = self.repos.orders.insert_draft(&mut tx, &NewSalesOrderRow {
             id,
             order_number: &o.order_number,
             quotation_id: o.quotation_id,
             delivery_carrier_id,
-            company_id: o.company_id,
             branch_id: o.branch_id,
             customer_id: o.customer_id,
             order_date: o.order_date,
@@ -99,7 +104,6 @@ impl SellingWriteService {
             self.repos.order_items.insert_line(&mut tx, &NewSalesOrderItemRow {
                 id: Uuid::new_v4(),
                 order_id: id,
-                company_id: o.company_id,
                 item_id: p.item_id,
                 description: p.description.as_deref(),
                 quantity: p.quantity,
@@ -130,7 +134,9 @@ impl SellingWriteService {
         // Build the pricing request, keeping a parallel line_ref → input-index map.
         let refs: Vec<Uuid> = o.lines.iter().map(|_| Uuid::new_v4()).collect();
         let req = CartPriceRequest {
-            company_id: o.company_id,
+            // Legacy twin (ADR-0029): the pricer's request wire shape still carries the tenant
+            // for the unstripped promo module; the module keys no statement on it.
+            company_id: legacy_company_echo(),
             customer_id: Some(o.customer_id),
             customer_group_id: o.customer_group_id,
             coupon_code: o.coupon_code.clone(),
@@ -195,7 +201,6 @@ impl SellingWriteService {
             order_number: o.order_number,
             quotation_id: None,
             delivery_carrier_id: o.delivery_carrier_id,
-            company_id: o.company_id,
             branch_id: o.branch_id,
             customer_id: o.customer_id,
             order_date: o.order_date,
@@ -220,12 +225,12 @@ impl SellingWriteService {
     /// every stock-tracked line through the `stock` port (the procurement-group → rule → move →
     /// picking intent; see [`super::selling_stock_fulfillment`]).
     ///
-    /// Flow: (1) read the order's live (line id, item id) pairs on the request scope; (2) ask the
+    /// Flow: (1) read the order's live (line id, item id) pairs; (2) ask the
     /// cost port for the DISTINCT items' costs — BEFORE any transaction, so no network call runs
     /// inside the DB tx and draft lines are not locked across the port call; (2b) ask the stock
     /// port to launch the order's non-downpayment lines (the port launches only stock-tracked
     /// items; a service line is a skip, not an error) — also before any transaction; (3) in ONE
-    /// transaction (company bound on it): stamp the snapshots, then run the UNCHANGED
+    /// transaction: stamp the snapshots, then run the UNCHANGED
     /// draft→confirmed guard. The guard losing (0 rows) rolls the stamp back with it — a loser of
     /// two concurrent confirms never leaves a cost on a non-confirmed order.
     ///
@@ -263,25 +268,22 @@ impl SellingWriteService {
     /// (tightening would need `FOR UPDATE` line reads inside the tx; deliberately not taken in
     /// this release). The line-edit path's `FOR UPDATE` serializes its writes against the stamp.
     ///
-    /// `company_id` scopes everything, so a principal of company A cannot confirm company B's
-    /// order by knowing its id — a mismatched tenant reads no lines and loses the guard, which is
+    /// Tenancy note (ADR-0029): cross-tenant isolation is the composing service's tenancy
+    /// decorator — a foreign order id reads no lines and loses the guard, which is
     /// indistinguishable from a missing order (`NotDraft`), so this does not leak whether the id
-    /// exists.
+    /// exists. Port requests to the still-company-fenced cost source carry the ambient org
+    /// scope's legacy company echo.
     pub async fn confirm_sales_order(
         &self,
         order_id: Uuid,
-        company_id: Uuid,
         costs: &dyn UnitCostPort,
         stock: &dyn StockFulfillmentPort,
         catalog: &dyn ServiceCatalogPort,
         delivery: &dyn ProjectFulfillmentPort,
     ) -> Result<(), SellingError> {
-        // (1) live (line, item) pairs — ID-only, company-scoped through the caller's fence; a
-        // wrong-tenant order simply reads [] and the guard below refuses with NotDraft.
-        let lines = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.order_items.list_cost_stamp_lines(&self.db_pool, order_id),
-        ).await?;
+        // (1) live (line, item) pairs — ID-only; under a composed decorator a foreign order
+        // simply reads [] and the guard below refuses with NotDraft.
+        let lines = self.repos.order_items.list_cost_stamp_lines(&self.db_pool, order_id).await?;
 
         // (2) resolve the DISTINCT items' costs outside any transaction.
         let mut stamps: Vec<(Uuid, Option<Decimal>)> = Vec::with_capacity(lines.len());
@@ -290,7 +292,12 @@ impl SellingWriteService {
             item_ids.sort_unstable();
             item_ids.dedup();
             let resolved = costs
-                .resolve_unit_costs(&UnitCostRequest { company_id, item_ids })
+                .resolve_unit_costs(&UnitCostRequest {
+                    // Legacy twin (ADR-0029): the cost source's request wire shape still carries
+                    // the tenant for the unstripped catalog module; selling keys nothing on it.
+                    company_id: legacy_company_echo(),
+                    item_ids,
+                })
                 .await
                 .map_err(|e| SellingError::CostRejected { code: e.code, message: e.message })?;
 
@@ -320,20 +327,16 @@ impl SellingWriteService {
         // no stamp written (the stamp only happens inside the transaction below) and no event
         // fired. Downpayment lines are excluded: a downpayment's placeholder quantity is never
         // physically delivered, so it never drives stock work.
-        let stock_header = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.orders.find_stock_header(&self.db_pool, order_id),
-        ).await?;
+        let stock_header = self.repos.orders.find_stock_header(&self.db_pool, order_id).await?;
         if let Some(hdr) = stock_header {
-            let demand_lines = company_scope::with_company_scope(
-                Some(company_id),
-                self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id),
-            ).await?;
+            let demand_lines = self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id).await?;
             if !demand_lines.is_empty() {
                 let outcomes = stock
                     .launch_stock_rules(&StockRuleRequest {
                         order_id,
-                        company_id: hdr.company_id,
+                        // Legacy twin (ADR-0029): the stock engine still fences on company, so the
+                        // request carries the ambient org scope's legacy company echo for it.
+                        company_id: legacy_company_echo(),
                         customer_id: hdr.customer_id,
                         order_number: hdr.order_number.clone(),
                         lines: demand_lines
@@ -364,9 +367,10 @@ impl SellingWriteService {
                 }
             }
         }
-        // A missing stock header (wrong tenant / absent id) is NOT refused here: the guard
-        // below is the sole authority on whether this order is confirmable, and its NotDraft
-        // refusal types every absent-id case identically (no existence leak).
+        // A missing stock header (absent id; under a composed decorator also a foreign id) is NOT
+        // refused here: the guard below is the sole authority on whether this order is
+        // confirmable, and its NotDraft refusal types every absent-id case identically (no
+        // existence leak).
 
         // (2c) resolve the service-tracking policy for the order's non-downpayment products and
         // mint the delivery work a confirm commits to — outside any transaction, same posture as
@@ -375,20 +379,19 @@ impl SellingWriteService {
         // is the manual policy (mints nothing, proceeds). Downpayment lines are excluded: a
         // downpayment's placeholder quantity is never delivered, so it never drives delivery work.
         let mut backrefs: Vec<(Uuid, Option<Uuid>, Option<Uuid>)> = Vec::new();
-        if let Some(hdr) = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.orders.find_delivery_header(&self.db_pool, order_id),
-        ).await? {
-            let service_lines = company_scope::with_company_scope(
-                Some(company_id),
-                self.repos.order_items.list_service_delivery_lines(&self.db_pool, order_id),
-            ).await?;
+        if let Some(hdr) = self.repos.orders.find_delivery_header(&self.db_pool, order_id).await? {
+            let service_lines = self.repos.order_items.list_service_delivery_lines(&self.db_pool, order_id).await?;
             if !service_lines.is_empty() {
                 let mut item_ids: Vec<Uuid> = service_lines.iter().map(|l| l.item_id).collect();
                 item_ids.sort_unstable();
                 item_ids.dedup();
                 let policies = catalog
-                    .resolve_service_tracking(company_id, &item_ids)
+                    .resolve_service_tracking(
+                        // Legacy twin (ADR-0029): the product surface still fences on company, so
+                        // the ambient org scope's legacy company echo rides along for it.
+                        legacy_company_echo(),
+                        &item_ids,
+                    )
                     .await
                     .map_err(|e| SellingError::ServiceCatalogRejected { code: e.code, message: e.message })?;
                 // Absent item = manual: the product surface holds no tracking row, which is
@@ -408,7 +411,6 @@ impl SellingWriteService {
                 let outcomes = delivery
                     .mint_service_delivery(&ServiceDeliveryRequest {
                         order_id,
-                        company_id: hdr.company_id,
                         customer_id: hdr.customer_id,
                         order_number: hdr.order_number.clone(),
                         currency: hdr.currency.clone(),
@@ -442,25 +444,27 @@ impl SellingWriteService {
         // A missing delivery header is the same non-refusal as the stock header above: the
         // guard below is the sole authority (NotDraft types every absent-id case identically).
 
-        // (3) stamp + guard as ONE unit of work; a losing guard rolls the stamp back.
+        // (3) stamp + guard as ONE unit of work; a losing guard rolls the stamp back. The ambient
+        // org scope (when the composing service bound one) is relayed onto the connection so the
+        // decorator's RLS sees it; on an undecorated deployment the transaction stays plain.
         let mut tx = self.db_pool.begin().await?;
-        company_scope::bind_company_on(&mut tx, company_id).await?;
+        relay_ambient_scope(&mut tx).await?;
         if !stamps.is_empty() {
             self.repos.order_items.stamp_unit_costs(&mut tx, order_id, &stamps).await?;
         }
         if !backrefs.is_empty() {
             self.repos.order_items.stamp_service_backrefs(&mut tx, order_id, &backrefs).await?;
         }
-        let row = self.repos.orders.confirm_tx(&mut tx, order_id, company_id).await?;
+        let row = self.repos.orders.confirm_tx(&mut tx, order_id).await?;
         let Some(row) = row else {
-            // Refusal typing is byte-identical to the pre-snapshot era: wrong tenant, absent id,
-            // and non-draft are ALL `NotDraft` — no existence leak.
+            // Refusal typing is byte-identical to the pre-snapshot era: absent id and non-draft
+            // are ALL `NotDraft` — no existence leak.
             return Err(SellingError::NotDraft(order_id.to_string()));
         };
         tx.commit().await?;
         self.sink.publish(SellingEvent::SalesOrderConfirmed(SalesOrderConfirmed {
             order_id,
-            company_id: row.company_id,
+            company_id: legacy_company_echo(),
             customer_id: row.customer_id,
             grand_total: row.total,
             currency: row.currency,
@@ -475,11 +479,9 @@ impl SellingWriteService {
         quotation_id: Uuid,
         order_number: String,
     ) -> Result<Uuid, SellingError> {
-        // RLS scope (ADR-0008), ID-only pattern: identified by the quotation id alone, with no company
-        // argument to scope from up front. These reads therefore ride the REQUEST-dedicated connection
-        // (established by `company_auth`), which carries the caller's `app.company_id` — RLS fences the
-        // lookup so another company's quotation simply isn't found. `create_sales_order` below binds the
-        // quotation's own company onto its transaction.
+        // ID-only reads (ADR-0029): identified by the quotation id alone; under a composed tenancy
+        // decorator the request's fence scopes the lookup so another tenant's quotation simply
+        // isn't found.
         let q = self.repos.quotations.find_conversion_source(&self.db_pool, quotation_id).await?
             .ok_or(SellingError::QuotationNotFound(quotation_id))?;
         if q.status != "accepted" {
@@ -504,7 +506,6 @@ impl SellingWriteService {
             order_number,
             quotation_id: Some(quotation_id),
             delivery_carrier_id: None,
-            company_id: q.company_id,
             branch_id: q.branch_id,
             customer_id: q.customer_id,
             order_date: chrono::Utc::now().date_naive(),
@@ -521,13 +522,15 @@ impl SellingWriteService {
 
     /// Load the exported `SalesOrderRef` (the brief's cross-module DTO) for one order.
     pub async fn sales_order_ref(&self, order_id: Uuid) -> Result<SalesOrderRef, SellingError> {
-        // RLS scope (ADR-0008), ID-only pattern — see `convert_quotation_to_order`.
+        // ID-only read — see `convert_quotation_to_order`.
         let row = self.repos.orders.find_ref(&self.db_pool, order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
         Ok(SalesOrderRef {
             id: order_id,
             customer_id: row.customer_id,
-            company_id: row.company_id,
+            // Legacy twin (ADR-0029): the exported ref's wire shape still carries the tenant for
+            // unstripped consumers; the module keys no statement on it.
+            company_id: legacy_company_echo(),
             grand_total: row.total,
             currency: row.currency,
         })
@@ -559,23 +562,16 @@ impl SellingWriteService {
     pub async fn cancel_sales_order(
         &self,
         order_id: Uuid,
-        company_id: Uuid,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
-        let row = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.orders.cancel(&self.db_pool, order_id, company_id),
-        ).await?;
+        let row = self.repos.orders.cancel(&self.db_pool, order_id).await?;
         let row = match row {
             Some(r) => r,
             None => {
                 // The guard refused — classify why (only after a refusal; the guarded statement
                 // itself never leaks whether the id exists). No port call happens on a refusal:
                 // nothing was cancelled, so there is nothing to tell the stock side.
-                let why = company_scope::with_company_scope(
-                    Some(company_id),
-                    self.repos.orders.find_cancel_refusal(&self.db_pool, order_id, company_id),
-                ).await?;
+                let why = self.repos.orders.find_cancel_refusal(&self.db_pool, order_id).await?;
                 return Err(match why {
                     None => SellingError::OrderNotFound(order_id),
                     // A terminal order refuses because it is terminal; an in-flight order with a
@@ -593,12 +589,12 @@ impl SellingWriteService {
         };
         self.sink.publish(SellingEvent::SalesOrderCancelled(SalesOrderCancelled {
             order_id,
-            company_id: row.company_id,
+            company_id: legacy_company_echo(),
             customer_id: row.customer_id,
         }));
         // The commitment's end is published first (it happened); the upstream log follows. A
         // failure here is returned loudly but does not undo anything — see the method doc.
-        self.log_decrease_activities(order_id, company_id, &row.order_number, stock).await?;
+        self.log_decrease_activities(order_id, &row.order_number, stock).await?;
         Ok(())
     }
 
@@ -609,18 +605,14 @@ impl SellingWriteService {
     pub async fn retry_decrease_activities(
         &self,
         order_id: Uuid,
-        company_id: Uuid,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
-        let hdr = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.orders.find_stock_header(&self.db_pool, order_id),
-        ).await?
+        let hdr = self.repos.orders.find_stock_header(&self.db_pool, order_id).await?
         .ok_or(SellingError::OrderNotFound(order_id))?;
         if hdr.status != "cancelled" {
             return Err(SellingError::InvalidTransition { verb: "retry_decrease_activities".into(), current: hdr.status });
         }
-        self.log_decrease_activities(order_id, company_id, &hdr.order_number, stock).await
+        self.log_decrease_activities(order_id, &hdr.order_number, stock).await
     }
 
     /// Build and send the decrease-quantity request for a cancelled order: one entry per live
@@ -629,21 +621,19 @@ impl SellingWriteService {
     async fn log_decrease_activities(
         &self,
         order_id: Uuid,
-        company_id: Uuid,
         order_number: &str,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
-        let lines = company_scope::with_company_scope(
-            Some(company_id),
-            self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id),
-        ).await?;
+        let lines = self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id).await?;
         if lines.is_empty() {
             return Ok(()); // nothing was ever orderable — nothing to decrease upstream
         }
         stock
             .log_decrease_quantity(&DecreaseQuantityRequest {
                 order_id,
-                company_id,
+                // Legacy twin (ADR-0029): the stock engine still fences on company, so the
+                // request carries the ambient org scope's legacy company echo for it.
+                company_id: legacy_company_echo(),
                 order_number: order_number.to_string(),
                 lines: lines
                     .iter()
@@ -669,16 +659,15 @@ impl SellingWriteService {
     pub async fn update_order_line(
         &self,
         line_id: Uuid,
-        company_id: Uuid,
         patch: UpdateOrderLinePatch,
     ) -> Result<(), SellingError> {
         if patch.description.is_none() && !patch.touches_frozen_fields() {
             return Ok(()); // nothing asked, nothing changed
         }
         let mut tx = self.db_pool.begin().await?;
-        company_scope::bind_company_on(&mut tx, company_id).await?;
+        relay_ambient_scope(&mut tx).await?;
         let line = self.repos.order_items
-            .lock_line_with_parent_status(&mut tx, line_id, company_id).await?
+            .lock_line_with_parent_status(&mut tx, line_id).await?
             .ok_or(SellingError::OrderNotFound(line_id))?;
 
         if line.order_status != "draft" && patch.touches_frozen_fields() {
