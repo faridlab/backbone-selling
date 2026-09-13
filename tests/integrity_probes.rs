@@ -1,18 +1,23 @@
 //! Route-level probes: the guarded surface validates creates and does NOT expose generic mutation
-//! (create/update/delete/bulk) on selling documents — closing the CRUD-bypass — and every write
-//! demands a signed Bearer token (authn only: the module is tenant-agnostic, ADR-0029, and keys
-//! nothing on the token's tenant). Requires DATABASE_URL (:5433/backbone_selling).
+//! (create/update/delete/bulk) on selling documents — closing the CRUD-bypass. The module applies
+//! no authn of its own (ADR-0029 posture): the composing service's org-session guard both
+//! verifies the token and inserts the OrgContext the write handlers extract — an internal guard
+//! would nest a second request-dedicated connection inside the composer's and shadow its fence
+//! variables. The probe app stands the context in directly. Requires DATABASE_URL
+//! (:5433/backbone_selling).
 //!
 //! IGC-*  the CRUD-bypass and validated-write invariants.
-//! IGT-*  the authn invariants that remain provable at module level. The cross-tenant
-//!        data-isolation legs this suite once carried (foreign-id refusals on every verb, the
-//!        restricted-role RLS probe) retired with the company strip (ADR-0029): an undecorated
-//!        deployment is unfenced by design, so row isolation is proven by the composing service's
-//!        decorator probes plus the undecorated half-fence pin in tests/tenancy_posture_probe.rs.
+//! IGT-*  the token-tolerance invariants that remain provable at module level. The token-demand
+//!        and cross-tenant data-isolation legs this suite once carried (unauthenticated-write
+//!        refusal, claim-less-token refusal, foreign-id refusals on every verb, the
+//!        restricted-role RLS probe) retired with the company strip (ADR-0029): the module ships
+//!        no guard to demand anything, and an undecorated deployment is unfenced by design, so
+//!        both authn and row isolation are proven by the composing service's probes plus the
+//!        undecorated half-fence pin in tests/tenancy_posture_probe.rs.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
-use backbone_auth::company::CompanyVerifier;
+
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::Serialize;
 use sqlx::PgPool;
@@ -51,7 +56,6 @@ fn app(pool: &PgPool, m: &SellingModule) -> axum::Router {
     create_guarded_selling_routes(
         m,
         pool.clone(),
-        CompanyVerifier::hs256(SECRET),
         // No cost source in the probe app: resolves every cost to NULL, which confirm treats as
         // honest absence — good enough for the route-level probes here (the margin snapshot's own
         // port behaviors are proven in tests/margin_compute.rs with a scripted port).
@@ -72,6 +76,19 @@ fn app(pool: &PgPool, m: &SellingModule) -> axum::Router {
             backbone_selling::application::service::selling_service_delivery::NoServiceDelivery,
         ),
     )
+    // The write handlers extract OrgContext, which the composing service's org-session
+    // guard inserts in production; the probe app stands the context in directly.
+    .layer(axum::middleware::from_fn(
+        |mut req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
+            req.extensions_mut().insert(backbone_auth::org::OrgContext {
+                acting_unit_id: uuid::Uuid::nil(),
+                entitled_units: vec![],
+                legacy_company_id: None,
+                user_id: "probe".to_string(),
+            });
+            next.run(req).await
+        },
+    ))
 }
 
 /// Send a request with an optional bearer token.
@@ -101,10 +118,10 @@ async fn req(app: axum::Router, method: &str, uri: &str, body: Option<String>) -
     req_with(app, method, uri, body, None).await
 }
 
-/// Request authenticated as some principal. The token still carries a company claim — the auth
-/// guard demands one — but nothing server-side keys on it (ADR-0029): the module is
-/// tenant-agnostic and the composing service's tenancy decorator scopes whatever a request
-/// touches.
+/// Request authenticated as some principal — the shape a composing service hands the module after
+/// its org-session guard verifies the token and inserts OrgContext. The Bearer header models the
+/// verified credential; nothing server-side reads it (the module is tenant-agnostic, ADR-0029),
+/// and the composing service's tenancy decorator scopes whatever a request touches.
 async fn req_as(
     app: axum::Router,
     method: &str,
@@ -145,38 +162,12 @@ async fn guarded_routes_lock_generic_invoice_delete() {
 // create route is gone now that selling exited the invoice business; ADR-006. The AR invoice create
 // + its validation live in backbone-billing.)
 
-// IGT-1: an unauthenticated write is rejected. Before the tenant guard this create succeeded and
-// stamped whatever `companyId` the caller put in the body. (Re-pointed from invoices to sales-orders
-// when the invoice route was removed.)
-#[tokio::test]
-async fn guarded_write_rejects_unauthenticated() {
-    let pool = pool().await;
-    let m = module(&pool).await;
-    let body = format!(
-        r#"{{"orderNumber":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
-             "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
-        uq("SO"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-    );
-    let (status, _) = req(app(&pool, &m), "POST", "/sales-orders", Some(body)).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "an unauthenticated write must not reach the service");
-}
-
-// IGT-2: a token that authenticates a user but carries no `company_id` claim is rejected — a writer
-// that cannot name its tenant must never run.
-#[tokio::test]
-async fn guarded_write_rejects_token_without_company_id() {
-    let pool = pool().await;
-    let m = module(&pool).await;
-    let body = format!(
-        r#"{{"orderNumber":"{}","customerId":"{}","orderDate":"2026-07-03","taxRate":"0",
-             "lines":[{{"itemId":"{}","quantity":"1","unitPrice":"1000"}}]}}"#,
-        uq("SO"), uuid::Uuid::new_v4(), uuid::Uuid::new_v4(),
-    );
-    let (status, _) = req_with(
-        app(&pool, &m), "POST", "/sales-orders", Some(body), Some(token(None)),
-    ).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "a token with no tenant must not write");
-}
+// (IGT-1/IGT-2 — the token-demand legs, "an unauthenticated write is rejected" and "a token
+// without a company claim is rejected" — retired when the module dropped its internal auth guard:
+// a module-level guard nests a second request-dedicated connection inside the composing service's
+// and shadows its fence variables, blinding every org-scoped read on the write path. Authn —
+// token verification and the session's org context — is the composing service's duty and is
+// proven by its probes.)
 
 // (IGT-4 — "a principal cannot confirm another tenant's order" — retired with the company strip
 // (ADR-0029): the module no longer carries the tenant key the fence was cut on, and an undecorated

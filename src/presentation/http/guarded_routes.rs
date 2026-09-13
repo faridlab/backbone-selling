@@ -19,10 +19,13 @@
 //! without a stock engine passes
 //! [`crate::application::service::selling_stock_fulfillment::NoStockFulfillmentPort`] to opt out
 //! explicitly. The generic CRUD read routers for the carrier registry and the
-//! expense-reinvoice link are merged unauthenticated (same posture as the document reads); every
-//! WRITE below still rides `company_auth`, so only an authenticated caller gets in. The module
-//! itself is tenant-agnostic (ADR-0029) — the composing service's tenancy decorator scopes
-//! whatever the request touches, and the handlers pass no tenant at all.
+//! expense-reinvoice link are merged unauthenticated (same posture as the document reads). The
+//! write handlers extract [`OrgContext`] — inserted by the COMPOSING service's authentication
+//! stack (an org-session guard such as `backbone_auth::org::org_auth`); the module applies no
+//! guard of its own, because an internal one would nest a second request-dedicated connection
+//! inside the composer's and shadow its fence variables. The module itself is tenant-agnostic
+//! (ADR-0029) — the composing service's tenancy decorator scopes
+//! whatever a request touches, and the handlers pass no tenant at all.
 //!
 //! `SellingWriteService` is stateless over the pool, so it is constructed here rather than pulled
 //! from the generated `SellingModule` struct — the guarded surface survives a regen of the module.
@@ -33,7 +36,7 @@ use axum::{
     extract::{Path, Query, State}, http::StatusCode, middleware::from_fn_with_state,
     response::IntoResponse, routing::{get, patch, post}, Json, Router,
 };
-use backbone_auth::company::{company_auth, CompanyContext, CompanyVerifier};
+use backbone_auth::org::OrgContext;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -163,13 +166,15 @@ struct CreateQuotationBody {
 }
 async fn create_quotation(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<CreateQuotationBody>,
 ) -> axum::response::Response {
     let q = NewQuotation {
         quotation_number: b.quotation_number,
-        // branch_id is a business column, not the tenancy axis — it still comes off the token.
-        branch_id: tenant.branch_id,
+        // branch_id is a business column, not the tenancy axis. The org session carries no
+        // branch claim — the acting unit IS the branch grain under ADR-0029 — so the column
+        // starts NULL until an explicit branch verb sets it.
+        branch_id: None,
         customer_id: b.customer_id,
         quotation_date: b.quotation_date,
         valid_until: b.valid_until,
@@ -211,14 +216,16 @@ struct CreateSalesOrderBody {
 }
 async fn create_sales_order(
     State(st): State<SellingWriteState>,
-    tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<CreateSalesOrderBody>,
 ) -> axum::response::Response {
     let o = NewSalesOrder {
         order_number: b.order_number,
         quotation_id: b.quotation_id,
-        // branch_id is a business column, not the tenancy axis — it still comes off the token.
-        branch_id: tenant.branch_id,
+        // branch_id is a business column, not the tenancy axis. The org session carries no
+        // branch claim — the acting unit IS the branch grain under ADR-0029 — so the column
+        // starts NULL until an explicit branch verb sets it.
+        branch_id: None,
         customer_id: b.customer_id,
         order_date: b.order_date,
         delivery_date: b.delivery_date,
@@ -241,7 +248,7 @@ struct ConfirmOrderBody {
 }
 async fn confirm_sales_order(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<ConfirmOrderBody>,
 ) -> axum::response::Response {
     // No tenant passed: the module is tenant-agnostic (ADR-0029) — under a composed tenancy
@@ -285,7 +292,7 @@ struct QuotationReasonBody {
 }
 async fn send_quotation(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<QuotationVerbBody>,
 ) -> axum::response::Response {
     match st.svc.send_quotation(b.quotation_id).await {
@@ -295,7 +302,7 @@ async fn send_quotation(
 }
 async fn redraft_quotation(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<QuotationVerbBody>,
 ) -> axum::response::Response {
     match st.svc.redraft_quotation(b.quotation_id).await {
@@ -305,7 +312,7 @@ async fn redraft_quotation(
 }
 async fn reject_quotation(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<QuotationReasonBody>,
 ) -> axum::response::Response {
     match st.svc.reject_quotation(b.quotation_id, b.reason).await {
@@ -315,7 +322,7 @@ async fn reject_quotation(
 }
 async fn cancel_quotation(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<QuotationReasonBody>,
 ) -> axum::response::Response {
     match st.svc.cancel_quotation(b.quotation_id, b.reason).await {
@@ -325,7 +332,7 @@ async fn cancel_quotation(
 }
 async fn accept_quotation(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<QuotationVerbBody>,
 ) -> axum::response::Response {
     match st.svc.accept_quotation(b.quotation_id).await {
@@ -367,7 +374,7 @@ struct OrderVerbBody {
 }
 async fn cancel_sales_order(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<OrderVerbBody>,
 ) -> axum::response::Response {
     // On success the cancel also logs decrease-quantity activities upstream through the stock
@@ -383,7 +390,7 @@ async fn cancel_sales_order(
 /// call failed (`decrease_activity_failed`). Idempotent; refuses an order that is not cancelled.
 async fn retry_decrease_activities(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     match st.svc.retry_decrease_activities(order_id, st.stock.as_ref()).await {
@@ -399,7 +406,7 @@ async fn retry_decrease_activities(
 // ordered quantity).
 async fn order_delivery_status(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     match st.svc.order_delivery_view(order_id, st.stock.as_ref()).await {
@@ -409,7 +416,7 @@ async fn order_delivery_status(
 }
 async fn sync_delivered_from_moves(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     match st.svc.sync_delivered_from_moves(order_id, st.stock.as_ref()).await {
@@ -434,7 +441,7 @@ struct UpdateOrderLineBody {
 }
 async fn update_order_line(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(line_id): Path<Uuid>,
     Json(b): Json<UpdateOrderLineBody>,
 ) -> axum::response::Response {
@@ -457,7 +464,7 @@ async fn update_order_line(
 // body — there is no route that could persist them.
 async fn order_invoice_status(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     match st.svc.order_invoice_view(order_id).await {
@@ -467,7 +474,7 @@ async fn order_invoice_status(
 }
 async fn quotation_invoice_status(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(quotation_id): Path<Uuid>,
 ) -> axum::response::Response {
     match st.svc.quotation_invoice_view(quotation_id).await {
@@ -483,7 +490,7 @@ async fn quotation_invoice_status(
 // confirm flow's stamp, fed by the host-supplied cost port.
 async fn order_margin_view(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     match st.svc.order_margin_view(order_id).await {
@@ -522,7 +529,7 @@ struct CreateTemplateBody {
 }
 async fn create_quotation_template(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<CreateTemplateBody>,
 ) -> axum::response::Response {
     // Validity defaults to 30 days when omitted; a duplicate live name refuses with
@@ -541,7 +548,7 @@ async fn create_quotation_template(
 }
 async fn list_quotation_templates(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
 ) -> axum::response::Response {
     match st.svc.list_quotation_templates().await {
         Ok(rows) => {
@@ -563,7 +570,7 @@ struct CreateCarrierBody {
 }
 async fn create_carrier(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<CreateCarrierBody>,
 ) -> axum::response::Response {
     match st.svc
@@ -585,7 +592,7 @@ struct CarrierListQuery {
 }
 async fn list_carriers(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Query(q): Query<CarrierListQuery>,
 ) -> axum::response::Response {
     match st.svc.list_delivery_carriers(q.active_only.unwrap_or(true)).await {
@@ -607,7 +614,7 @@ struct UpdateCarrierBody {
 }
 async fn update_carrier(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(carrier_id): Path<Uuid>,
     Json(b): Json<UpdateCarrierBody>,
 ) -> axum::response::Response {
@@ -637,7 +644,7 @@ struct SetDeliveryBody {
 }
 async fn set_order_delivery(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Json(b): Json<SetDeliveryBody>,
 ) -> axum::response::Response {
     // Fulfillment metadata, not frozen money: writable on draft AND confirmed orders (tracking
@@ -663,7 +670,7 @@ struct AttachReinvoiceBody {
 }
 async fn attach_expense_reinvoice(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(order_id): Path<Uuid>,
     Json(b): Json<AttachReinvoiceBody>,
 ) -> axum::response::Response {
@@ -677,7 +684,7 @@ async fn attach_expense_reinvoice(
 }
 async fn list_expense_reinvoices(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     match st.svc.list_expense_reinvoices(order_id).await {
@@ -687,7 +694,7 @@ async fn list_expense_reinvoices(
 }
 async fn mark_expense_reinvoice_invoiced(
     State(st): State<SellingWriteState>,
-    _tenant: CompanyContext,
+    _session: OrgContext,
     Path(link_id): Path<Uuid>,
 ) -> axum::response::Response {
     // Called by the host billing adapter after its invoice post acked. A double mark is a LOUD
@@ -698,7 +705,7 @@ async fn mark_expense_reinvoice_invoiced(
     }
 }
 
-fn create_selling_write_routes(state: SellingWriteState, verifier: CompanyVerifier) -> Router {
+fn create_selling_write_routes(state: SellingWriteState) -> Router {
     Router::new()
         .route("/quotations", post(create_quotation))
         // Quotation state machine: send → accept → reject → re-draft round trips, cancel is the exit.
@@ -727,24 +734,19 @@ fn create_selling_write_routes(state: SellingWriteState, verifier: CompanyVerifi
         .route("/delivery-carriers", post(create_carrier).get(list_carriers))
         .route("/delivery-carriers/:id", patch(update_carrier))
         .route("/sales-orders/set-delivery", post(set_order_delivery))
-        // Every write above demands a signed Bearer token: `company_auth` rejects a request whose
-        // token is absent, invalid, or carries no `company_id`. The module itself is
-        // tenant-agnostic (ADR-0029) — the composing service's tenancy decorator scopes what the
-        // request touches.
-        //
-        // `route_layer`, not `layer`: `layer` would also wrap this router's fallback, so once merged
-        // every *unmatched* path (e.g. the generic CRUD paths this surface deliberately does not
-        // mount) would answer 401 instead of 404 — leaking "auth required" for routes that do not
-        // exist, and masking the CRUD-bypass probes.
-        .route_layer(from_fn_with_state(verifier, company_auth))
+        // No auth layer here by design: the handlers extract OrgContext, which the composing
+        // service's authentication stack inserts. An internal guard would open a second
+        // request-dedicated connection nested inside the composer's and shadow its fence
+        // variables — the read blinding this composer's 0.10 line shipped with.
         .with_state(state)
 }
 
 /// Mount the selling module: read all documents + validated creates. Generic mutation
 /// is not mounted. **Prefer this over `SellingModule::all_crud_routes()` for any real deployment.**
 ///
-/// The composing service builds one [`CompanyVerifier`] from its JWT secret and passes it here:
-/// every write still demands a signed Bearer token (`company_auth`), and no tenant crosses the
+/// Authentication is the composing service's duty: it must wrap this router in an org-session
+/// guard (`backbone_auth::org::org_auth`) so the write handlers' [`OrgContext`] extractor
+/// resolves and the request carries one org-scoped dedicated connection. No tenant crosses the
 /// wire in a body — the module is tenant-agnostic (ADR-0029); the composing service's tenancy
 /// decorator scopes whatever a request touches.
 ///
@@ -773,7 +775,6 @@ fn create_selling_write_routes(state: SellingWriteState, verifier: CompanyVerifi
 pub fn create_guarded_selling_routes(
     m: &SellingModule,
     pool: PgPool,
-    verifier: CompanyVerifier,
     unit_cost: Arc<dyn UnitCostPort>,
     stock: Arc<dyn StockFulfillmentPort>,
     catalog: Arc<dyn ServiceCatalogPort>,
@@ -796,5 +797,5 @@ pub fn create_guarded_selling_routes(
         // entities goes exclusively through the validated verbs above).
         .merge(create_delivery_carrier_read_routes(m.delivery_carrier_service.clone()))
         .merge(create_expense_reinvoice_link_read_routes(m.expense_reinvoice_link_service.clone()))
-        .merge(create_selling_write_routes(write, verifier))
+        .merge(create_selling_write_routes(write))
 }

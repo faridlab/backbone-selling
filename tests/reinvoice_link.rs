@@ -180,35 +180,30 @@ async fn list_serves_an_orders_links_and_refuses_unknown_orders() {
 
 // ── route-level probe ────────────────────────────────────────────────────────
 
-const SECRET: &[u8] = b"selling-reinvoice-probe-secret";
-
-#[derive(serde::Serialize)]
-struct TestClaims {
-    sub: String,
-    exp: usize,
-    company_id: Uuid,
-}
-fn token(company_id: Uuid) -> String {
-    let claims = TestClaims { sub: "reinvoice-probe".into(), exp: 9_999_999_999, company_id };
-    jsonwebtoken::encode(
-        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(SECRET),
-    ).unwrap()
-}
-
 async fn probe_app() -> axum::Router {
     let pool = pool().await;
     let m = backbone_selling::SellingModule::builder().with_database(pool.clone()).build().unwrap();
     backbone_selling::presentation::http::create_guarded_selling_routes(
         &m,
         pool,
-        backbone_auth::company::CompanyVerifier::hs256(SECRET),
         std::sync::Arc::new(NoUnitCostPort),
         std::sync::Arc::new(NoStockFulfillmentPort),
         std::sync::Arc::new(NoServiceCatalog),
         std::sync::Arc::new(NoServiceDelivery),
     )
+    // The write handlers extract OrgContext, which the composing service's org-session
+    // guard inserts in production; the probe app stands the context in directly.
+    .layer(axum::middleware::from_fn(
+        |mut req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
+            req.extensions_mut().insert(backbone_auth::org::OrgContext {
+                acting_unit_id: uuid::Uuid::nil(),
+                entitled_units: vec![],
+                legacy_company_id: None,
+                user_id: "probe".to_string(),
+            });
+            next.run(req).await
+        },
+    ))
 }
 
 async fn send(
@@ -216,16 +211,12 @@ async fn send(
     method: &str,
     uri: &str,
     body: Option<String>,
-    company: Option<Uuid>,
 ) -> (axum::http::StatusCode, String) {
     use tower::ServiceExt;
-    let mut builder = axum::http::Request::builder()
+    let builder = axum::http::Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json");
-    if let Some(c) = company {
-        builder = builder.header("authorization", format!("Bearer {}", token(c)));
-    }
     let resp = app
         .oneshot(builder.body(axum::body::Body::from(body.unwrap_or_default())).unwrap())
         .await
@@ -235,8 +226,10 @@ async fn send(
     (status, String::from_utf8_lossy(&bytes).to_string())
 }
 
-// The three verbs served through the guarded routes, in the billing adapter's order: attach →
-// list (pending) → mark-invoiced; every step demands a token.
+// The three verbs served through the module surface, in the billing adapter's order: attach →
+// list (pending) → mark-invoiced. Token-demand is not probed here: the module applies no auth of
+// its own (an internal guard would shadow the composer's fence variables), so the composing
+// service's org-session guard owns that property.
 #[tokio::test]
 async fn reinvoice_routes_serve_the_billing_adapter_pull() {
     let pool = pool().await;
@@ -244,24 +237,11 @@ async fn reinvoice_routes_serve_the_billing_adapter_pull() {
     let order = draft_order(&w).await;
     let expense = Uuid::new_v4();
     let app = probe_app().await;
-    // The guarded routes verify the token's signature (authn); these verbs read no claim, so
-    // any well-formed claim set decodes.
-    let company = Uuid::new_v4();
-
-    // token demanded on every verb.
-    for (method, uri, body) in [
-        ("POST", format!("/sales-orders/{order}/expense-reinvoices"), Some(r#"{"expenseId":"00000000-0000-0000-0000-000000000000","amount":"1"}"#.into())),
-        ("GET", format!("/sales-orders/{order}/expense-reinvoices"), None),
-        ("POST", "/expense-reinvoices/00000000-0000-0000-0000-000000000000/mark-invoiced".into(), None),
-    ] {
-        let (status, _) = send(app.clone(), method, &uri, body, None).await;
-        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{method} {uri} must demand a token");
-    }
 
     // attach through the route.
     let (status, created) = send(
         app.clone(), "POST", &format!("/sales-orders/{order}/expense-reinvoices"),
-        Some(format!(r#"{{"expenseId":"{expense}","amount":"250000.00"}}"#)), Some(company),
+        Some(format!(r#"{{"expenseId":"{expense}","amount":"250000.00"}}"#)),
     ).await;
     assert_eq!(status, axum::http::StatusCode::CREATED, "{created}");
     let link: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
@@ -269,13 +249,13 @@ async fn reinvoice_routes_serve_the_billing_adapter_pull() {
     // duplicate through the route refuses 422.
     let (status, body) = send(
         app.clone(), "POST", &format!("/sales-orders/{order}/expense-reinvoices"),
-        Some(format!(r#"{{"expenseId":"{expense}","amount":"1.00"}}"#)), Some(company),
+        Some(format!(r#"{{"expenseId":"{expense}","amount":"1.00"}}"#)),
     ).await;
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert!(body.contains("duplicate_reinvoice"));
 
     // the pull list serves camelCase rows.
-    let (status, body) = send(app.clone(), "GET", &format!("/sales-orders/{order}/expense-reinvoices"), None, Some(company)).await;
+    let (status, body) = send(app.clone(), "GET", &format!("/sales-orders/{order}/expense-reinvoices"), None).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let list: serde_json::Value = serde_json::from_str(&body).unwrap();
     let mine = list.as_array().unwrap().iter().find(|l| l["id"] == link.to_string()).expect("listed");
@@ -288,11 +268,11 @@ async fn reinvoice_routes_serve_the_billing_adapter_pull() {
 
     // mark through the route; the double mark is loud.
     let (status, body) = send(
-        app.clone(), "POST", &format!("/expense-reinvoices/{link}/mark-invoiced"), None, Some(company),
+        app.clone(), "POST", &format!("/expense-reinvoices/{link}/mark-invoiced"), None,
     ).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let (status, body) = send(
-        app.clone(), "POST", &format!("/expense-reinvoices/{link}/mark-invoiced"), None, Some(company),
+        app.clone(), "POST", &format!("/expense-reinvoices/{link}/mark-invoiced"), None,
     ).await;
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY, "double mark must be loud: {body}");
     assert!(body.contains("invalid_transition"));

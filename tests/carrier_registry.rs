@@ -13,7 +13,8 @@
 //!   set-delivery: draft AND confirmed writable, cancelled refused, unknown carrier ⇒ clean 404,
 //!     keep/clear/set patch semantics
 //!   create-order with a carrier choice (validated pre-transaction)
-//!   route probes: the registry writes are token-guarded and served end-to-end
+//!   route probes: the registry verbs are served end-to-end (authn is the composing service's
+//!     duty — the module applies no guard of its own)
 
 use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
@@ -228,35 +229,30 @@ async fn create_order_validates_the_carrier_choice() {
 
 // ── route-level probes ───────────────────────────────────────────────────────
 
-const SECRET: &[u8] = b"selling-carrier-probe-secret";
-
-#[derive(serde::Serialize)]
-struct TestClaims {
-    sub: String,
-    exp: usize,
-    company_id: Uuid,
-}
-fn token(company_id: Uuid) -> String {
-    let claims = TestClaims { sub: "carrier-probe".into(), exp: 9_999_999_999, company_id };
-    jsonwebtoken::encode(
-        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256),
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(SECRET),
-    ).unwrap()
-}
-
 async fn probe_app() -> axum::Router {
     let pool = pool().await;
     let m = backbone_selling::SellingModule::builder().with_database(pool.clone()).build().unwrap();
     backbone_selling::presentation::http::create_guarded_selling_routes(
         &m,
         pool,
-        backbone_auth::company::CompanyVerifier::hs256(SECRET),
         std::sync::Arc::new(NoUnitCostPort),
         std::sync::Arc::new(NoStockFulfillmentPort),
         std::sync::Arc::new(NoServiceCatalog),
         std::sync::Arc::new(NoServiceDelivery),
     )
+    // The write handlers extract OrgContext, which the composing service's org-session
+    // guard inserts in production; the probe app stands the context in directly.
+    .layer(axum::middleware::from_fn(
+        |mut req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
+            req.extensions_mut().insert(backbone_auth::org::OrgContext {
+                acting_unit_id: uuid::Uuid::nil(),
+                entitled_units: vec![],
+                legacy_company_id: None,
+                user_id: "probe".to_string(),
+            });
+            next.run(req).await
+        },
+    ))
 }
 
 async fn send(
@@ -264,16 +260,12 @@ async fn send(
     method: &str,
     uri: &str,
     body: Option<String>,
-    company: Option<Uuid>,
 ) -> (axum::http::StatusCode, String) {
     use tower::ServiceExt;
-    let mut builder = axum::http::Request::builder()
+    let builder = axum::http::Request::builder()
         .method(method)
         .uri(uri)
         .header("content-type", "application/json");
-    if let Some(c) = company {
-        builder = builder.header("authorization", format!("Bearer {}", token(c)));
-    }
     let resp = app
         .oneshot(builder.body(axum::body::Body::from(body.unwrap_or_default())).unwrap())
         .await
@@ -283,44 +275,32 @@ async fn send(
     (status, String::from_utf8_lossy(&bytes).to_string())
 }
 
-// C6: the registry's writes ride the guarded surface end-to-end — create, list (active-only
-// default), deactivate-by-patch, duplicate refusal — and every one of them demands a token.
+// C6: the registry's verbs ride the module surface end-to-end — create, list (active-only
+// default), deactivate-by-patch, duplicate refusal, set-delivery. Token-demand is not probed
+// here: the module applies no auth of its own (an internal guard would shadow the composer's
+// fence variables), so the composing service's org-session guard owns that property.
 #[tokio::test]
-async fn carrier_routes_serve_the_registry_and_demand_a_token() {
+async fn carrier_routes_serve_the_registry() {
     let pool = pool().await;
     let app = probe_app().await;
-    // The guarded routes verify the token's signature (authn); the claim values themselves are
-    // not read by these registry verbs, so any well-formed claim set decodes.
-    let company = Uuid::new_v4();
-
-    // unauthenticated writes and reads-on-the-guarded-list are refused.
-    for (method, uri, body) in [
-        ("POST", "/delivery-carriers", Some(r#"{"name":"x"}"#.to_string())),
-        ("GET", "/delivery-carriers", None),
-        ("PATCH", "/delivery-carriers/00000000-0000-0000-0000-000000000000", Some(r#"{"active":false}"#.to_string())),
-    ] {
-        let (status, _) = send(app.clone(), method, uri, body, None).await;
-        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{method} {uri} must demand a token");
-    }
 
     // create + duplicate refusal.
     let name = uq("ProbeCarrier");
     let (status, created) = send(
         app.clone(), "POST", "/delivery-carriers",
         Some(format!(r#"{{"name":"{name}","trackingUrlTemplate":"https://t/{{ref}}"}}"#)),
-        Some(company),
     ).await;
     assert_eq!(status, axum::http::StatusCode::CREATED, "{created}");
     let id: Uuid = serde_json::from_str::<serde_json::Value>(&created).unwrap()["id"].as_str().unwrap().parse().unwrap();
 
     let (status, body) = send(
-        app.clone(), "POST", "/delivery-carriers", Some(format!(r#"{{"name":"{name}"}}"#)), Some(company),
+        app.clone(), "POST", "/delivery-carriers", Some(format!(r#"{{"name":"{name}"}}"#)),
     ).await;
     assert_eq!(status, axum::http::StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert!(body.contains("duplicate_carrier_name"));
 
     // the list serves the registry's carriers with the template in camelCase.
-    let (status, body) = send(app.clone(), "GET", "/delivery-carriers", None, Some(company)).await;
+    let (status, body) = send(app.clone(), "GET", "/delivery-carriers", None).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let list: serde_json::Value = serde_json::from_str(&body).unwrap();
     let mine = list.as_array().unwrap().iter().find(|c| c["id"] == id.to_string()).expect("listed");
@@ -330,20 +310,20 @@ async fn carrier_routes_serve_the_registry_and_demand_a_token() {
 
     // deactivate through the route; the default list drops it, activeOnly=false keeps it.
     let (status, body) = send(
-        app.clone(), "PATCH", &format!("/delivery-carriers/{id}"), Some(r#"{"active":false}"#.into()), Some(company),
+        app.clone(), "PATCH", &format!("/delivery-carriers/{id}"), Some(r#"{"active":false}"#.into()),
     ).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    let (status, body) = send(app.clone(), "GET", "/delivery-carriers", None, Some(company)).await;
+    let (status, body) = send(app.clone(), "GET", "/delivery-carriers", None).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let list: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert!(list.as_array().unwrap().iter().all(|c| c["id"] != id.to_string()), "retired leaves the default list");
-    let (status, body) = send(app.clone(), "GET", "/delivery-carriers?activeOnly=false", None, Some(company)).await;
+    let (status, body) = send(app.clone(), "GET", "/delivery-carriers?activeOnly=false", None).await;
     assert_eq!(status, axum::http::StatusCode::OK, "{body}");
     let list: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert!(list.as_array().unwrap().iter().any(|c| c["id"] == id.to_string()), "history stays readable");
 
     // the generic CRUD read router for the registry is mounted at its framework path.
-    let (status, _) = send(app.clone(), "GET", "/delivery_carriers", None, None).await;
+    let (status, _) = send(app.clone(), "GET", "/delivery_carriers", None).await;
     assert_eq!(status, axum::http::StatusCode::OK, "the generic read router mounts at /delivery_carriers");
 
     // set-delivery through the route: happy path on a draft order.
@@ -352,7 +332,6 @@ async fn carrier_routes_serve_the_registry_and_demand_a_token() {
     let (status, body) = send(
         app.clone(), "POST", "/sales-orders/set-delivery",
         Some(format!(r#"{{"orderId":"{order}","deliveryCarrierId":"{id}","trackingRef":"RT-1"}}"#)),
-        Some(company),
     ).await;
     // NOTE: the carrier was deactivated above — set-delivery only needs the row to EXIST (the
     // registry keeps retired carriers usable for history), so this is 200 by design.

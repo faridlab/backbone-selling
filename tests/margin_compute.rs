@@ -342,12 +342,24 @@ async fn probe_app(costs: ScriptedCosts) -> axum::Router {
     backbone_selling::presentation::http::create_guarded_selling_routes(
         &m,
         pool,
-        backbone_auth::company::CompanyVerifier::hs256(SECRET),
         Arc::new(costs),
         Arc::new(NoStockFulfillmentPort),
         Arc::new(NoServiceCatalog),
         Arc::new(NoServiceDelivery),
     )
+    // The write handlers extract OrgContext, which the composing service's org-session
+    // guard inserts in production; the probe app stands the context in directly.
+    .layer(axum::middleware::from_fn(
+        |mut req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| async move {
+            req.extensions_mut().insert(backbone_auth::org::OrgContext {
+                acting_unit_id: uuid::Uuid::nil(),
+                entitled_units: vec![],
+                legacy_company_id: None,
+                user_id: "probe".to_string(),
+            });
+            next.run(req).await
+        },
+    ))
 }
 
 async fn send(
@@ -376,8 +388,7 @@ async fn send(
 
 // A client CANNOT author a cost or a margin: the create body accepts no such field (injected JSON
 // fields are ignored, not stored — `unit_cost`'s only writer is the confirm stamp), the draft
-// lines carry NULL until confirm, and the margin route serves the computed figures only. The
-// margin read is token-guarded like every other guarded route.
+// lines carry NULL until confirm, and the margin route serves the computed figures only.
 #[tokio::test]
 async fn client_authored_cost_and_margin_injection_is_ignored() {
     let pool = pool().await;
@@ -401,10 +412,6 @@ async fn client_authored_cost_and_margin_injection_is_ignored() {
         sqlx::query_scalar("SELECT unit_cost FROM selling.sales_order_items WHERE order_id=$1")
             .bind(order).fetch_all(&pool).await.unwrap();
     assert_eq!(pre, vec![None], "a client-authored cost must not persist on a draft");
-
-    // The margin read is guarded: no token ⇒ 401.
-    let (status, _) = send(app.clone(), "GET", &format!("/sales-orders/{order}/margin"), None, None).await;
-    assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
 
     // Confirm through the route (scripted port: cost 100), then read the computed margin.
     let (status, body) = send(
