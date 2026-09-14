@@ -386,12 +386,7 @@ impl SellingWriteService {
                 item_ids.sort_unstable();
                 item_ids.dedup();
                 let policies = catalog
-                    .resolve_service_tracking(
-                        // Legacy twin (ADR-0029): the product surface still fences on company, so
-                        // the ambient org scope's legacy company echo rides along for it.
-                        legacy_company_echo(),
-                        &item_ids,
-                    )
+                    .resolve_service_tracking(&item_ids)
                     .await
                     .map_err(|e| SellingError::ServiceCatalogRejected { code: e.code, message: e.message })?;
                 // Absent item = manual: the product surface holds no tracking row, which is

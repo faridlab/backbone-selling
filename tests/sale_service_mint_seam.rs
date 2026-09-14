@@ -163,7 +163,6 @@ struct FakeCatalog {
 impl ServiceCatalogPort for FakeCatalog {
     async fn resolve_service_tracking(
         &self,
-        _company_id: Uuid,
         item_ids: &[Uuid],
     ) -> Result<Vec<ServiceTrackingInfo>, ServiceCatalogError> {
         Ok(self

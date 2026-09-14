@@ -99,12 +99,11 @@ pub trait ServiceCatalogPort: Send + Sync {
     /// Resolve the service-tracking policy for each named item. Items with no tracking
     /// configuration are OMITTED from the result — omission is the `manual` policy (see the
     /// module doc). Called BEFORE the confirm transaction; an `Err` refuses the whole confirm.
-    // `company_id` is the legacy tenant twin (ADR-0029) for the still-company-fenced
-    // product-surface consumer — selling passes the ambient org scope's echo and keys no
-    // statement on it.
+    // The port carries no tenant argument. Selling resolves its scope from the ambient org
+    // scope, and an adapter that needs a company for a still-company-fenced surface reads the
+    // same source — one source of truth rather than a value echoed across a boundary.
     async fn resolve_service_tracking(
         &self,
-        company_id: Uuid,
         item_ids: &[Uuid],
     ) -> Result<Vec<ServiceTrackingInfo>, ServiceCatalogError>;
 }
@@ -120,7 +119,6 @@ pub struct NoServiceCatalog;
 impl ServiceCatalogPort for NoServiceCatalog {
     async fn resolve_service_tracking(
         &self,
-        _company_id: Uuid,
         _item_ids: &[Uuid],
     ) -> Result<Vec<ServiceTrackingInfo>, ServiceCatalogError> {
         // Total absence: no product carries a tracking policy from this composition's point of

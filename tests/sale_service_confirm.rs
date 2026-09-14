@@ -52,7 +52,7 @@ use backbone_selling::application::service::selling_write_service::{
 // ── the scripted fakes (the composition's adapter stand-ins) ───────────────────
 
 /// One recorded catalog call: (legacy tenant twin, distinct item ids asked for).
-type CatalogCall = (Uuid, Vec<Uuid>);
+type CatalogCall = Vec<Uuid>;
 /// The mint's per-line record: sale line -> (project id, task id).
 type MintedIds = HashMap<Uuid, (Uuid, Option<Uuid>)>;
 
@@ -69,10 +69,9 @@ struct FakeCatalog {
 impl ServiceCatalogPort for FakeCatalog {
     async fn resolve_service_tracking(
         &self,
-        company_id: Uuid,
         item_ids: &[Uuid],
     ) -> Result<Vec<ServiceTrackingInfo>, ServiceCatalogError> {
-        self.calls.lock().unwrap().push((company_id, item_ids.to_vec()));
+        self.calls.lock().unwrap().push(item_ids.to_vec());
         if let Some(e) = self.err.lock().unwrap().take() {
             return Err(e);
         }
@@ -301,10 +300,7 @@ async fn confirm_mints_per_line_and_stamps_backrefs() {
     {
         let calls = cat.calls.lock().unwrap();
         assert_eq!(calls.len(), 1, "one policy resolution per confirm");
-        // The catalog request's company is the legacy tenant twin (ADR-0029): the ambient org
-        // scope's echo — nil on this undecorated deployment.
-        assert_eq!(calls[0].0, Uuid::nil());
-        let mut asked = calls[0].1.clone();
+        let mut asked = calls[0].clone();
         asked.sort_unstable();
         let mut expected = vec![svc, fixed, plain];
         expected.sort_unstable();
