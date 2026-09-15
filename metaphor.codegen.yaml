@@ -11,6 +11,10 @@
 # Add your hand-authored services, handlers, tests, and docs below as you write them.
 
 user_owned:
+  # Hand-written files the audit found undeclared; declared so a schema
+  # regeneration cannot delete them.
+  - "src/domain/entity/gl_posting_state.rs"
+
   # Domain events (public extension surface) + outbound GL-posting port + validated write path
   # + the reference consumer extension (extension-contract §5).
   - "src/application/service/selling_events.rs"
