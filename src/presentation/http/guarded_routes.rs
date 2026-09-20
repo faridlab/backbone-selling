@@ -58,7 +58,9 @@ use crate::SellingModule;
 use super::{
     create_delivery_carrier_read_routes, create_expense_reinvoice_link_read_routes,
     create_quotation_read_routes, create_quotation_item_read_routes,
-    create_sales_order_read_routes, create_sales_order_item_read_routes,
+    create_quotation_template_read_routes, create_sales_order_read_routes,
+    create_sales_order_item_read_routes, create_sales_person_allocation_read_routes,
+    create_sales_team_read_routes,
 };
 
 #[derive(Debug, Serialize)]
@@ -797,5 +799,15 @@ pub fn create_guarded_selling_routes(
         // entities goes exclusively through the validated verbs above).
         .merge(create_delivery_carrier_read_routes(m.delivery_carrier_service.clone()))
         .merge(create_expense_reinvoice_link_read_routes(m.expense_reinvoice_link_service.clone()))
+        // The commercial masters the admin surface navigates: quotation
+        // templates, sales teams, and the person-allocation rows that assign
+        // sellers to teams. READS ONLY — writes stay on validated verbs.
+        .merge(create_quotation_template_read_routes(
+            m.quotation_template_service.clone(),
+        ))
+        .merge(create_sales_team_read_routes(m.sales_team_service.clone()))
+        .merge(create_sales_person_allocation_read_routes(
+            m.sales_person_allocation_service.clone(),
+        ))
         .merge(create_selling_write_routes(write))
 }
