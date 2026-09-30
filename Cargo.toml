@@ -3,6 +3,7 @@ name = "backbone-selling"
 version = "0.13.18"
 edition = "2021"
 description = "Selling: Quotation -> Sales Order -> Sales Invoice; emits revenue AccountingPost to backbone-accounting (order-to-cash intent + GL seam)"
+license = "MIT OR Apache-2.0"
 
 [lib]
 path = "src/lib.rs"
