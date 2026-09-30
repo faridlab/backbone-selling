@@ -42,6 +42,9 @@ pub use application::service::SalesOrderItemService;
 pub use application::service::SalesTeamService;
 pub use application::service::SalesPersonAllocationService;
 
+// Re-exports - Validation
+pub use application::validator::{ValidationError, ValidationResult};
+
 // Re-exports - Workflows
 pub use application::workflows::*;
 

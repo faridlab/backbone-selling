@@ -308,6 +308,8 @@ impl backbone_orm::EntityRepoMeta for SalesOrder {
         m.insert("branch_id".to_string(), "uuid".to_string());
         m.insert("customer_id".to_string(), "uuid".to_string());
         m.insert("status".to_string(), "sales_order_status".to_string());
+        m.insert("order_date".to_string(), "date".to_string());
+        m.insert("delivery_date".to_string(), "date".to_string());
         m
     }
     fn search_fields() -> &'static [&'static str] {

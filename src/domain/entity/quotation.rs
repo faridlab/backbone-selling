@@ -296,6 +296,8 @@ impl backbone_orm::EntityRepoMeta for Quotation {
         m.insert("customer_id".to_string(), "uuid".to_string());
         m.insert("opportunity_id".to_string(), "uuid".to_string());
         m.insert("status".to_string(), "quotation_status".to_string());
+        m.insert("quotation_date".to_string(), "date".to_string());
+        m.insert("valid_until".to_string(), "date".to_string());
         m
     }
     fn search_fields() -> &'static [&'static str] {
