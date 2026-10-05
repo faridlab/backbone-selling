@@ -57,7 +57,7 @@ impl SellingWriteService {
             return Err(SellingError::InvalidReinvoiceAmount);
         }
         // The order must exist and not be cancelled.
-        let why = self.repos.orders.find_cancel_refusal(&self.db_pool, order_id).await?;
+        let why = self.repos.orders.find_cancel_refusal(&self.rpool(), order_id).await?;
         match why {
             None => return Err(SellingError::OrderNotFound(order_id)),
             Some(r) if r.status == "cancelled" => {
@@ -66,13 +66,13 @@ impl SellingWriteService {
             Some(_) => {}
         }
         // Duplicate pre-read (the partial unique index backs the race below).
-        let dup = self.repos.reinvoices.find_live_link(&self.db_pool, order_id, expense_id).await?;
+        let dup = self.repos.reinvoices.find_live_link(&self.rpool(), order_id, expense_id).await?;
         if dup.is_some() {
             return Err(SellingError::DuplicateReinvoice);
         }
 
         let id = Uuid::new_v4();
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         let r = self.repos.reinvoices.insert_link(&mut tx, &NewExpenseReinvoiceLinkRow {
             id,
@@ -96,11 +96,11 @@ impl SellingWriteService {
         order_id: Uuid,
     ) -> Result<Vec<ExpenseReinvoiceDto>, SellingError> {
         // Existence probe: the order must exist (None ⇒ not found, no leak).
-        let why = self.repos.orders.find_cancel_refusal(&self.db_pool, order_id).await?;
+        let why = self.repos.orders.find_cancel_refusal(&self.rpool(), order_id).await?;
         if why.is_none() {
             return Err(SellingError::OrderNotFound(order_id));
         }
-        let rows = self.repos.reinvoices.list_links_for_order(&self.db_pool, order_id).await?;
+        let rows = self.repos.reinvoices.list_links_for_order(&self.rpool(), order_id).await?;
         Ok(rows.into_iter().map(|l| ExpenseReinvoiceDto {
             id: l.id,
             order_id: l.order_id,
@@ -119,10 +119,10 @@ impl SellingWriteService {
         &self,
         link_id: Uuid,
     ) -> Result<(), SellingError> {
-        let updated = self.repos.reinvoices.mark_invoiced(&self.db_pool, link_id).await?;
+        let updated = self.repos.reinvoices.mark_invoiced(&self.rpool(), link_id).await?;
         if !updated {
             // The guarded statement refused — classify why (only after a refusal).
-            let st = self.repos.reinvoices.find_link_state(&self.db_pool, link_id).await?;
+            let st = self.repos.reinvoices.find_link_state(&self.rpool(), link_id).await?;
             return Err(match st {
                 None => SellingError::ReinvoiceNotFound(link_id),
                 Some(state) => SellingError::InvalidTransition { verb: "mark_invoiced".into(), current: state },

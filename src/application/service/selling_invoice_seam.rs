@@ -34,12 +34,12 @@ impl SellingWriteService {
     /// revenue itself (retiring `create_invoice_from_order` in the composed flow).
     pub async fn build_invoice_request(&self, order_id: Uuid) -> Result<InvoiceRequestEnvelope, SellingError> {
         // ID-only read — see `build_delivery_request`. Read-only.
-        let hdr = self.repos.orders.find_fulfillment_header(&self.db_pool, order_id).await?
+        let hdr = self.repos.orders.find_fulfillment_header(&self.rpool(), order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
         if hdr.status == "draft" {
             return Err(SellingError::NotDraft(order_id.to_string()));
         }
-        let rows = self.repos.order_items.list_billing_remainders(&self.db_pool, order_id).await?;
+        let rows = self.repos.order_items.list_billing_remainders(&self.rpool(), order_id).await?;
         let lines: Vec<InvoiceRequestLine> = rows.iter().map(|r| InvoiceRequestLine {
             item_id: r.item_id,
             quantity: r.remaining,
@@ -75,7 +75,7 @@ impl SellingWriteService {
         // The allocation transaction relays the caller's ambient org scope (when the composing
         // service bound one) so the decorator's RLS sees it; on an undecorated deployment the
         // transaction stays plain.
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         for (item_id, qty) in billed {
             self.allocate_billed(&mut tx, order_id, *item_id, *qty).await?;

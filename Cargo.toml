@@ -11,16 +11,10 @@ exclude = [".claude/", ".github/", "graphify-out/"]
 path = "src/lib.rs"
 
 [dependencies]
+# Framework by semver from crates.io (ADR-0030): the module stays publishable
+# and follows the framework's released line. 2.7.34+ carries the org-scope
+# read twins the repositories ride.
 backbone-outbox = { version = "2.7.35", features = ["multi_tenant"] }
-# -----------------------------------------------------------------------------
-# Backbone Framework crates
-#
-# Pulled directly from the public framework repository so this skeleton works
-# anywhere on disk without path fix-up. For reproducible builds, pin to a
-# specific tag or commit by replacing `branch = "main"` with `tag = "vX.Y.Z"`
-# or `rev = "<commit-sha>"`. Cargo dedupes the git fetch — the repo is only
-# cloned once even though four crates reference it.
-# -----------------------------------------------------------------------------
 backbone-core = { version = "2.7.35", features = ["postgres"] }
 backbone-orm = { version = "2.7.35" }
 backbone-auth = { version = "2.7.35", features = ["axum"] }

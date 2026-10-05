@@ -459,6 +459,16 @@ impl SellingWriteService {
         Self { db_pool, sink, repos }
     }
 
+    /// The database this call runs on: the composer's request pool when one
+    /// is bound (a tenant mount, or a relay consumer wrapped by the host),
+    /// else the composed pool. The repository methods this service feeds
+    /// still prefer the request-dedicated connection when the org-auth stack
+    /// opened one; this resolves the pool for every leg that opens its own
+    /// connection (ADR-0029 pool law).
+    pub(super) fn rpool(&self) -> PgPool {
+        crate::request_pool::current().unwrap_or_else(|| self.db_pool.clone())
+    }
+
     /// Recompute an order's status from its two watermarks (ADR-003): `completed` iff every line is
     /// fully billed AND fully delivered; else `to_deliver` (billed, awaiting delivery) / `to_bill`
     /// (delivered, awaiting billing) / `to_deliver_and_bill` (awaiting both). Never touches a
@@ -470,7 +480,7 @@ impl SellingWriteService {
     /// the invoice business — ADR-006.)
     pub(super) async fn recompute_order_status(&self, order_id: Uuid) -> Result<(), SellingError> {
         // RLS scope (ADR-0008), ID-only pattern — inherits the caller's scope.
-        let row = self.repos.order_items.watermark_rollup(&self.db_pool, order_id).await?;
+        let row = self.repos.order_items.watermark_rollup(&self.rpool(), order_id).await?;
         let next = match (row.billed_all.unwrap_or(false), row.delivered_all.unwrap_or(false)) {
             (true, true) => "completed",
             (true, false) => "to_deliver",
@@ -479,7 +489,7 @@ impl SellingWriteService {
         };
         // Only advance an in-flight (confirmed) order; leave draft/closed/cancelled alone — the
         // repo statement's `status = ANY(...)` gate enforces that.
-        self.repos.orders.advance_status(&self.db_pool, order_id, next).await?;
+        self.repos.orders.advance_status(&self.rpool(), order_id, next).await?;
         Ok(())
     }
 }

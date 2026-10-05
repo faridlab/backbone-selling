@@ -13,13 +13,12 @@ use anyhow::Result;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-// The optional-row read and write twins ride the org-scope module; the all-rows read twin
-// lives only in the legacy `company_scope` module. Their connection discipline is the
-// request-dedicated connection when the composing service bound one, plain pool otherwise.
-// The legacy task-local branch is never taken: this module sets no legacy scope of its own
-// (ADR-0029).
-use backbone_orm::company_scope::fetch_all_rows_scoped;
+// The read and write twins ride the org-scope module: the request-dedicated connection
+// when the composing service bound one, plain pool otherwise, no scope invented. The legacy
+// `company_scope` twins would open a transaction and bind a company this module no longer
+// sets (ADR-0029 stripped it), so the org-scope twins are the honest read lane here.
 use backbone_orm::org_scope;
+use backbone_orm::org_scope::fetch_all_rows_scoped;
 
 use crate::domain::entity::DeliveryCarrier;
 

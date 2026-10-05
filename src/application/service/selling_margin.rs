@@ -83,10 +83,10 @@ impl SellingWriteService {
     /// nothing here is stored or writable. ID-only read (rides the caller's request-scoped
     /// connection; RLS fences it).
     pub async fn order_margin_view(&self, order_id: Uuid) -> Result<SalesOrderMarginDto, SellingError> {
-        let hdr = self.repos.orders.find_invoice_status_header(&self.db_pool, order_id).await?
+        let hdr = self.repos.orders.find_invoice_status_header(&self.rpool(), order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
-        let rows = self.repos.order_items.list_margin_rows(&self.db_pool, order_id).await?;
-        let rollup = self.repos.order_items.margin_rollup(&self.db_pool, order_id).await?;
+        let rows = self.repos.order_items.list_margin_rows(&self.rpool(), order_id).await?;
+        let rollup = self.repos.order_items.margin_rollup(&self.rpool(), order_id).await?;
 
         let lines: Vec<SalesOrderMarginLineDto> = rows.iter().map(|r| {
             // NULL cost ⇒ NULL margin + NULL percent (honest absence, never zero).

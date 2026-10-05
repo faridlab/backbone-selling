@@ -49,12 +49,12 @@ impl SellingWriteService {
         name: &str,
         tracking_url_template: Option<&str>,
     ) -> Result<Uuid, SellingError> {
-        let dup = self.repos.carriers.find_carrier_by_name(&self.db_pool, name).await?;
+        let dup = self.repos.carriers.find_carrier_by_name(&self.rpool(), name).await?;
         if dup.is_some() {
             return Err(SellingError::CarrierDuplicate(name.to_string()));
         }
         let id = Uuid::new_v4();
-        let r = self.repos.carriers.insert_carrier(&self.db_pool, id, name, tracking_url_template).await;
+        let r = self.repos.carriers.insert_carrier(&self.rpool(), id, name, tracking_url_template).await;
         if let Err(e) = r {
             return Err(if is_dup(&e) { SellingError::CarrierDuplicate(name.to_string()) } else { e.into() });
         }
@@ -71,7 +71,7 @@ impl SellingWriteService {
         if patch.name.is_none() && patch.active.is_none() && patch.tracking_url_template.is_none() {
             return Ok(()); // nothing asked, nothing changed
         }
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         let updated = self.repos.carriers.update_carrier(
             &mut tx,
@@ -96,7 +96,7 @@ impl SellingWriteService {
         &self,
         active_only: bool,
     ) -> Result<Vec<CarrierDto>, SellingError> {
-        let rows = self.repos.carriers.list_carriers(&self.db_pool, active_only).await?;
+        let rows = self.repos.carriers.list_carriers(&self.rpool(), active_only).await?;
         Ok(rows.into_iter().map(|c| CarrierDto {
             id: c.id,
             name: c.name,
@@ -122,7 +122,7 @@ impl SellingWriteService {
         if let Some(id) = delivery_carrier_id.flatten() {
             self.carrier_id_or_refuse(Some(id)).await?;
         }
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         let updated = self.repos.orders.set_order_delivery(
             &mut tx,
@@ -135,7 +135,7 @@ impl SellingWriteService {
         if !updated {
             // The guard refused — classify why (only after a refusal; the guarded statement
             // itself never leaks whether the id exists).
-            let why = self.repos.orders.find_cancel_refusal(&self.db_pool, order_id).await?;
+            let why = self.repos.orders.find_cancel_refusal(&self.rpool(), order_id).await?;
             return Err(match why {
                 None => SellingError::OrderNotFound(order_id),
                 Some(r) => SellingError::InvalidTransition { verb: "set_delivery".into(), current: r.status },
@@ -154,7 +154,7 @@ impl SellingWriteService {
         match carrier_id {
             None => Ok(None),
             Some(id) => {
-                let found = self.repos.carriers.find_carrier(&self.db_pool, id).await?;
+                let found = self.repos.carriers.find_carrier(&self.rpool(), id).await?;
                 match found {
                     Some(_) => Ok(Some(id)),
                     None => Err(SellingError::CarrierNotFound(id)),

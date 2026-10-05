@@ -58,7 +58,7 @@ impl SellingWriteService {
             let t = self
                 .repos
                 .templates
-                .find_template(&self.db_pool, template_id)
+                .find_template(&self.rpool(), template_id)
                 .await?
                 .ok_or(SellingError::TemplateNotFound(template_id))?;
             valid_until = valid_until
@@ -72,7 +72,7 @@ impl SellingWriteService {
         // One transaction for header + lines. The ambient org scope (when the composing service
         // bound one) is relayed onto the connection so the decorator's RLS sees it; on an
         // undecorated deployment the transaction stays plain.
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         let r = self.repos.quotations.insert_draft(&mut tx, &NewQuotationRow {
             id,
@@ -114,7 +114,7 @@ impl SellingWriteService {
     /// Accept a quotation (draft/sent → accepted); emits `QuotationAccepted`. Only an accepted
     /// quotation may be converted to a sales order.
     pub async fn accept_quotation(&self, quotation_id: Uuid) -> Result<(), SellingError> {
-        let row = self.repos.quotations.accept(&self.db_pool, quotation_id).await?;
+        let row = self.repos.quotations.accept(&self.rpool(), quotation_id).await?;
         // A refused guard is wrong-state OR absent — classify only after the refusal, exactly like
         // the other machine verbs: the re-read decides between `invalid_transition` (422, the
         // quotation is ours but not acceptable) and `quotation_not_found` (404, an unknown id —
@@ -136,7 +136,7 @@ impl SellingWriteService {
     pub async fn send_quotation(&self, quotation_id: Uuid) -> Result<(), SellingError> {
         // The guarded flip refuses wrong-state AND foreign ids alike; classify only after a
         // refusal (the re-read decides, no existence leak).
-        if !self.repos.quotations.send(&self.db_pool, quotation_id).await? {
+        if !self.repos.quotations.send(&self.rpool(), quotation_id).await? {
             return Err(self.refuse_quotation_transition("send", quotation_id).await);
         }
         self.sink.publish(SellingEvent::QuotationSent(QuotationSent {
@@ -155,7 +155,7 @@ impl SellingWriteService {
     ) -> Result<(), SellingError> {
         // The guarded flip refuses wrong-state AND foreign ids alike; classify only after a
         // refusal (the re-read decides, no existence leak).
-        if !self.repos.quotations.reject(&self.db_pool, quotation_id, reason.as_deref()).await? {
+        if !self.repos.quotations.reject(&self.rpool(), quotation_id, reason.as_deref()).await? {
             return Err(self.refuse_quotation_transition("reject", quotation_id).await);
         }
         self.sink.publish(SellingEvent::QuotationRejected(QuotationRejected {
@@ -176,7 +176,7 @@ impl SellingWriteService {
     ) -> Result<(), SellingError> {
         // The guarded flip refuses wrong-state AND foreign ids alike; classify only after a
         // refusal (the re-read decides, no existence leak).
-        if !self.repos.quotations.cancel(&self.db_pool, quotation_id, reason.as_deref()).await? {
+        if !self.repos.quotations.cancel(&self.rpool(), quotation_id, reason.as_deref()).await? {
             return Err(self.refuse_quotation_cancel(quotation_id).await);
         }
         self.sink.publish(SellingEvent::QuotationCancelled(QuotationCancelled {
@@ -192,7 +192,7 @@ impl SellingWriteService {
     pub async fn redraft_quotation(&self, quotation_id: Uuid) -> Result<(), SellingError> {
         // The guarded flip refuses wrong-state AND foreign ids alike; classify only after a
         // refusal (the re-read decides, no existence leak).
-        if !self.repos.quotations.redraft(&self.db_pool, quotation_id).await? {
+        if !self.repos.quotations.redraft(&self.rpool(), quotation_id).await? {
             return Err(self.refuse_quotation_transition("re-draft", quotation_id).await);
         }
         self.sink.publish(SellingEvent::QuotationReDrafted(QuotationReDrafted {
@@ -209,7 +209,7 @@ impl SellingWriteService {
     // classification read runs only AFTER a refusal, to produce the precise error code.
 
     async fn refuse_quotation_transition(&self, verb: &str, quotation_id: Uuid) -> SellingError {
-        let st = self.repos.quotations.find_status(&self.db_pool, quotation_id).await;
+        let st = self.repos.quotations.find_status(&self.rpool(), quotation_id).await;
         match st {
             Ok(Some(row)) => SellingError::InvalidTransition { verb: verb.into(), current: row.status },
             _ => SellingError::QuotationNotFound(quotation_id),
@@ -217,7 +217,7 @@ impl SellingWriteService {
     }
 
     async fn refuse_quotation_cancel(&self, quotation_id: Uuid) -> SellingError {
-        let st = self.repos.quotations.find_status(&self.db_pool, quotation_id).await;
+        let st = self.repos.quotations.find_status(&self.rpool(), quotation_id).await;
         match st {
             Ok(Some(row)) if row.status == "ordered" => SellingError::QuotationOrdered(quotation_id),
             Ok(Some(row)) => SellingError::InvalidTransition { verb: "cancel".into(), current: row.status },
@@ -237,12 +237,12 @@ impl SellingWriteService {
         validity_days: i32,
         default_notes: Option<&str>,
     ) -> Result<Uuid, SellingError> {
-        let dup = self.repos.templates.find_template_by_name(&self.db_pool, name).await?;
+        let dup = self.repos.templates.find_template_by_name(&self.rpool(), name).await?;
         if dup.is_some() {
             return Err(SellingError::TemplateDuplicate(name.to_string()));
         }
         let id = Uuid::new_v4();
-        let r = self.repos.templates.insert_template(&self.db_pool, &NewQuotationTemplateRow {
+        let r = self.repos.templates.insert_template(&self.rpool(), &NewQuotationTemplateRow {
             id,
             name,
             validity_days,
@@ -259,6 +259,6 @@ impl SellingWriteService {
     pub async fn list_quotation_templates(
         &self,
     ) -> Result<Vec<QuotationTemplateRow>, SellingError> {
-        Ok(self.repos.templates.list_templates(&self.db_pool).await?)
+        Ok(self.repos.templates.list_templates(&self.rpool()).await?)
     }
 }

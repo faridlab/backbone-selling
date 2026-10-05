@@ -129,9 +129,9 @@ impl SellingWriteService {
         &self,
         order_id: Uuid,
     ) -> Result<SalesOrderInvoiceStatusDto, SellingError> {
-        let hdr = self.repos.orders.find_invoice_status_header(&self.db_pool, order_id).await?
+        let hdr = self.repos.orders.find_invoice_status_header(&self.rpool(), order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
-        let rows = self.repos.order_items.list_invoice_policy_rows(&self.db_pool, order_id).await?;
+        let rows = self.repos.order_items.list_invoice_policy_rows(&self.rpool(), order_id).await?;
 
         let lines: Vec<SalesOrderItemInvoiceDto> = rows.iter().map(|r| {
             let st = line_invoice_status(&hdr.status, &r.invoice_policy, r.is_downpayment, r.quantity, r.delivered_qty, r.billed_qty);
@@ -175,9 +175,9 @@ impl SellingWriteService {
         &self,
         quotation_id: Uuid,
     ) -> Result<QuotationInvoiceStatusDto, SellingError> {
-        let hdr = self.repos.quotations.find_invoice_status_header(&self.db_pool, quotation_id).await?
+        let hdr = self.repos.quotations.find_invoice_status_header(&self.rpool(), quotation_id).await?
             .ok_or(SellingError::QuotationNotFound(quotation_id))?;
-        let rows = self.repos.quotation_items.list_policy_rows(&self.db_pool, quotation_id).await?;
+        let rows = self.repos.quotation_items.list_policy_rows(&self.rpool(), quotation_id).await?;
 
         let lines: Vec<QuotationItemInvoiceDto> = rows.iter().map(|r| QuotationItemInvoiceDto {
             id: r.id,

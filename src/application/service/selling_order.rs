@@ -79,7 +79,7 @@ impl SellingWriteService {
         // One transaction for header + lines. The ambient org scope (when the composing service
         // bound one) is relayed onto the connection so the decorator's RLS sees it; on an
         // undecorated deployment the transaction stays plain.
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         let r = self.repos.orders.insert_draft(&mut tx, &NewSalesOrderRow {
             id,
@@ -283,7 +283,7 @@ impl SellingWriteService {
     ) -> Result<(), SellingError> {
         // (1) live (line, item) pairs — ID-only; under a composed decorator a foreign order
         // simply reads [] and the guard below refuses with NotDraft.
-        let lines = self.repos.order_items.list_cost_stamp_lines(&self.db_pool, order_id).await?;
+        let lines = self.repos.order_items.list_cost_stamp_lines(&self.rpool(), order_id).await?;
 
         // (2) resolve the DISTINCT items' costs outside any transaction.
         let mut stamps: Vec<(Uuid, Option<Decimal>)> = Vec::with_capacity(lines.len());
@@ -327,9 +327,9 @@ impl SellingWriteService {
         // no stamp written (the stamp only happens inside the transaction below) and no event
         // fired. Downpayment lines are excluded: a downpayment's placeholder quantity is never
         // physically delivered, so it never drives stock work.
-        let stock_header = self.repos.orders.find_stock_header(&self.db_pool, order_id).await?;
+        let stock_header = self.repos.orders.find_stock_header(&self.rpool(), order_id).await?;
         if let Some(hdr) = stock_header {
-            let demand_lines = self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id).await?;
+            let demand_lines = self.repos.order_items.list_stock_demand_lines(&self.rpool(), order_id).await?;
             if !demand_lines.is_empty() {
                 let outcomes = stock
                     .launch_stock_rules(&StockRuleRequest {
@@ -379,8 +379,8 @@ impl SellingWriteService {
         // is the manual policy (mints nothing, proceeds). Downpayment lines are excluded: a
         // downpayment's placeholder quantity is never delivered, so it never drives delivery work.
         let mut backrefs: Vec<(Uuid, Option<Uuid>, Option<Uuid>)> = Vec::new();
-        if let Some(hdr) = self.repos.orders.find_delivery_header(&self.db_pool, order_id).await? {
-            let service_lines = self.repos.order_items.list_service_delivery_lines(&self.db_pool, order_id).await?;
+        if let Some(hdr) = self.repos.orders.find_delivery_header(&self.rpool(), order_id).await? {
+            let service_lines = self.repos.order_items.list_service_delivery_lines(&self.rpool(), order_id).await?;
             if !service_lines.is_empty() {
                 let mut item_ids: Vec<Uuid> = service_lines.iter().map(|l| l.item_id).collect();
                 item_ids.sort_unstable();
@@ -442,7 +442,7 @@ impl SellingWriteService {
         // (3) stamp + guard as ONE unit of work; a losing guard rolls the stamp back. The ambient
         // org scope (when the composing service bound one) is relayed onto the connection so the
         // decorator's RLS sees it; on an undecorated deployment the transaction stays plain.
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         if !stamps.is_empty() {
             self.repos.order_items.stamp_unit_costs(&mut tx, order_id, &stamps).await?;
@@ -477,12 +477,12 @@ impl SellingWriteService {
         // ID-only reads (ADR-0029): identified by the quotation id alone; under a composed tenancy
         // decorator the request's fence scopes the lookup so another tenant's quotation simply
         // isn't found.
-        let q = self.repos.quotations.find_conversion_source(&self.db_pool, quotation_id).await?
+        let q = self.repos.quotations.find_conversion_source(&self.rpool(), quotation_id).await?
             .ok_or(SellingError::QuotationNotFound(quotation_id))?;
         if q.status != "accepted" {
             return Err(SellingError::QuotationNotAccepted(quotation_id));
         }
-        let lines = self.repos.quotation_items.list_for_conversion(&self.db_pool, quotation_id).await?;
+        let lines = self.repos.quotation_items.list_for_conversion(&self.rpool(), quotation_id).await?;
 
         let new_lines: Vec<NewLine> = lines.into_iter().map(|l| NewLine {
             item_id: l.item_id,
@@ -511,14 +511,14 @@ impl SellingWriteService {
             lines: new_lines,
         }).await?;
 
-        self.repos.quotations.mark_ordered(&self.db_pool, quotation_id).await?;
+        self.repos.quotations.mark_ordered(&self.rpool(), quotation_id).await?;
         Ok(order_id)
     }
 
     /// Load the exported `SalesOrderRef` (the brief's cross-module DTO) for one order.
     pub async fn sales_order_ref(&self, order_id: Uuid) -> Result<SalesOrderRef, SellingError> {
         // ID-only read — see `convert_quotation_to_order`.
-        let row = self.repos.orders.find_ref(&self.db_pool, order_id).await?
+        let row = self.repos.orders.find_ref(&self.rpool(), order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
         Ok(SalesOrderRef {
             id: order_id,
@@ -559,14 +559,14 @@ impl SellingWriteService {
         order_id: Uuid,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
-        let row = self.repos.orders.cancel(&self.db_pool, order_id).await?;
+        let row = self.repos.orders.cancel(&self.rpool(), order_id).await?;
         let row = match row {
             Some(r) => r,
             None => {
                 // The guard refused — classify why (only after a refusal; the guarded statement
                 // itself never leaks whether the id exists). No port call happens on a refusal:
                 // nothing was cancelled, so there is nothing to tell the stock side.
-                let why = self.repos.orders.find_cancel_refusal(&self.db_pool, order_id).await?;
+                let why = self.repos.orders.find_cancel_refusal(&self.rpool(), order_id).await?;
                 return Err(match why {
                     None => SellingError::OrderNotFound(order_id),
                     // A terminal order refuses because it is terminal; an in-flight order with a
@@ -602,7 +602,7 @@ impl SellingWriteService {
         order_id: Uuid,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
-        let hdr = self.repos.orders.find_stock_header(&self.db_pool, order_id).await?
+        let hdr = self.repos.orders.find_stock_header(&self.rpool(), order_id).await?
         .ok_or(SellingError::OrderNotFound(order_id))?;
         if hdr.status != "cancelled" {
             return Err(SellingError::InvalidTransition { verb: "retry_decrease_activities".into(), current: hdr.status });
@@ -619,7 +619,7 @@ impl SellingWriteService {
         order_number: &str,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
-        let lines = self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id).await?;
+        let lines = self.repos.order_items.list_stock_demand_lines(&self.rpool(), order_id).await?;
         if lines.is_empty() {
             return Ok(()); // nothing was ever orderable — nothing to decrease upstream
         }
@@ -659,7 +659,7 @@ impl SellingWriteService {
         if patch.description.is_none() && !patch.touches_frozen_fields() {
             return Ok(()); // nothing asked, nothing changed
         }
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         let line = self.repos.order_items
             .lock_line_with_parent_status(&mut tx, line_id).await?

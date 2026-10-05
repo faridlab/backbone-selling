@@ -18,12 +18,14 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-// The optional-scalar read twin lives only in the legacy `company_scope` module. Its
+// The optional-scalar read twin lives only in the legacy `company_scope` module — its
 // connection discipline is the request-dedicated connection when the composing service bound
-// one, plain pool otherwise. The legacy task-local branch is never taken: this module sets no
-// legacy scope of its own (ADR-0029).
-use backbone_orm::company_scope::{fetch_all_rows_scoped, fetch_optional_scalar_scoped};
+// one, plain pool otherwise, and the legacy task-local branch is never taken (this module
+// sets no legacy scope of its own, ADR-0029). The all-rows read twin rides the org-scope
+// module instead: same connection discipline, no scope invented.
+use backbone_orm::company_scope::fetch_optional_scalar_scoped;
 use backbone_orm::org_scope;
+use backbone_orm::org_scope::fetch_all_rows_scoped;
 
 use crate::domain::entity::ExpenseReinvoiceLink;
 

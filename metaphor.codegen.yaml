@@ -45,6 +45,9 @@ user_owned:
   - "src/application/service/selling_service_catalog.rs"
   - "src/application/service/selling_service_delivery.rs"
   - "src/presentation/http/guarded_routes.rs"
+  # The composer-installed request-pool shim the write service resolves its database
+  # through (ADR-0029 pool law): hand-written, never schema-derived.
+  - "src/request_pool.rs"
 
   # The five document repositories own the hand-written selling SQL that the write service
   # orchestrates (the header+lines inserts, the guarded state transitions, the fulfillment

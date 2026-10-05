@@ -71,12 +71,12 @@ impl SellingWriteService {
     /// a fulfillment/composition layer maps it into inventory's `DeliveryRequested`). Emits the
     /// `DeliveryRequested` domain event. Guard: the order must be confirmed (not draft/cancelled).
     pub async fn build_delivery_request(&self, order_id: Uuid) -> Result<DeliveryRequestEnvelope, SellingError> {
-        let hdr = self.repos.orders.find_fulfillment_header(&self.db_pool, order_id).await?
+        let hdr = self.repos.orders.find_fulfillment_header(&self.rpool(), order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
         if hdr.status == "draft" {
             return Err(SellingError::NotDraft(order_id.to_string())); // reuse: "not in a confirmable/deliverable state"
         }
-        let rows = self.repos.order_items.list_delivery_remainders(&self.db_pool, order_id).await?;
+        let rows = self.repos.order_items.list_delivery_remainders(&self.rpool(), order_id).await?;
         let lines: Vec<DeliveryRequestLine> = rows.iter().map(|r| DeliveryRequestLine {
             item_id: r.item_id,
             quantity: r.remaining,
@@ -101,7 +101,7 @@ impl SellingWriteService {
             serde_json::to_value(&event).map_err(|e| SellingError::Outbox(e.to_string()))?,
             chrono::Utc::now(),
         );
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         backbone_outbox::outbox::stage(&mut *tx, "selling", &record)
             .await.map_err(|e| SellingError::Outbox(format!("stage: {e}")))?;
@@ -129,7 +129,7 @@ impl SellingWriteService {
         // The allocation transaction relays the caller's ambient org scope (when the composing
         // service bound one) so the decorator's RLS sees it; on an undecorated deployment the
         // transaction stays plain.
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         for (item_id, qty) in deliveries {
             self.allocate_delivered(&mut tx, order_id, *item_id, *qty).await?;
@@ -175,9 +175,9 @@ impl SellingWriteService {
     ) -> Result<SalesOrderDeliveryDto, SellingError> {
         // ID-only reads — see `convert_quotation_to_order`. The header read is the existence
         // guard only (the reconstruction keys on the order's live lines).
-        let _hdr = self.repos.orders.find_stock_header(&self.db_pool, order_id).await?
+        let _hdr = self.repos.orders.find_stock_header(&self.rpool(), order_id).await?
             .ok_or(SellingError::OrderNotFound(order_id))?;
-        let lines = self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id).await?;
+        let lines = self.repos.order_items.list_stock_demand_lines(&self.rpool(), order_id).await?;
         let figures = stock
             .delivered_quantities(&DeliveredQtyRequest {
                 // Legacy twin (ADR-0029): the stock engine still fences on company, so the
@@ -233,7 +233,7 @@ impl SellingWriteService {
         order_id: Uuid,
         stock: &dyn StockFulfillmentPort,
     ) -> Result<(), SellingError> {
-        let lines = self.repos.order_items.list_stock_demand_lines(&self.db_pool, order_id).await?;
+        let lines = self.repos.order_items.list_stock_demand_lines(&self.rpool(), order_id).await?;
         if lines.is_empty() {
             return Ok(());
         }
@@ -267,7 +267,7 @@ impl SellingWriteService {
         if updates.is_empty() {
             return Ok(()); // no move-backed figures: keep every stored watermark
         }
-        let mut tx = self.db_pool.begin().await?;
+        let mut tx = self.rpool().begin().await?;
         relay_ambient_scope(&mut tx).await?;
         self.repos.order_items.set_delivered_quantities(&mut tx, order_id, &updates).await?;
         tx.commit().await?;
