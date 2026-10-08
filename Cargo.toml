@@ -1,6 +1,6 @@
 [package]
 name = "backbone-selling"
-version = "0.13.20"
+version = "0.14.0"
 edition = "2021"
 description = "Selling: Quotation -> Sales Order -> Sales Invoice; emits revenue AccountingPost to backbone-accounting (order-to-cash intent + GL seam)"
 license = "MIT OR Apache-2.0"
@@ -14,11 +14,11 @@ path = "src/lib.rs"
 # Framework by semver from crates.io (ADR-0030): the module stays publishable
 # and follows the framework's released line. 2.7.34+ carries the org-scope
 # read twins the repositories ride.
-backbone-outbox = { version = "2.7.35", features = ["multi_tenant"] }
-backbone-core = { version = "2.7.35", features = ["postgres"] }
-backbone-orm = { version = "2.7.35" }
-backbone-auth = { version = "2.7.35", features = ["axum"] }
-backbone-messaging = { version = "2.7.35" }
+backbone-outbox = { version = "3.0.0", features = ["multi_tenant"] }
+backbone-core = { version = "3.0.0", features = ["postgres"] }
+backbone-orm = { version = "3.0.0" }
+backbone-auth = { version = "3.0.0", features = ["axum"] }
+backbone-messaging = { version = "3.0.0" }
 
 # Core async runtime and serialization
 tokio = { version = "1.0", features = ["full"] }
@@ -92,15 +92,15 @@ rand = "0.8"
 # through an in-test adapter (envelope -> PostingRequest) to prove the contract end-to-end. This
 # is a dev-dependency ONLY — the shipped selling library has ZERO horizontal edges to accounting
 # (verify: `cargo tree -e normal -i backbone-accounting` is empty). See docs/adr/ADR-002.
-backbone-accounting = { version = "0.9.27" }
-backbone-inventory = { version = "0.9.29" }
+backbone-accounting = { version = "0.10.0" }
+backbone-inventory = { version = "0.10.0" }
 # The OrderInvoiced seam test drives the REAL backbone-billing (invoice request -> Sales Invoice ->
 # revenue post -> SalesInvoicePosted -> mark_invoiced). Dev-dependency ONLY — zero normal edge.
-backbone-billing = { version = "0.8.25" }
+backbone-billing = { version = "0.9.0" }
 # The service-delivery mint seam test drives the REAL backbone-project mint
 # (ProjectWriteService::mint_service_delivery) through an in-test adapter that maps this module's
 # fulfillment-port DTOs onto project's — proving the cross-adapter seam end-to-end. The sibling
 # checkout this resolves to is the tagged v0.4.0 tree. Dev-dependency ONLY — the shipped selling
 # library has ZERO horizontal edges to project (verify: `cargo tree -e normal -i backbone-project`
 # is empty).
-backbone-project = { version = "0.5.22" }
+backbone-project = { version = "0.6.0" }
