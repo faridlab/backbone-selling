@@ -1,6 +1,6 @@
 [package]
 name = "backbone-selling"
-version = "0.14.0"
+version = "0.14.1"
 edition = "2021"
 description = "Selling: Quotation -> Sales Order -> Sales Invoice; emits revenue AccountingPost to backbone-accounting (order-to-cash intent + GL seam)"
 license = "MIT OR Apache-2.0"
@@ -92,7 +92,7 @@ rand = "0.8"
 # through an in-test adapter (envelope -> PostingRequest) to prove the contract end-to-end. This
 # is a dev-dependency ONLY — the shipped selling library has ZERO horizontal edges to accounting
 # (verify: `cargo tree -e normal -i backbone-accounting` is empty). See docs/adr/ADR-002.
-backbone-accounting = { version = "0.10.0" }
+backbone-accounting = { version = "0.11.0" }
 backbone-inventory = { version = "0.10.0" }
 # The OrderInvoiced seam test drives the REAL backbone-billing (invoice request -> Sales Invoice ->
 # revenue post -> SalesInvoicePosted -> mark_invoiced). Dev-dependency ONLY — zero normal edge.
