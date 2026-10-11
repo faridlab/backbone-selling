@@ -1,0 +1,73 @@
+// This directory's extension (hand-written; ADR-0031). The generated mod.rs (lib.rs for
+// src/) pulls it in with include!, so its lines resolve against this directory.
+
+// Hand-authored (user-owned): domain events, the validated write path. (selling_gl + the invoice
+// create/post chunks were removed when selling exited the invoice business — ADR-006.)
+pub mod selling_events;
+pub mod selling_cart_pricing;
+pub mod selling_write_service;
+// The write surface, chunked out of selling_write_service.rs. Each is an
+// `impl SellingWriteService` block; the shared vocabulary (input structs, outcomes, errors,
+// money/price helpers, the repository bag) stays in selling_write_service (so the
+// `selling_write_service::{NewLine, ...}` import paths are unchanged).
+pub mod selling_quotation;
+pub mod selling_order;
+pub mod selling_delivery_seam;
+pub mod selling_invoice_seam;
+// The invoicing-policy engine: pure compute (qty_to_invoice / invoice_status) + the read models.
+pub mod selling_invoice_policy;
+// The unit-cost port (catalog standard-cost seam) + the margin engine (pure compute over the
+// confirm-time snapshots + the order margin read model).
+pub mod selling_unit_cost;
+pub mod selling_margin;
+// The stock-fulfillment port (the sale_stock confirm engine's seam to the stock module):
+// confirm-time rule launch per storable line, move-backed delivered-qty reconstruction,
+// and the cancel-time decrease-quantity activity log.
+pub mod selling_stock_fulfillment;
+// The service-delivery confirm engine's seams to the product surface and the project module:
+// the service-tracking policy read (the ladder off the product) and the confirm-time
+// project/task mint whose outcomes become the order lines' delivery backrefs.
+pub mod selling_service_catalog;
+pub mod selling_service_delivery;
+// The delivery-carrier registry (master + the order carrier/tracking verb).
+pub mod selling_carrier;
+// The expense-reinvoice link verbs (attach / list / mark-invoiced) the host billing adapter drives.
+pub mod selling_reinvoice;
+// Reference consumer extension (extension-contract §5, second half) — a downstream rule on events.
+pub mod consumer_credit_rule_custom;
+pub use selling_events::{
+    DeliveryRequestEnvelope, DeliveryRequestLine, InvoiceRequestEnvelope, InvoiceRequestLine,
+    QuotationAccepted, QuotationCancelled, QuotationReDrafted, QuotationRejected, QuotationSent,
+    SalesOrderCancelled, SalesOrderConfirmed, SellingEvent, SellingEventSink,
+};
+pub use selling_order::UpdateOrderLinePatch;
+pub use selling_invoice_policy::{
+    QuotationInvoiceStatusDto, QuotationItemInvoiceDto, SalesOrderInvoiceStatusDto,
+    SalesOrderItemInvoiceDto,
+};
+pub use selling_cart_pricing::{
+    CartPriceLine, CartPriceRequest, CartPricingError, CartPricingPort, PricedCart, PricedCartLine,
+    PricedRewardLine,
+};
+pub use selling_unit_cost::{ItemUnitCost, NoUnitCostPort, UnitCostError, UnitCostPort, UnitCostRequest};
+pub use selling_stock_fulfillment::{
+    DecreaseQuantityLine, DecreaseQuantityRequest, DeliveredQtyLineRef, DeliveredQtyRequest,
+    MoveDeliveryFigures, NoStockFulfillmentPort, StockFulfillmentError, StockFulfillmentPort,
+    StockRuleLine, StockRuleOutcome, StockRuleRequest,
+};
+pub use selling_service_catalog::{
+    NoServiceCatalog, ServiceCatalogError, ServiceCatalogPort, ServiceTrackingInfo,
+    ServiceTrackingRung,
+};
+pub use selling_service_delivery::{
+    NoServiceDelivery, ProjectFulfillmentError, ProjectFulfillmentPort, ServiceDeliveryLine,
+    ServiceDeliveryLineOutcome, ServiceDeliveryRequest,
+};
+pub use selling_delivery_seam::{SalesOrderDeliveryDto, SalesOrderDeliveryLineDto};
+pub use selling_margin::{SalesOrderMarginDto, SalesOrderMarginLineDto};
+pub use selling_carrier::{CarrierDto, UpdateCarrierPatch};
+pub use selling_reinvoice::ExpenseReinvoiceDto;
+pub use selling_write_service::{
+    CartOrderLine, NewCartSalesOrder, NewLine, NewQuotation, NewSalesOrder, SellingError,
+    SellingWriteService,
+};

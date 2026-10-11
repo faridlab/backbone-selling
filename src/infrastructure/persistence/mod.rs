@@ -16,32 +16,6 @@ mod sales_person_allocation_repository;
 
 // Custom persistence modules
 // <<< CUSTOM
-// The hand-written selling SQL's parameter/projection types. Their repositories are declared
-// `user_owned` in metaphor.codegen.yaml; these types mirror COLUMNS, not entities.
-pub use quotation_repository::{
-    AcceptedQuotationRow, NewQuotationRow, QuotationConversionRow, QuotationInvoiceHeaderRow,
-    QuotationStatusRow,
-};
-pub use quotation_item_repository::{
-    InvoicePolicyLineRow, NewQuotationItemRow, QuotationLineRow,
-};
-pub use quotation_template_repository::{NewQuotationTemplateRow, QuotationTemplateRow};
-pub use sales_order_repository::{
-    CancelRefusalRow, CancelledOrderRow, ConfirmedOrderRow, InvoiceSourceOrderRow,
-    InvoiceStatusHeaderRow, NewSalesOrderRow, OrderFulfillmentHeaderRow, OrderStockHeaderRow,
-    SalesOrderRefRow,
-};
-pub use sales_order_item_repository::{
-    CostStampLineRow, InvoicePolicyOrderLineRow, LineBillingCapacityRow, LineDeliveryCapacityRow,
-    LinePatchRow, MarginLineRow, MarginRollupRow, NewSalesOrderItemRow,
-    OrderBillingRemainderRow, OrderDeliveryRemainderRow, OrderLineForInvoiceRow,
-    OrderStockLineRow, WatermarkRollupRow,
-};
-// The carrier master's row type (its insert takes plain parameters — no New* row struct exists).
-pub use delivery_carrier_repository::DeliveryCarrierRow;
-pub use expense_reinvoice_link_repository::{
-    ExpenseReinvoiceLinkRow, NewExpenseReinvoiceLinkRow,
-};
 // END CUSTOM
 
 // Re-exports
@@ -65,3 +39,6 @@ pub use backbone_orm::repository::{
 // Re-export custom persistence types
 // <<< CUSTOM
 // END CUSTOM
+
+// This directory's extension (hand-written; ADR-0031).
+include!("mod.ext.rs");

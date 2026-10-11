@@ -16,7 +16,6 @@ pub mod sales_team_handler;
 pub mod sales_person_allocation_handler;
 
 // <<< CUSTOM
-pub mod guarded_routes;
 // END CUSTOM
 
 // Re-exports
@@ -30,5 +29,7 @@ pub use sales_order_item_handler::{create_sales_order_item_routes, create_sales_
 pub use sales_team_handler::{create_sales_team_routes, create_sales_team_read_routes, create_sales_team_write_routes};
 pub use sales_person_allocation_handler::{create_sales_person_allocation_routes, create_sales_person_allocation_read_routes, create_sales_person_allocation_write_routes};
 // <<< CUSTOM
-pub use guarded_routes::create_guarded_selling_routes;
 // END CUSTOM
+
+// This directory's extension (hand-written; ADR-0031).
+include!("mod.ext.rs");
