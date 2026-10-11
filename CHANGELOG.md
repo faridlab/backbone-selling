@@ -7,6 +7,15 @@ the date the change was applied.
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-11
+
+### Added
+
+- State fields move only through their verbs: a generic write that moves one is reported in shadow
+  (state_field_verbs_only), and a migration adds a trigger warning when a state moves along a
+  transition its machine does not declare. Each machine declares who owns its verbs (verbs:
+  generated | hand). Requires backbone-core 3.7.
+
 ### Added — the unit-cost margin snapshot, the expense-reinvoice link, and the delivery-carrier registry ([ADR-008], 2026-08-25)
 
 Odoo `sale.order.line.purchase_price` semantics, adapted. Confirm stamps each live order line's

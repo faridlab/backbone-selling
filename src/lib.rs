@@ -189,7 +189,7 @@ impl SellingModuleBuilder {
 
         // Quotation service
         let quotation_repository = Arc::new(QuotationRepository::new(db_pool.clone()));
-        let quotation_service = Arc::new(QuotationService::with_repository(quotation_repository.clone()));
+        let quotation_service = Arc::new(QuotationService::with_repository(quotation_repository.clone()).with_guard(Arc::new(crate::application::service::QuotationRowRules)));
 
         // QuotationItem service
         let quotation_item_repository = Arc::new(QuotationItemRepository::new(db_pool.clone()));
@@ -201,7 +201,7 @@ impl SellingModuleBuilder {
 
         // SalesOrder service
         let sales_order_repository = Arc::new(SalesOrderRepository::new(db_pool.clone()));
-        let sales_order_service = Arc::new(SalesOrderService::with_repository(sales_order_repository.clone()));
+        let sales_order_service = Arc::new(SalesOrderService::with_repository(sales_order_repository.clone()).with_guard(Arc::new(crate::application::service::SalesOrderRowRules)));
 
         // SalesOrderItem service
         let sales_order_item_repository = Arc::new(SalesOrderItemRepository::new(db_pool.clone()));

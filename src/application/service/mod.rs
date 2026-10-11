@@ -27,6 +27,8 @@ pub use sales_order_service::SalesOrderService;
 pub use sales_order_item_service::SalesOrderItemService;
 pub use sales_team_service::SalesTeamService;
 pub use sales_person_allocation_service::SalesPersonAllocationService;
+pub use quotation_service::QuotationRowRules;
+pub use sales_order_service::SalesOrderRowRules;
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");
