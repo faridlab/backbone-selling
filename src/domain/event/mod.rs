@@ -40,5 +40,3 @@ pub use sales_team_event_handlers::SalesTeamEventHandler;
 pub use sales_person_allocation_events::{SalesPersonAllocationEvent, SalesPersonAllocationEventPublisher, NoopSalesPersonAllocationEventPublisher};
 pub use sales_person_allocation_event_handlers::SalesPersonAllocationEventHandler;
 
-// <<< CUSTOM
-// END CUSTOM

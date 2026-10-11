@@ -17,9 +17,5 @@ pub fn quotation_template_validator() -> QuotationTemplateValidator {
     EntityValidator::new()
         .rule(RequiredString::new("name", |e: &QuotationTemplate| &e.name))
         .rule(OptionalNotBlank::new("default_notes", |e: &QuotationTemplate| e.default_notes.as_deref()))
-    // <<< CUSTOM RULES
-    // END CUSTOM RULES
 }
 
-// <<< CUSTOM
-// END CUSTOM

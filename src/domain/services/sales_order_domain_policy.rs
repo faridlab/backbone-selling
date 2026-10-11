@@ -18,5 +18,3 @@ use crate::domain::entity::SalesOrder;
 /// service. `PermitAllPolicy` is the safe default until then.
 pub type SalesOrderDomainPolicy = PermitAllPolicy<SalesOrder>;
 
-// <<< CUSTOM
-// END CUSTOM

@@ -32,5 +32,3 @@ pub type SalesPersonAllocationService = GenericCrudService<
     SalesPersonAllocationRepository,
 >;
 
-// <<< CUSTOM
-// END CUSTOM

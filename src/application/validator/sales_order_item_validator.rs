@@ -16,9 +16,5 @@ pub type SalesOrderItemValidator = EntityValidator<SalesOrderItem>;
 pub fn sales_order_item_validator() -> SalesOrderItemValidator {
     EntityValidator::new()
         .rule(OptionalNotBlank::new("description", |e: &SalesOrderItem| e.description.as_deref()))
-    // <<< CUSTOM RULES
-    // END CUSTOM RULES
 }
 
-// <<< CUSTOM
-// END CUSTOM

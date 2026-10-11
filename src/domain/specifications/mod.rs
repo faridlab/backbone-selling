@@ -16,5 +16,3 @@ pub mod sales_order_item_specification;
 pub mod sales_team_specification;
 pub mod sales_person_allocation_specification;
 
-// <<< CUSTOM
-// END CUSTOM

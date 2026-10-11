@@ -15,8 +15,6 @@ mod sales_team_repository;
 mod sales_person_allocation_repository;
 
 // Custom persistence modules
-// <<< CUSTOM
-// END CUSTOM
 
 // Re-exports
 pub use delivery_carrier_repository::DeliveryCarrierRepository;
@@ -37,8 +35,6 @@ pub use backbone_orm::repository::{
 };
 
 // Re-export custom persistence types
-// <<< CUSTOM
-// END CUSTOM
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");

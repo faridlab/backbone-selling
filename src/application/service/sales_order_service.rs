@@ -32,5 +32,3 @@ pub type SalesOrderService = GenericCrudService<
     SalesOrderRepository,
 >;
 
-// <<< CUSTOM
-// END CUSTOM

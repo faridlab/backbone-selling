@@ -258,7 +258,7 @@ impl backbone_core::ApplyUpdateDto<UpdateExpenseReinvoiceLinkDto> for ExpenseRei
 // Custom DTOs
 // =============================================================================
 
-// <<< CUSTOM DTOs
 // Add custom DTOs specific to ExpenseReinvoiceLink here.
 // This section will be preserved during regeneration.
 // >>> END CUSTOM DTOs
+

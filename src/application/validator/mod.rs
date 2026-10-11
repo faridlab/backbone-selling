@@ -25,5 +25,3 @@ pub use sales_order_item_validator::{SalesOrderItemValidator, sales_order_item_v
 pub use sales_team_validator::{SalesTeamValidator, sales_team_validator};
 pub use sales_person_allocation_validator::{SalesPersonAllocationValidator, sales_person_allocation_validator};
 
-// <<< CUSTOM
-// END CUSTOM

@@ -236,7 +236,7 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesTeamDto> for SalesTeam {
 // Custom DTOs
 // =============================================================================
 
-// <<< CUSTOM DTOs
 // Add custom DTOs specific to SalesTeam here.
 // This section will be preserved during regeneration.
 // >>> END CUSTOM DTOs
+

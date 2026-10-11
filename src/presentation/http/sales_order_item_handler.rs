@@ -187,3 +187,4 @@ pub fn create_protected_sales_order_item_routes<A: AuthMiddleware + Send + Sync 
             }
         }))
 }
+

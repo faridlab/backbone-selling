@@ -186,3 +186,4 @@ pub fn create_protected_sales_team_routes<A: AuthMiddleware + Send + Sync + 'sta
             }
         }))
 }
+

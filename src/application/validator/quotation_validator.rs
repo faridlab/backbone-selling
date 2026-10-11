@@ -19,9 +19,5 @@ pub fn quotation_validator() -> QuotationValidator {
         .rule(RequiredString::new("currency", |e: &Quotation| &e.currency))
         .rule(OptionalNotBlank::new("notes", |e: &Quotation| e.notes.as_deref()))
         .rule(OptionalNotBlank::new("status_reason", |e: &Quotation| e.status_reason.as_deref()))
-    // <<< CUSTOM RULES
-    // END CUSTOM RULES
 }
 
-// <<< CUSTOM
-// END CUSTOM

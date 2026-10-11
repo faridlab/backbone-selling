@@ -11,8 +11,6 @@ use crate::domain::entity::SalesPersonAllocation;
 /// enum containing a `Crud(CrudEvent<SalesPersonAllocation>)` variant.
 pub type SalesPersonAllocationEvent = CrudEvent<SalesPersonAllocation>;
 
-// <<< CUSTOM
-// END CUSTOM
 
 use backbone_messaging::{CrudEventPublisher, NoOpCrudEventPublisher};
 use std::sync::Arc;

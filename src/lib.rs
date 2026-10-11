@@ -24,8 +24,6 @@ pub mod application;
 pub mod presentation;
 pub mod seeders;
 pub mod exports;
-// <<< CUSTOM MODULES
-// END CUSTOM
 
 // Re-exports for convenience - Domain entities
 pub use domain::entity::*;
@@ -76,8 +74,6 @@ pub struct SellingModule {
     pub(crate) sales_order_item_service: Arc<SalesOrderItemService>,
     pub(crate) sales_team_service: Arc<SalesTeamService>,
     pub(crate) sales_person_allocation_service: Arc<SalesPersonAllocationService>,
-    // <<< CUSTOM FIELDS
-    // END CUSTOM
 }
 
 impl SellingModule {
@@ -156,15 +152,11 @@ impl SellingModule {
             .merge(create_sales_person_allocation_read_routes(self.sales_person_allocation_service.clone()))
     }
 
-    // <<< CUSTOM METHODS
-    // END CUSTOM
 }
 
 /// Builder for SellingModule
 pub struct SellingModuleBuilder {
     db_pool: Option<PgPool>,
-    // <<< CUSTOM BUILDER FIELDS
-    // END CUSTOM
 }
 
 impl SellingModuleBuilder {
@@ -172,8 +164,6 @@ impl SellingModuleBuilder {
     pub fn new() -> Self {
         Self {
             db_pool: None,
-            // <<< CUSTOM BUILDER DEFAULTS
-            // END CUSTOM
         }
     }
 
@@ -183,8 +173,6 @@ impl SellingModuleBuilder {
         self
     }
 
-    // <<< CUSTOM - custom builder methods
-    // END CUSTOM
 
     /// Build the module with configured dependencies
     pub fn build(self) -> anyhow::Result<SellingModule> {
@@ -227,8 +215,6 @@ impl SellingModuleBuilder {
         let sales_person_allocation_repository = Arc::new(SalesPersonAllocationRepository::new(db_pool.clone()));
         let sales_person_allocation_service = Arc::new(SalesPersonAllocationService::with_repository(sales_person_allocation_repository.clone()));
 
-        // <<< CUSTOM
-        // END CUSTOM
 
         Ok(SellingModule {
             delivery_carrier_service,
@@ -240,8 +226,6 @@ impl SellingModuleBuilder {
             sales_order_item_service,
             sales_team_service,
             sales_person_allocation_service,
-            // <<< CUSTOM
-            // END CUSTOM
         })
     }
 }

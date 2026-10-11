@@ -32,5 +32,3 @@ pub type QuotationTemplateService = GenericCrudService<
     QuotationTemplateRepository,
 >;
 
-// <<< CUSTOM
-// END CUSTOM

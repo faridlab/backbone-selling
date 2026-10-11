@@ -261,7 +261,7 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesPersonAllocationDto> for SalesPers
 // Custom DTOs
 // =============================================================================
 
-// <<< CUSTOM DTOs
 // Add custom DTOs specific to SalesPersonAllocation here.
 // This section will be preserved during regeneration.
 // >>> END CUSTOM DTOs
+

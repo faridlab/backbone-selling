@@ -187,3 +187,4 @@ pub fn create_protected_sales_person_allocation_routes<A: AuthMiddleware + Send 
             }
         }))
 }
+

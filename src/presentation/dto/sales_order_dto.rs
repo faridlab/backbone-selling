@@ -395,7 +395,7 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderDto> for SalesOrder {
 // Custom DTOs
 // =============================================================================
 
-// <<< CUSTOM DTOs
 // Add custom DTOs specific to SalesOrder here.
 // This section will be preserved during regeneration.
 // >>> END CUSTOM DTOs
+

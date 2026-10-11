@@ -22,5 +22,3 @@ pub use sales_order_item_domain_policy::SalesOrderItemDomainPolicy;
 pub use sales_team_domain_policy::SalesTeamDomainPolicy;
 pub use sales_person_allocation_domain_policy::SalesPersonAllocationDomainPolicy;
 
-// <<< CUSTOM
-// END CUSTOM

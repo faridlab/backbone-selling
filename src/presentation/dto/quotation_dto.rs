@@ -384,7 +384,7 @@ impl backbone_core::ApplyUpdateDto<UpdateQuotationDto> for Quotation {
 // Custom DTOs
 // =============================================================================
 
-// <<< CUSTOM DTOs
 // Add custom DTOs specific to Quotation here.
 // This section will be preserved during regeneration.
 // >>> END CUSTOM DTOs
+

@@ -32,5 +32,3 @@ pub type ExpenseReinvoiceLinkService = GenericCrudService<
     ExpenseReinvoiceLinkRepository,
 >;
 
-// <<< CUSTOM
-// END CUSTOM

@@ -18,5 +18,3 @@ use crate::domain::entity::QuotationTemplate;
 /// service. `PermitAllPolicy` is the safe default until then.
 pub type QuotationTemplateDomainPolicy = PermitAllPolicy<QuotationTemplate>;
 
-// <<< CUSTOM
-// END CUSTOM

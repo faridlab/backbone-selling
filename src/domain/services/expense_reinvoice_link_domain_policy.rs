@@ -18,5 +18,3 @@ use crate::domain::entity::ExpenseReinvoiceLink;
 /// service. `PermitAllPolicy` is the safe default until then.
 pub type ExpenseReinvoiceLinkDomainPolicy = PermitAllPolicy<ExpenseReinvoiceLink>;
 
-// <<< CUSTOM
-// END CUSTOM

@@ -19,9 +19,5 @@ pub fn sales_order_validator() -> SalesOrderValidator {
         .rule(OptionalNotBlank::new("tracking_ref", |e: &SalesOrder| e.tracking_ref.as_deref()))
         .rule(RequiredString::new("currency", |e: &SalesOrder| &e.currency))
         .rule(OptionalNotBlank::new("notes", |e: &SalesOrder| e.notes.as_deref()))
-    // <<< CUSTOM RULES
-    // END CUSTOM RULES
 }
 
-// <<< CUSTOM
-// END CUSTOM

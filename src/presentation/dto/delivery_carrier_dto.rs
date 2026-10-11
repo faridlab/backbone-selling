@@ -251,7 +251,7 @@ impl backbone_core::ApplyUpdateDto<UpdateDeliveryCarrierDto> for DeliveryCarrier
 // Custom DTOs
 // =============================================================================
 
-// <<< CUSTOM DTOs
 // Add custom DTOs specific to DeliveryCarrier here.
 // This section will be preserved during regeneration.
 // >>> END CUSTOM DTOs
+

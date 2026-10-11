@@ -17,8 +17,6 @@ pub mod sales_order_item_service;
 pub mod sales_team_service;
 pub mod sales_person_allocation_service;
 
-// <<< CUSTOM
-// END CUSTOM
 
 pub use delivery_carrier_service::DeliveryCarrierService;
 pub use expense_reinvoice_link_service::ExpenseReinvoiceLinkService;
@@ -29,8 +27,6 @@ pub use sales_order_service::SalesOrderService;
 pub use sales_order_item_service::SalesOrderItemService;
 pub use sales_team_service::SalesTeamService;
 pub use sales_person_allocation_service::SalesPersonAllocationService;
-// <<< CUSTOM
-// END CUSTOM
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");

@@ -32,5 +32,3 @@ pub type QuotationItemService = GenericCrudService<
     QuotationItemRepository,
 >;
 
-// <<< CUSTOM
-// END CUSTOM

@@ -32,5 +32,3 @@ pub type SalesTeamService = GenericCrudService<
     SalesTeamRepository,
 >;
 
-// <<< CUSTOM
-// END CUSTOM

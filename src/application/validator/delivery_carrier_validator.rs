@@ -17,9 +17,5 @@ pub fn delivery_carrier_validator() -> DeliveryCarrierValidator {
     EntityValidator::new()
         .rule(RequiredString::new("name", |e: &DeliveryCarrier| &e.name))
         .rule(OptionalNotBlank::new("tracking_url_template", |e: &DeliveryCarrier| e.tracking_url_template.as_deref()))
-    // <<< CUSTOM RULES
-    // END CUSTOM RULES
 }
 
-// <<< CUSTOM
-// END CUSTOM

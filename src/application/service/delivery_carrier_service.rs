@@ -32,5 +32,3 @@ pub type DeliveryCarrierService = GenericCrudService<
     DeliveryCarrierRepository,
 >;
 
-// <<< CUSTOM
-// END CUSTOM

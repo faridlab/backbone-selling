@@ -17,9 +17,5 @@ pub fn sales_team_validator() -> SalesTeamValidator {
     EntityValidator::new()
         .rule(RequiredString::new("name", |e: &SalesTeam| &e.name))
         .rule(OptionalNotBlank::new("description", |e: &SalesTeam| e.description.as_deref()))
-    // <<< CUSTOM RULES
-    // END CUSTOM RULES
 }
 
-// <<< CUSTOM
-// END CUSTOM

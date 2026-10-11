@@ -188,3 +188,4 @@ pub fn create_protected_quotation_routes<A: AuthMiddleware + Send + Sync + 'stat
             }
         }))
 }
+

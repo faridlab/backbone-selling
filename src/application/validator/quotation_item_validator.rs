@@ -16,9 +16,5 @@ pub type QuotationItemValidator = EntityValidator<QuotationItem>;
 pub fn quotation_item_validator() -> QuotationItemValidator {
     EntityValidator::new()
         .rule(OptionalNotBlank::new("description", |e: &QuotationItem| e.description.as_deref()))
-    // <<< CUSTOM RULES
-    // END CUSTOM RULES
 }
 
-// <<< CUSTOM
-// END CUSTOM

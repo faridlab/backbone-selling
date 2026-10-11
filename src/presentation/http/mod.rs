@@ -15,8 +15,6 @@ pub mod sales_order_item_handler;
 pub mod sales_team_handler;
 pub mod sales_person_allocation_handler;
 
-// <<< CUSTOM
-// END CUSTOM
 
 // Re-exports
 pub use delivery_carrier_handler::{create_delivery_carrier_routes, create_delivery_carrier_read_routes, create_delivery_carrier_write_routes};
@@ -28,8 +26,6 @@ pub use sales_order_handler::{create_sales_order_routes, create_sales_order_read
 pub use sales_order_item_handler::{create_sales_order_item_routes, create_sales_order_item_read_routes, create_sales_order_item_write_routes};
 pub use sales_team_handler::{create_sales_team_routes, create_sales_team_read_routes, create_sales_team_write_routes};
 pub use sales_person_allocation_handler::{create_sales_person_allocation_routes, create_sales_person_allocation_read_routes, create_sales_person_allocation_write_routes};
-// <<< CUSTOM
-// END CUSTOM
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");

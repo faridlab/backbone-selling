@@ -11,8 +11,6 @@ use crate::domain::entity::ExpenseReinvoiceLink;
 /// enum containing a `Crud(CrudEvent<ExpenseReinvoiceLink>)` variant.
 pub type ExpenseReinvoiceLinkEvent = CrudEvent<ExpenseReinvoiceLink>;
 
-// <<< CUSTOM
-// END CUSTOM
 
 use backbone_messaging::{CrudEventPublisher, NoOpCrudEventPublisher};
 use std::sync::Arc;

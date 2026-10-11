@@ -18,5 +18,3 @@ use crate::domain::entity::SalesPersonAllocation;
 /// service. `PermitAllPolicy` is the safe default until then.
 pub type SalesPersonAllocationDomainPolicy = PermitAllPolicy<SalesPersonAllocation>;
 
-// <<< CUSTOM
-// END CUSTOM
