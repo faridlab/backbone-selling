@@ -70,6 +70,7 @@ rules:
   - id: R8
     name: accepted_to_convert
     when: convert
+    enforced_by: "src/application/service/selling_order.rs::convert_quotation_to_order"
     assert: "quotation.status == 'accepted'"
     error_code: quotation_not_accepted
   - id: R9
@@ -80,6 +81,7 @@ rules:
   - id: R10
     name: quotation_cancel_refuses_ordered
     when: cancel
+    enforced_by: "src/application/service/selling_quotation.rs::cancel_quotation"
     assert: "quotation.status != 'ordered'"
     error_code: quotation_ordered
   - id: R11
