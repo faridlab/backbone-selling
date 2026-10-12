@@ -1,0 +1,14 @@
+# The rule ratchet (schema doctor): these counts may only go down. Regenerate with
+# `metaphor schema rules . --update-baseline` after enforcing a rule.
+unenforced: 7
+warnings: 10
+machines_without_verbs: 0
+untested_rule_ids: 6
+unenforced_rules:
+- 'selling.hook.yaml: non_empty_document'
+- 'selling.hook.yaml: non_negative_line'
+- 'selling.hook.yaml: order_cancel_refuses_billed'
+- 'selling.hook.yaml: order_line_freeze'
+- 'selling.hook.yaml: quotation_transition_guard'
+- 'selling.hook.yaml: template_name_unique'
+- 'selling.hook.yaml: unique_document_number'
