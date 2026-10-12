@@ -56,51 +56,68 @@ state_machines:
 rules:
   - id: R1
     name: non_empty_document
+    entity: Quotation
     when: create
     assert: "count(lines) >= 1"
     error_code: empty_document
+    enforced_by: "src/application/service/selling_write_service.rs::price_document, src/application/service/selling_order.rs::create_sales_order_priced"
+    justification: "Holds on the quotation and order create verbs, for both documents. A header written through the generic CRUD routes carries no lines and is not refused; a line count spans rows, so no constraint on the header can see it."
   - id: R2
     name: non_negative_line
+    entity: QuotationItem
     when: create
     assert: "line.qty >= 0 AND line.price >= 0 AND line.discount >= 0 AND line.net >= 0"
     error_code: negative_quantity
+    enforced_by: "src/application/service/selling_write_service.rs::price_document, src/application/service/selling_order.rs::update_order_line"
   - id: R5
     name: unique_document_number
+    entity: Quotation
     when: create
     assert: "document number is unique"
     error_code: duplicate_number
+    enforced_by: "migrations/20260426220001_create_quotation_table.up.sql::idx_quotations_quotation_number, migrations/20260426220005_create_sales_order_table.up.sql::idx_sales_orders_order_number"
   - id: R8
     name: accepted_to_convert
+    entity: Quotation
     when: convert
     enforced_by: "src/application/service/selling_order.rs::convert_quotation_to_order"
     assert: "quotation.status == 'accepted'"
     error_code: quotation_not_accepted
   - id: R9
     name: quotation_transition_guard
+    entity: Quotation
     when: send | reject | re_draft | cancel
     assert: "current status is in the verb's from-set (see the Quotation machine)"
     error_code: invalid_transition
+    enforced_by: "src/application/service/selling_quotation.rs::send_quotation, src/application/service/selling_quotation.rs::reject_quotation, src/application/service/selling_quotation.rs::redraft_quotation, src/application/service/selling_quotation.rs::cancel_quotation"
   - id: R10
     name: quotation_cancel_refuses_ordered
+    entity: Quotation
     when: cancel
     enforced_by: "src/application/service/selling_quotation.rs::cancel_quotation"
     assert: "quotation.status != 'ordered'"
     error_code: quotation_ordered
   - id: R11
     name: order_cancel_refuses_billed
+    entity: SalesOrder
     when: cancel
     assert: "no live order line has billed_qty > 0 (posted invoices are never cancelled)"
     error_code: order_billed
+    enforced_by: "src/application/service/selling_order.rs::cancel_sales_order, src/infrastructure/persistence/sales_order_repository.rs::cancel"
   - id: R12
     name: order_line_freeze
+    entity: SalesOrderItem
     when: update_order_line
     assert: "order.status == 'draft' OR only description changes"
     error_code: order_line_frozen
+    enforced_by: "src/application/service/selling_order.rs::update_order_line"
   - id: R13
     name: template_name_unique
+    entity: QuotationTemplate
     when: create_quotation_template
     assert: "name is unique among the caller's live templates (service-side name pre-read; the per-unit unique is the composing decorator's)"
     error_code: duplicate_template_name
+    justification: "PARTLY: selling_quotation.rs create_quotation_template reads for the name before it inserts, so two concurrent creates can both pass. The module's own unique index left with tenancy (strip_tenancy); the composing service's tenancy posture installs the per-unit unique that closes the race."
 
 # -----------------------------------------------------------------------------
 # Invoicing policy (computed at read time; never persisted, no write route).
@@ -109,13 +126,13 @@ rules:
 #   policy_base = (invoice_policy == 'delivery' AND NOT is_downpayment) ? delivered_qty
 #                                                                     : quantity
 # -----------------------------------------------------------------------------
-invoicing_policy:
-  per_line:
-    qty_to_invoice: "policy_base - billed_qty"
-    invoice_status: "no | to invoice | invoiced | upselling"
-  order_aggregate:
-    invoice_status: "actionable-first over non-downpayment lines: any 'to invoice' > any 'upselling' > all 'invoiced' > 'no'"
-  downpayment_lines: "quantity basis for the billed watermark; excluded from the order aggregate and status rollup"
+# invoicing_policy:
+#   per_line:
+#     qty_to_invoice: "policy_base - billed_qty"
+#     invoice_status: "no | to invoice | invoiced | upselling"
+#   order_aggregate:
+#     invoice_status: "actionable-first over non-downpayment lines: any 'to invoice' > any 'upselling' > all 'invoiced' > 'no'"
+#   downpayment_lines: "quantity basis for the billed watermark; excluded from the order aggregate and status rollup"
 
 # -----------------------------------------------------------------------------
 # Domain events (emitted by SellingWriteService via SellingEventSink).
