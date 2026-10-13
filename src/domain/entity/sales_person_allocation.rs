@@ -218,7 +218,7 @@ impl backbone_orm::EntityRepoMeta for SalesPersonAllocation {
         &[]
     }
     fn relations() -> &'static [(&'static str, &'static str, &'static str)] {
-        &[("order", "sales_orders", "orderId")]
+        &[("order", "sales_orders", "orderId"), ("salesTeam", "sales_teams", "salesTeamId")]
     }
 }
 

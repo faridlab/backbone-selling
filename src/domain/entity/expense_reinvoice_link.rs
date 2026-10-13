@@ -209,6 +209,9 @@ impl backbone_orm::EntityRepoMeta for ExpenseReinvoiceLink {
     fn search_fields() -> &'static [&'static str] {
         &[]
     }
+    fn relations() -> &'static [(&'static str, &'static str, &'static str)] {
+        &[("order", "sales_orders", "orderId")]
+    }
 }
 
 /// Builder for ExpenseReinvoiceLink entity
