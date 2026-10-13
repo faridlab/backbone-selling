@@ -56,7 +56,7 @@ impl backbone_core::write_guard::WriteGuard<SalesOrderItem> for SalesOrderItemRo
         };
         let row = &row;
         let old = ctx.before.and_then(|b| serde_json::to_value(b).ok());
-        let mut shadow = Vec::new();
+        let shadow = Vec::new();
         let mut refuse = Vec::new();
         // `order_id_required` (@required on SalesOrderItem.order_id)
         if (create || (update && r::changed(old.as_ref(), row, &["order_id"]))) && !r::holds(&r::and(r::is_not_null(r::field(row, "order_id")), r::not(r::is_empty(r::trim(r::field(row, "order_id")))))) {
@@ -68,35 +68,35 @@ impl backbone_core::write_guard::WriteGuard<SalesOrderItem> for SalesOrderItemRo
         }
         // `description_max_length` (@max(300) on SalesOrderItem.description)
         if (create || (update && r::changed(old.as_ref(), row, &["description"]))) && !r::holds(&r::le(r::length(r::field(row, "description")), r::Val::Num(300.0_f64))) {
-            shadow.push(Violation::new("description", "max_length", "description must be at most 300 characters").with_param("max", 300_i64));
+            refuse.push(Violation::new("description", "max_length", "description must be at most 300 characters").with_param("max", 300_i64));
         }
         // `quantity_non_negative` (@non_negative on SalesOrderItem.quantity)
         if (create || (update && r::changed(old.as_ref(), row, &["quantity"]))) && !r::holds(&r::ge(r::field(row, "quantity"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("quantity", "non_negative", "quantity must not be negative"));
+            refuse.push(Violation::new("quantity", "non_negative", "quantity must not be negative"));
         }
         // `unit_price_non_negative` (@non_negative on SalesOrderItem.unit_price)
         if (create || (update && r::changed(old.as_ref(), row, &["unit_price"]))) && !r::holds(&r::ge(r::field(row, "unit_price"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("unit_price", "non_negative", "unit_price must not be negative"));
+            refuse.push(Violation::new("unit_price", "non_negative", "unit_price must not be negative"));
         }
         // `line_discount_non_negative` (@non_negative on SalesOrderItem.line_discount)
         if (create || (update && r::changed(old.as_ref(), row, &["line_discount"]))) && !r::holds(&r::ge(r::field(row, "line_discount"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("line_discount", "non_negative", "line_discount must not be negative"));
+            refuse.push(Violation::new("line_discount", "non_negative", "line_discount must not be negative"));
         }
         // `line_amount_non_negative` (@non_negative on SalesOrderItem.line_amount)
         if (create || (update && r::changed(old.as_ref(), row, &["line_amount"]))) && !r::holds(&r::ge(r::field(row, "line_amount"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("line_amount", "non_negative", "line_amount must not be negative"));
+            refuse.push(Violation::new("line_amount", "non_negative", "line_amount must not be negative"));
         }
         // `unit_cost_non_negative` (@non_negative on SalesOrderItem.unit_cost)
         if (create || (update && r::changed(old.as_ref(), row, &["unit_cost"]))) && !r::holds(&r::ge(r::field(row, "unit_cost"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("unit_cost", "non_negative", "unit_cost must not be negative"));
+            refuse.push(Violation::new("unit_cost", "non_negative", "unit_cost must not be negative"));
         }
         // `billed_qty_non_negative` (@non_negative on SalesOrderItem.billed_qty)
         if (create || (update && r::changed(old.as_ref(), row, &["billed_qty"]))) && !r::holds(&r::ge(r::field(row, "billed_qty"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("billed_qty", "non_negative", "billed_qty must not be negative"));
+            refuse.push(Violation::new("billed_qty", "non_negative", "billed_qty must not be negative"));
         }
         // `delivered_qty_non_negative` (@non_negative on SalesOrderItem.delivered_qty)
         if (create || (update && r::changed(old.as_ref(), row, &["delivered_qty"]))) && !r::holds(&r::ge(r::field(row, "delivered_qty"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("delivered_qty", "non_negative", "delivered_qty must not be negative"));
+            refuse.push(Violation::new("delivered_qty", "non_negative", "delivered_qty must not be negative"));
         }
         GuardOutcome { refuse, shadow }
     }

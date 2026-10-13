@@ -68,7 +68,7 @@ impl backbone_core::write_guard::WriteGuard<Quotation> for QuotationRowRules {
         }
         // `quotation_number_max_length` (@max(40) on Quotation.quotation_number)
         if (create || (update && r::changed(old.as_ref(), row, &["quotation_number"]))) && !r::holds(&r::le(r::length(r::field(row, "quotation_number")), r::Val::Num(40.0_f64))) {
-            shadow.push(Violation::new("quotation_number", "max_length", "quotation_number must be at most 40 characters").with_param("max", 40_i64));
+            refuse.push(Violation::new("quotation_number", "max_length", "quotation_number must be at most 40 characters").with_param("max", 40_i64));
         }
         // `customer_id_required` (@required on Quotation.customer_id)
         if (create || (update && r::changed(old.as_ref(), row, &["customer_id"]))) && !r::holds(&r::and(r::is_not_null(r::field(row, "customer_id")), r::not(r::is_empty(r::trim(r::field(row, "customer_id")))))) {
@@ -76,31 +76,31 @@ impl backbone_core::write_guard::WriteGuard<Quotation> for QuotationRowRules {
         }
         // `currency_max_length` (@max(3) on Quotation.currency)
         if (create || (update && r::changed(old.as_ref(), row, &["currency"]))) && !r::holds(&r::le(r::length(r::field(row, "currency")), r::Val::Num(3.0_f64))) {
-            shadow.push(Violation::new("currency", "max_length", "currency must be at most 3 characters").with_param("max", 3_i64));
+            refuse.push(Violation::new("currency", "max_length", "currency must be at most 3 characters").with_param("max", 3_i64));
         }
         // `subtotal_non_negative` (@non_negative on Quotation.subtotal)
         if (create || (update && r::changed(old.as_ref(), row, &["subtotal"]))) && !r::holds(&r::ge(r::field(row, "subtotal"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("subtotal", "non_negative", "subtotal must not be negative"));
+            refuse.push(Violation::new("subtotal", "non_negative", "subtotal must not be negative"));
         }
         // `tax_rate_non_negative` (@non_negative on Quotation.tax_rate)
         if (create || (update && r::changed(old.as_ref(), row, &["tax_rate"]))) && !r::holds(&r::ge(r::field(row, "tax_rate"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("tax_rate", "non_negative", "tax_rate must not be negative"));
+            refuse.push(Violation::new("tax_rate", "non_negative", "tax_rate must not be negative"));
         }
         // `tax_amount_non_negative` (@non_negative on Quotation.tax_amount)
         if (create || (update && r::changed(old.as_ref(), row, &["tax_amount"]))) && !r::holds(&r::ge(r::field(row, "tax_amount"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("tax_amount", "non_negative", "tax_amount must not be negative"));
+            refuse.push(Violation::new("tax_amount", "non_negative", "tax_amount must not be negative"));
         }
         // `total_non_negative` (@non_negative on Quotation.total)
         if (create || (update && r::changed(old.as_ref(), row, &["total"]))) && !r::holds(&r::ge(r::field(row, "total"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("total", "non_negative", "total must not be negative"));
+            refuse.push(Violation::new("total", "non_negative", "total must not be negative"));
         }
         // `notes_max_length` (@max(1000) on Quotation.notes)
         if (create || (update && r::changed(old.as_ref(), row, &["notes"]))) && !r::holds(&r::le(r::length(r::field(row, "notes")), r::Val::Num(1000.0_f64))) {
-            shadow.push(Violation::new("notes", "max_length", "notes must be at most 1000 characters").with_param("max", 1000_i64));
+            refuse.push(Violation::new("notes", "max_length", "notes must be at most 1000 characters").with_param("max", 1000_i64));
         }
         // `status_reason_max_length` (@max(500) on Quotation.status_reason)
         if (create || (update && r::changed(old.as_ref(), row, &["status_reason"]))) && !r::holds(&r::le(r::length(r::field(row, "status_reason")), r::Val::Num(500.0_f64))) {
-            shadow.push(Violation::new("status_reason", "max_length", "status_reason must be at most 500 characters").with_param("max", 500_i64));
+            refuse.push(Violation::new("status_reason", "max_length", "status_reason must be at most 500 characters").with_param("max", 500_i64));
         }
         GuardOutcome { refuse, shadow }
     }

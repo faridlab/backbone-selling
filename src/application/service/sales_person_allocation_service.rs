@@ -56,7 +56,7 @@ impl backbone_core::write_guard::WriteGuard<SalesPersonAllocation> for SalesPers
         };
         let row = &row;
         let old = ctx.before.and_then(|b| serde_json::to_value(b).ok());
-        let mut shadow = Vec::new();
+        let shadow = Vec::new();
         let mut refuse = Vec::new();
         // `order_id_required` (@required on SalesPersonAllocation.order_id)
         if (create || (update && r::changed(old.as_ref(), row, &["order_id"]))) && !r::holds(&r::and(r::is_not_null(r::field(row, "order_id")), r::not(r::is_empty(r::trim(r::field(row, "order_id")))))) {
@@ -68,7 +68,7 @@ impl backbone_core::write_guard::WriteGuard<SalesPersonAllocation> for SalesPers
         }
         // `allocated_pct_non_negative` (@non_negative on SalesPersonAllocation.allocated_pct)
         if (create || (update && r::changed(old.as_ref(), row, &["allocated_pct"]))) && !r::holds(&r::ge(r::field(row, "allocated_pct"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("allocated_pct", "non_negative", "allocated_pct must not be negative"));
+            refuse.push(Violation::new("allocated_pct", "non_negative", "allocated_pct must not be negative"));
         }
         GuardOutcome { refuse, shadow }
     }

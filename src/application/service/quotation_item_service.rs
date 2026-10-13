@@ -56,7 +56,7 @@ impl backbone_core::write_guard::WriteGuard<QuotationItem> for QuotationItemRowR
         };
         let row = &row;
         let old = ctx.before.and_then(|b| serde_json::to_value(b).ok());
-        let mut shadow = Vec::new();
+        let shadow = Vec::new();
         let mut refuse = Vec::new();
         // `quotation_id_required` (@required on QuotationItem.quotation_id)
         if (create || (update && r::changed(old.as_ref(), row, &["quotation_id"]))) && !r::holds(&r::and(r::is_not_null(r::field(row, "quotation_id")), r::not(r::is_empty(r::trim(r::field(row, "quotation_id")))))) {
@@ -68,23 +68,23 @@ impl backbone_core::write_guard::WriteGuard<QuotationItem> for QuotationItemRowR
         }
         // `description_max_length` (@max(300) on QuotationItem.description)
         if (create || (update && r::changed(old.as_ref(), row, &["description"]))) && !r::holds(&r::le(r::length(r::field(row, "description")), r::Val::Num(300.0_f64))) {
-            shadow.push(Violation::new("description", "max_length", "description must be at most 300 characters").with_param("max", 300_i64));
+            refuse.push(Violation::new("description", "max_length", "description must be at most 300 characters").with_param("max", 300_i64));
         }
         // `quantity_non_negative` (@non_negative on QuotationItem.quantity)
         if (create || (update && r::changed(old.as_ref(), row, &["quantity"]))) && !r::holds(&r::ge(r::field(row, "quantity"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("quantity", "non_negative", "quantity must not be negative"));
+            refuse.push(Violation::new("quantity", "non_negative", "quantity must not be negative"));
         }
         // `unit_price_non_negative` (@non_negative on QuotationItem.unit_price)
         if (create || (update && r::changed(old.as_ref(), row, &["unit_price"]))) && !r::holds(&r::ge(r::field(row, "unit_price"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("unit_price", "non_negative", "unit_price must not be negative"));
+            refuse.push(Violation::new("unit_price", "non_negative", "unit_price must not be negative"));
         }
         // `line_discount_non_negative` (@non_negative on QuotationItem.line_discount)
         if (create || (update && r::changed(old.as_ref(), row, &["line_discount"]))) && !r::holds(&r::ge(r::field(row, "line_discount"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("line_discount", "non_negative", "line_discount must not be negative"));
+            refuse.push(Violation::new("line_discount", "non_negative", "line_discount must not be negative"));
         }
         // `line_amount_non_negative` (@non_negative on QuotationItem.line_amount)
         if (create || (update && r::changed(old.as_ref(), row, &["line_amount"]))) && !r::holds(&r::ge(r::field(row, "line_amount"), r::Val::Num(0.0_f64))) {
-            shadow.push(Violation::new("line_amount", "non_negative", "line_amount must not be negative"));
+            refuse.push(Violation::new("line_amount", "non_negative", "line_amount must not be negative"));
         }
         GuardOutcome { refuse, shadow }
     }
