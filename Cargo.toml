@@ -1,6 +1,6 @@
 [package]
 name = "backbone-selling"
-version = "0.17.0"
+version = "0.18.0"
 edition = "2021"
 description = "Selling: Quotation -> Sales Order -> Sales Invoice; emits revenue AccountingPost to backbone-accounting (order-to-cash intent + GL seam)"
 license = "MIT OR Apache-2.0"
