@@ -42,9 +42,6 @@ pub use application::service::SalesOrderItemService;
 pub use application::service::SalesTeamService;
 pub use application::service::SalesPersonAllocationService;
 
-// Re-exports - Validation
-pub use application::validator::{ValidationError, ValidationResult};
-
 // Re-exports - Workflows
 pub use application::workflows::*;
 
@@ -181,11 +178,11 @@ impl SellingModuleBuilder {
 
         // DeliveryCarrier service
         let delivery_carrier_repository = Arc::new(DeliveryCarrierRepository::new(db_pool.clone()));
-        let delivery_carrier_service = Arc::new(DeliveryCarrierService::with_repository(delivery_carrier_repository.clone()));
+        let delivery_carrier_service = Arc::new(DeliveryCarrierService::with_repository(delivery_carrier_repository.clone()).with_guard(Arc::new(crate::application::service::DeliveryCarrierRowRules)));
 
         // ExpenseReinvoiceLink service
         let expense_reinvoice_link_repository = Arc::new(ExpenseReinvoiceLinkRepository::new(db_pool.clone()));
-        let expense_reinvoice_link_service = Arc::new(ExpenseReinvoiceLinkService::with_repository(expense_reinvoice_link_repository.clone()));
+        let expense_reinvoice_link_service = Arc::new(ExpenseReinvoiceLinkService::with_repository(expense_reinvoice_link_repository.clone()).with_guard(Arc::new(crate::application::service::ExpenseReinvoiceLinkRowRules)));
 
         // Quotation service
         let quotation_repository = Arc::new(QuotationRepository::new(db_pool.clone()));
@@ -193,11 +190,11 @@ impl SellingModuleBuilder {
 
         // QuotationItem service
         let quotation_item_repository = Arc::new(QuotationItemRepository::new(db_pool.clone()));
-        let quotation_item_service = Arc::new(QuotationItemService::with_repository(quotation_item_repository.clone()));
+        let quotation_item_service = Arc::new(QuotationItemService::with_repository(quotation_item_repository.clone()).with_guard(Arc::new(crate::application::service::QuotationItemRowRules)));
 
         // QuotationTemplate service
         let quotation_template_repository = Arc::new(QuotationTemplateRepository::new(db_pool.clone()));
-        let quotation_template_service = Arc::new(QuotationTemplateService::with_repository(quotation_template_repository.clone()));
+        let quotation_template_service = Arc::new(QuotationTemplateService::with_repository(quotation_template_repository.clone()).with_guard(Arc::new(crate::application::service::QuotationTemplateRowRules)));
 
         // SalesOrder service
         let sales_order_repository = Arc::new(SalesOrderRepository::new(db_pool.clone()));
@@ -205,15 +202,15 @@ impl SellingModuleBuilder {
 
         // SalesOrderItem service
         let sales_order_item_repository = Arc::new(SalesOrderItemRepository::new(db_pool.clone()));
-        let sales_order_item_service = Arc::new(SalesOrderItemService::with_repository(sales_order_item_repository.clone()));
+        let sales_order_item_service = Arc::new(SalesOrderItemService::with_repository(sales_order_item_repository.clone()).with_guard(Arc::new(crate::application::service::SalesOrderItemRowRules)));
 
         // SalesTeam service
         let sales_team_repository = Arc::new(SalesTeamRepository::new(db_pool.clone()));
-        let sales_team_service = Arc::new(SalesTeamService::with_repository(sales_team_repository.clone()));
+        let sales_team_service = Arc::new(SalesTeamService::with_repository(sales_team_repository.clone()).with_guard(Arc::new(crate::application::service::SalesTeamRowRules)));
 
         // SalesPersonAllocation service
         let sales_person_allocation_repository = Arc::new(SalesPersonAllocationRepository::new(db_pool.clone()));
-        let sales_person_allocation_service = Arc::new(SalesPersonAllocationService::with_repository(sales_person_allocation_repository.clone()));
+        let sales_person_allocation_service = Arc::new(SalesPersonAllocationService::with_repository(sales_person_allocation_repository.clone()).with_guard(Arc::new(crate::application::service::SalesPersonAllocationRowRules)));
 
 
         Ok(SellingModule {

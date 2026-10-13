@@ -32,3 +32,45 @@ pub type SalesPersonAllocationService = GenericCrudService<
     SalesPersonAllocationRepository,
 >;
 
+/// The rules the schema declares for SalesPersonAllocation, checked against the row a create or update
+/// would store. The generated build attaches it to [`SalesPersonAllocationService`]. A refusing rule's
+/// break answers 422; a rule in shadow is logged under `backbone::write_guard` and the
+/// write goes ahead.
+pub struct SalesPersonAllocationRowRules;
+
+#[async_trait::async_trait]
+impl backbone_core::write_guard::WriteGuard<SalesPersonAllocation> for SalesPersonAllocationRowRules {
+    async fn check(
+        &self,
+        ctx: &backbone_core::write_guard::WriteCtx<'_, SalesPersonAllocation>,
+    ) -> backbone_core::write_guard::GuardOutcome {
+        use backbone_core::row_rule as r;
+        use backbone_core::violation::Violation;
+        use backbone_core::write_guard::{GuardOutcome, WriteKind};
+        let (create, update) = (ctx.kind == WriteKind::Create, ctx.kind == WriteKind::Update);
+        let Some(after) = ctx.after.filter(|_| create || update) else {
+            return GuardOutcome::allow();
+        };
+        let Ok(row) = serde_json::to_value(after) else {
+            return GuardOutcome::allow();
+        };
+        let row = &row;
+        let old = ctx.before.and_then(|b| serde_json::to_value(b).ok());
+        let mut shadow = Vec::new();
+        let mut refuse = Vec::new();
+        // `order_id_required` (@required on SalesPersonAllocation.order_id)
+        if (create || (update && r::changed(old.as_ref(), row, &["order_id"]))) && !r::holds(&r::and(r::is_not_null(r::field(row, "order_id")), r::not(r::is_empty(r::trim(r::field(row, "order_id")))))) {
+            refuse.push(Violation::new("order_id", "required", "order_id is required"));
+        }
+        // `sales_person_id_required` (@required on SalesPersonAllocation.sales_person_id)
+        if (create || (update && r::changed(old.as_ref(), row, &["sales_person_id"]))) && !r::holds(&r::and(r::is_not_null(r::field(row, "sales_person_id")), r::not(r::is_empty(r::trim(r::field(row, "sales_person_id")))))) {
+            refuse.push(Violation::new("sales_person_id", "required", "sales_person_id is required"));
+        }
+        // `allocated_pct_non_negative` (@non_negative on SalesPersonAllocation.allocated_pct)
+        if (create || (update && r::changed(old.as_ref(), row, &["allocated_pct"]))) && !r::holds(&r::ge(r::field(row, "allocated_pct"), r::Val::Num(0.0_f64))) {
+            shadow.push(Violation::new("allocated_pct", "non_negative", "allocated_pct must not be negative"));
+        }
+        GuardOutcome { refuse, shadow }
+    }
+}
+

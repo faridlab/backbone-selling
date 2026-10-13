@@ -27,8 +27,15 @@ pub use sales_order_service::SalesOrderService;
 pub use sales_order_item_service::SalesOrderItemService;
 pub use sales_team_service::SalesTeamService;
 pub use sales_person_allocation_service::SalesPersonAllocationService;
+pub use delivery_carrier_service::DeliveryCarrierRowRules;
+pub use expense_reinvoice_link_service::ExpenseReinvoiceLinkRowRules;
 pub use quotation_service::QuotationRowRules;
+pub use quotation_item_service::QuotationItemRowRules;
+pub use quotation_template_service::QuotationTemplateRowRules;
 pub use sales_order_service::SalesOrderRowRules;
+pub use sales_order_item_service::SalesOrderItemRowRules;
+pub use sales_team_service::SalesTeamRowRules;
+pub use sales_person_allocation_service::SalesPersonAllocationRowRules;
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");
