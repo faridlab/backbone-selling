@@ -37,5 +37,77 @@ pub use sales_order_item_service::SalesOrderItemRowRules;
 pub use sales_team_service::SalesTeamRowRules;
 pub use sales_person_allocation_service::SalesPersonAllocationRowRules;
 
+/// A `DeliveryCarrierService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_delivery_carrier_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::DeliveryCarrierRepository>,
+) -> DeliveryCarrierService {
+    DeliveryCarrierService::with_repository(repository).with_guard(std::sync::Arc::new(DeliveryCarrierRowRules))
+}
+
+/// A `ExpenseReinvoiceLinkService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_expense_reinvoice_link_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::ExpenseReinvoiceLinkRepository>,
+) -> ExpenseReinvoiceLinkService {
+    ExpenseReinvoiceLinkService::with_repository(repository).with_guard(std::sync::Arc::new(ExpenseReinvoiceLinkRowRules))
+}
+
+/// A `QuotationService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_quotation_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::QuotationRepository>,
+) -> QuotationService {
+    QuotationService::with_repository(repository).with_guard(std::sync::Arc::new(QuotationRowRules))
+}
+
+/// A `QuotationItemService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_quotation_item_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::QuotationItemRepository>,
+) -> QuotationItemService {
+    QuotationItemService::with_repository(repository).with_guard(std::sync::Arc::new(QuotationItemRowRules))
+}
+
+/// A `QuotationTemplateService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_quotation_template_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::QuotationTemplateRepository>,
+) -> QuotationTemplateService {
+    QuotationTemplateService::with_repository(repository).with_guard(std::sync::Arc::new(QuotationTemplateRowRules))
+}
+
+/// A `SalesOrderService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_sales_order_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::SalesOrderRepository>,
+) -> SalesOrderService {
+    SalesOrderService::with_repository(repository).with_guard(std::sync::Arc::new(SalesOrderRowRules))
+}
+
+/// A `SalesOrderItemService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_sales_order_item_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::SalesOrderItemRepository>,
+) -> SalesOrderItemService {
+    SalesOrderItemService::with_repository(repository).with_guard(std::sync::Arc::new(SalesOrderItemRowRules))
+}
+
+/// A `SalesTeamService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_sales_team_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::SalesTeamRepository>,
+) -> SalesTeamService {
+    SalesTeamService::with_repository(repository).with_guard(std::sync::Arc::new(SalesTeamRowRules))
+}
+
+/// A `SalesPersonAllocationService` over `repository` with its write guard attached: the way to build it, so its writes are
+/// served only with the rules the schema declares.
+pub fn build_sales_person_allocation_service(
+    repository: std::sync::Arc<crate::infrastructure::persistence::SalesPersonAllocationRepository>,
+) -> SalesPersonAllocationService {
+    SalesPersonAllocationService::with_repository(repository).with_guard(std::sync::Arc::new(SalesPersonAllocationRowRules))
+}
+
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");
