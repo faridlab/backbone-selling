@@ -44,6 +44,13 @@ state_machines:
       - { from: to_deliver_and_bill, to: to_deliver,        on: fully_billed }
       - { from: to_deliver,        to: completed,           on: fully_billed }
       - { from: to_bill,           to: completed,           on: fully_delivered }
+      # recompute_order_status rewrites the status from both watermarks on every delivery or
+      # invoice seam, so an in-flight order can land on any in-flight value or completed
+      - { from: to_deliver_and_bill, to: completed,         on: recompute }   # one seam fills both bands
+      - { from: to_deliver,        to: to_bill,             on: recompute }
+      - { from: to_bill,           to: to_deliver,          on: recompute }
+      - { from: to_deliver,        to: to_deliver_and_bill, on: recompute }   # a watermark drops back
+      - { from: to_bill,           to: to_deliver_and_bill, on: recompute }   # a watermark drops back
       - { from: to_bill,           to: closed,              on: close }
       - { from: draft,             to: cancelled,           on: cancel }
       - { from: to_deliver,        to: cancelled,           on: cancel }
