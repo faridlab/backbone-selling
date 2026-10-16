@@ -38,7 +38,6 @@ pub struct CreateQuotationDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "customer_id")]
     pub customer_id: Uuid,
-    pub status: QuotationStatus,
     #[cfg_attr(feature = "openapi", schema(example = "2024-01-01"))]
     #[serde(alias = "quotation_date")]
     pub quotation_date: NaiveDate,
@@ -297,7 +296,7 @@ impl From<CreateQuotationDto> for Quotation {
             quotation_number: dto.quotation_number,
             branch_id: dto.branch_id,
             customer_id: dto.customer_id,
-            status: dto.status,
+            status: QuotationStatus::Draft,
             quotation_date: dto.quotation_date,
             valid_until: dto.valid_until,
             currency: dto.currency,

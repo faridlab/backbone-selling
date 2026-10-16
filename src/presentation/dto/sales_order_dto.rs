@@ -44,7 +44,6 @@ pub struct CreateSalesOrderDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(alias = "customer_id")]
     pub customer_id: Uuid,
-    pub status: SalesOrderStatus,
     #[cfg_attr(feature = "openapi", schema(example = "2024-01-01"))]
     #[serde(alias = "order_date")]
     pub order_date: NaiveDate,
@@ -308,7 +307,7 @@ impl From<CreateSalesOrderDto> for SalesOrder {
             tracking_ref: dto.tracking_ref,
             branch_id: dto.branch_id,
             customer_id: dto.customer_id,
-            status: dto.status,
+            status: SalesOrderStatus::Draft,
             order_date: dto.order_date,
             delivery_date: dto.delivery_date,
             currency: dto.currency,
