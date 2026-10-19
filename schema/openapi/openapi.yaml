@@ -3367,8 +3367,6 @@ components:
       type: object
       required:
         - name
-        - active
-        - metadata
       properties:
         name:
           type: string
@@ -3379,15 +3377,12 @@ components:
           nullable: true
           type: string
           maxLength: 500
-        metadata:
-          type: object
 
     UpdateDeliveryCarrierRequest:
       type: object
       required:
         - name
         - active
-        - metadata
       properties:
         name:
           type: string
@@ -3398,8 +3393,6 @@ components:
           nullable: true
           type: string
           maxLength: 500
-        metadata:
-          type: object
 
     PatchDeliveryCarrierRequest:
       type: object
@@ -3413,8 +3406,6 @@ components:
           nullable: true
           type: string
           maxLength: 500
-        metadata:
-          type: object
 
     DeliveryCarrierList:
       type: object
@@ -3471,8 +3462,6 @@ components:
         - order_id
         - expense_id
         - amount
-        - state
-        - metadata
       properties:
         order_id:
           type: string
@@ -3484,8 +3473,6 @@ components:
           type: string
         state:
           type: string
-        metadata:
-          type: object
 
     UpdateExpenseReinvoiceLinkRequest:
       type: object
@@ -3494,7 +3481,6 @@ components:
         - expense_id
         - amount
         - state
-        - metadata
       properties:
         order_id:
           type: string
@@ -3506,8 +3492,6 @@ components:
           type: string
         state:
           type: string
-        metadata:
-          type: object
 
     PatchExpenseReinvoiceLinkRequest:
       type: object
@@ -3522,8 +3506,6 @@ components:
           type: string
         state:
           type: string
-        metadata:
-          type: object
 
     ExpenseReinvoiceLinkList:
       type: object
@@ -3616,14 +3598,7 @@ components:
       required:
         - quotation_number
         - customer_id
-        - status
         - quotation_date
-        - currency
-        - subtotal
-        - tax_rate
-        - tax_amount
-        - total
-        - metadata
       properties:
         quotation_number:
           type: string
@@ -3635,8 +3610,6 @@ components:
         customer_id:
           type: string
           format: uuid
-        status:
-          type: string
         quotation_date:
           type: string
           format: date
@@ -3667,8 +3640,6 @@ components:
           nullable: true
           type: string
           maxLength: 500
-        metadata:
-          type: object
 
     UpdateQuotationRequest:
       type: object
@@ -3682,7 +3653,6 @@ components:
         - tax_rate
         - tax_amount
         - total
-        - metadata
       properties:
         quotation_number:
           type: string
@@ -3726,8 +3696,6 @@ components:
           nullable: true
           type: string
           maxLength: 500
-        metadata:
-          type: object
 
     PatchQuotationRequest:
       type: object
@@ -3774,8 +3742,6 @@ components:
           nullable: true
           type: string
           maxLength: 500
-        metadata:
-          type: object
 
     QuotationList:
       type: object
@@ -3849,11 +3815,6 @@ components:
         - item_id
         - quantity
         - unit_price
-        - line_discount
-        - line_amount
-        - invoice_policy
-        - is_downpayment
-        - metadata
       properties:
         quotation_id:
           type: string
@@ -3877,8 +3838,6 @@ components:
           type: string
         is_downpayment:
           type: boolean
-        metadata:
-          type: object
 
     UpdateQuotationItemRequest:
       type: object
@@ -3891,7 +3850,6 @@ components:
         - line_amount
         - invoice_policy
         - is_downpayment
-        - metadata
       properties:
         quotation_id:
           type: string
@@ -3915,8 +3873,6 @@ components:
           type: string
         is_downpayment:
           type: boolean
-        metadata:
-          type: object
 
     PatchQuotationItemRequest:
       type: object
@@ -3943,8 +3899,6 @@ components:
           type: string
         is_downpayment:
           type: boolean
-        metadata:
-          type: object
 
     QuotationItemList:
       type: object
@@ -3997,8 +3951,6 @@ components:
       type: object
       required:
         - name
-        - validity_days
-        - metadata
       properties:
         name:
           type: string
@@ -4010,15 +3962,12 @@ components:
           nullable: true
           type: string
           maxLength: 1000
-        metadata:
-          type: object
 
     UpdateQuotationTemplateRequest:
       type: object
       required:
         - name
         - validity_days
-        - metadata
       properties:
         name:
           type: string
@@ -4030,8 +3979,6 @@ components:
           nullable: true
           type: string
           maxLength: 1000
-        metadata:
-          type: object
 
     PatchQuotationTemplateRequest:
       type: object
@@ -4046,8 +3993,6 @@ components:
           nullable: true
           type: string
           maxLength: 1000
-        metadata:
-          type: object
 
     QuotationTemplateList:
       type: object
@@ -4144,14 +4089,7 @@ components:
       required:
         - order_number
         - customer_id
-        - status
         - order_date
-        - currency
-        - subtotal
-        - tax_rate
-        - tax_amount
-        - total
-        - metadata
       properties:
         order_number:
           type: string
@@ -4175,8 +4113,6 @@ components:
         customer_id:
           type: string
           format: uuid
-        status:
-          type: string
         order_date:
           type: string
           format: date
@@ -4199,8 +4135,6 @@ components:
           nullable: true
           type: string
           maxLength: 1000
-        metadata:
-          type: object
 
     UpdateSalesOrderRequest:
       type: object
@@ -4214,7 +4148,6 @@ components:
         - tax_rate
         - tax_amount
         - total
-        - metadata
       properties:
         order_number:
           type: string
@@ -4262,8 +4195,6 @@ components:
           nullable: true
           type: string
           maxLength: 1000
-        metadata:
-          type: object
 
     PatchSalesOrderRequest:
       type: object
@@ -4314,8 +4245,6 @@ components:
           nullable: true
           type: string
           maxLength: 1000
-        metadata:
-          type: object
 
     SalesOrderList:
       type: object
@@ -4406,13 +4335,6 @@ components:
         - item_id
         - quantity
         - unit_price
-        - line_discount
-        - line_amount
-        - billed_qty
-        - delivered_qty
-        - invoice_policy
-        - is_downpayment
-        - metadata
       properties:
         order_id:
           type: string
@@ -4451,8 +4373,6 @@ components:
           nullable: true
           type: string
           format: uuid
-        metadata:
-          type: object
 
     UpdateSalesOrderItemRequest:
       type: object
@@ -4467,7 +4387,6 @@ components:
         - delivered_qty
         - invoice_policy
         - is_downpayment
-        - metadata
       properties:
         order_id:
           type: string
@@ -4506,8 +4425,6 @@ components:
           nullable: true
           type: string
           format: uuid
-        metadata:
-          type: object
 
     PatchSalesOrderItemRequest:
       type: object
@@ -4549,8 +4466,6 @@ components:
           nullable: true
           type: string
           format: uuid
-        metadata:
-          type: object
 
     SalesOrderItemList:
       type: object
@@ -4599,7 +4514,6 @@ components:
       type: object
       required:
         - name
-        - metadata
       properties:
         name:
           type: string
@@ -4608,14 +4522,11 @@ components:
           nullable: true
           type: string
           maxLength: 300
-        metadata:
-          type: object
 
     UpdateSalesTeamRequest:
       type: object
       required:
         - name
-        - metadata
       properties:
         name:
           type: string
@@ -4624,8 +4535,6 @@ components:
           nullable: true
           type: string
           maxLength: 300
-        metadata:
-          type: object
 
     PatchSalesTeamRequest:
       type: object
@@ -4637,8 +4546,6 @@ components:
           nullable: true
           type: string
           maxLength: 300
-        metadata:
-          type: object
 
     SalesTeamList:
       type: object
@@ -4696,7 +4603,6 @@ components:
         - order_id
         - sales_person_id
         - allocated_pct
-        - metadata
       properties:
         order_id:
           type: string
@@ -4710,8 +4616,6 @@ components:
           format: uuid
         allocated_pct:
           type: string
-        metadata:
-          type: object
 
     UpdateSalesPersonAllocationRequest:
       type: object
@@ -4719,7 +4623,6 @@ components:
         - order_id
         - sales_person_id
         - allocated_pct
-        - metadata
       properties:
         order_id:
           type: string
@@ -4733,8 +4636,6 @@ components:
           format: uuid
         allocated_pct:
           type: string
-        metadata:
-          type: object
 
     PatchSalesPersonAllocationRequest:
       type: object
@@ -4751,8 +4652,6 @@ components:
           format: uuid
         allocated_pct:
           type: string
-        metadata:
-          type: object
 
     SalesPersonAllocationList:
       type: object

@@ -17,15 +17,15 @@ pub mod sales_person_allocation_handler;
 
 
 // Re-exports
-pub use delivery_carrier_handler::{create_delivery_carrier_routes, create_delivery_carrier_read_routes, create_delivery_carrier_write_routes};
-pub use expense_reinvoice_link_handler::{create_expense_reinvoice_link_routes, create_expense_reinvoice_link_read_routes, create_expense_reinvoice_link_write_routes};
-pub use quotation_handler::{create_quotation_routes, create_quotation_read_routes, create_quotation_write_routes};
-pub use quotation_item_handler::{create_quotation_item_routes, create_quotation_item_read_routes, create_quotation_item_write_routes};
-pub use quotation_template_handler::{create_quotation_template_routes, create_quotation_template_read_routes, create_quotation_template_write_routes};
-pub use sales_order_handler::{create_sales_order_routes, create_sales_order_read_routes, create_sales_order_write_routes};
-pub use sales_order_item_handler::{create_sales_order_item_routes, create_sales_order_item_read_routes, create_sales_order_item_write_routes};
-pub use sales_team_handler::{create_sales_team_routes, create_sales_team_read_routes, create_sales_team_write_routes};
-pub use sales_person_allocation_handler::{create_sales_person_allocation_routes, create_sales_person_allocation_read_routes, create_sales_person_allocation_write_routes};
+pub use delivery_carrier_handler::{create_delivery_carrier_routes, create_delivery_carrier_read_routes, create_delivery_carrier_write_routes, delivery_carrier_permissions};
+pub use expense_reinvoice_link_handler::{create_expense_reinvoice_link_routes, create_expense_reinvoice_link_read_routes, create_expense_reinvoice_link_write_routes, expense_reinvoice_link_permissions};
+pub use quotation_handler::{create_quotation_routes, create_quotation_read_routes, create_quotation_write_routes, quotation_permissions};
+pub use quotation_item_handler::{create_quotation_item_routes, create_quotation_item_read_routes, create_quotation_item_write_routes, quotation_item_permissions};
+pub use quotation_template_handler::{create_quotation_template_routes, create_quotation_template_read_routes, create_quotation_template_write_routes, quotation_template_permissions};
+pub use sales_order_handler::{create_sales_order_routes, create_sales_order_read_routes, create_sales_order_write_routes, sales_order_permissions};
+pub use sales_order_item_handler::{create_sales_order_item_routes, create_sales_order_item_read_routes, create_sales_order_item_write_routes, sales_order_item_permissions};
+pub use sales_team_handler::{create_sales_team_routes, create_sales_team_read_routes, create_sales_team_write_routes, sales_team_permissions};
+pub use sales_person_allocation_handler::{create_sales_person_allocation_routes, create_sales_person_allocation_read_routes, create_sales_person_allocation_write_routes, sales_person_allocation_permissions};
 
 // This directory's extension (hand-written; ADR-0031).
 include!("mod.ext.rs");

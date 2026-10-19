@@ -31,10 +31,14 @@ pub struct CreateQuotationTemplateDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
     #[cfg_attr(feature = "openapi", schema(example = 42))]
-    #[serde(alias = "validity_days")]
+    #[serde(default = "default_create_quotation_template_validity_days", alias = "validity_days")]
     pub validity_days: i32,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "default_notes")]
     pub default_notes: Option<String>,
+}
+
+fn default_create_quotation_template_validity_days() -> i32 {
+    30
 }
 
 // =============================================================================
@@ -76,8 +80,8 @@ pub struct PatchQuotationTemplateDto {
     #[cfg_attr(feature = "openapi", schema(example = 42))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "validity_days")]
     pub validity_days: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "default_notes")]
-    pub default_notes: Option<String>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "default_notes")]
+    pub default_notes: Option<Option<String>>,
 }
 
 impl PatchQuotationTemplateDto {
@@ -236,12 +240,4 @@ impl backbone_core::ApplyUpdateDto<UpdateQuotationTemplateDto> for QuotationTemp
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to QuotationTemplate here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

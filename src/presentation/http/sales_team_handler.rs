@@ -80,6 +80,13 @@ impl axum::response::IntoResponse for SalesTeamError {
 // Route Configuration
 // =============================================================================
 
+/// The permissions this entity's generic routes require: `sales_team:<action>` for `read`, `create`,
+/// `update`, `delete`, `restore` and `purge`, with any rename the schema's `requires:` declares.
+pub fn sales_team_permissions() -> backbone_core::http::CrudPermissions {
+    backbone_core::http::CrudPermissions::new("sales_team")
+        .in_module("selling")
+}
+
 /// Create Axum router with all 16 Backbone endpoints for SalesTeam.
 ///
 /// # Routes
@@ -109,21 +116,23 @@ impl axum::response::IntoResponse for SalesTeamError {
 /// let router = create_sales_team_routes(service);
 /// ```
 pub fn create_sales_team_routes(service: Arc<SalesTeamService>) -> Router {
-    BackboneCrudHandler::<SalesTeamService, SalesTeam, CreateSalesTeamDto, UpdateSalesTeamDto, SalesTeamResponseDto>::routes(
+    BackboneCrudHandler::<SalesTeamService, SalesTeam, CreateSalesTeamDto, UpdateSalesTeamDto, SalesTeamResponseDto>::routes_guarded(
         service,
         "/sales_teams",
+        sales_team_permissions(),
     )
 }
 
 /// Create Axum router with only the read (GET) endpoints for SalesTeam.
 ///
-/// Safe for public, unauthenticated exposure (e.g., reference data).
+/// Each route requires the entity's `read` permission, so it needs an authenticated caller.
 /// Mutations must be served separately via `create_sales_team_write_routes`,
 /// typically wrapped in an auth middleware layer.
 pub fn create_sales_team_read_routes(service: Arc<SalesTeamService>) -> Router {
-    BackboneCrudHandler::<SalesTeamService, SalesTeam, CreateSalesTeamDto, UpdateSalesTeamDto, SalesTeamResponseDto>::read_routes(
+    BackboneCrudHandler::<SalesTeamService, SalesTeam, CreateSalesTeamDto, UpdateSalesTeamDto, SalesTeamResponseDto>::read_routes_guarded(
         service,
         "/sales_teams",
+        sales_team_permissions(),
     )
 }
 
@@ -139,9 +148,10 @@ pub fn create_sales_team_read_routes(service: Arc<SalesTeamService>) -> Router {
 /// service (e.g. a command router over its domain engine), serve THAT instead
 /// for any mutation that must respect domain rules.
 pub fn create_sales_team_write_routes(service: Arc<SalesTeamService>) -> Router {
-    BackboneCrudHandler::<SalesTeamService, SalesTeam, CreateSalesTeamDto, UpdateSalesTeamDto, SalesTeamResponseDto>::write_routes(
+    BackboneCrudHandler::<SalesTeamService, SalesTeam, CreateSalesTeamDto, UpdateSalesTeamDto, SalesTeamResponseDto>::write_routes_guarded(
         service,
         "/sales_teams",
+        sales_team_permissions(),
     )
 }
 

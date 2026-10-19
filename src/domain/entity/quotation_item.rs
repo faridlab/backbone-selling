@@ -204,6 +204,12 @@ impl super::Entity for QuotationItem {
 }
 
 impl backbone_core::PersistentEntity for QuotationItem {
+    fn references() -> &'static [backbone_core::Reference] {
+        const REFERENCES: &[backbone_core::Reference] = &[
+            backbone_core::Reference::new("quotation_id", "selling.quotations", "id"),
+        ];
+        REFERENCES
+    }
     fn entity_id(&self) -> String {
         self.id.to_string()
     }

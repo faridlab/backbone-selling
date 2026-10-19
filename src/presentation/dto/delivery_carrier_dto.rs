@@ -31,9 +31,14 @@ pub struct CreateDeliveryCarrierDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     pub name: String,
     #[cfg_attr(feature = "openapi", schema(example = true))]
+    #[serde(default = "default_create_delivery_carrier_active")]
     pub active: bool,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "tracking_url_template")]
     pub tracking_url_template: Option<String>,
+}
+
+fn default_create_delivery_carrier_active() -> bool {
+    true
 }
 
 // =============================================================================
@@ -74,8 +79,8 @@ pub struct PatchDeliveryCarrierDto {
     #[cfg_attr(feature = "openapi", schema(example = true))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "tracking_url_template")]
-    pub tracking_url_template: Option<String>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "tracking_url_template")]
+    pub tracking_url_template: Option<Option<String>>,
 }
 
 impl PatchDeliveryCarrierDto {
@@ -234,12 +239,4 @@ impl backbone_core::ApplyUpdateDto<UpdateDeliveryCarrierDto> for DeliveryCarrier
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to DeliveryCarrier here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

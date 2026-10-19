@@ -41,15 +41,19 @@ pub struct CreateQuotationItemDto {
     pub quantity: Decimal,
     #[serde(alias = "unit_price")]
     pub unit_price: Decimal,
-    #[serde(alias = "line_discount")]
+    #[serde(default, alias = "line_discount")]
     pub line_discount: Decimal,
-    #[serde(alias = "line_amount")]
+    #[serde(default, alias = "line_amount")]
     pub line_amount: Decimal,
-    #[serde(alias = "invoice_policy")]
+    #[serde(default = "default_create_quotation_item_invoice_policy", alias = "invoice_policy")]
     pub invoice_policy: InvoicePolicy,
     #[cfg_attr(feature = "openapi", schema(example = true))]
-    #[serde(alias = "is_downpayment")]
+    #[serde(default, alias = "is_downpayment")]
     pub is_downpayment: bool,
+}
+
+fn default_create_quotation_item_invoice_policy() -> InvoicePolicy {
+    InvoicePolicy::Order
 }
 
 // =============================================================================
@@ -104,8 +108,8 @@ pub struct PatchQuotationItemDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "item_id")]
     pub item_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option")]
+    pub description: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantity: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "unit_price")]
@@ -308,12 +312,4 @@ impl backbone_core::ApplyUpdateDto<UpdateQuotationItemDto> for QuotationItem {
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to QuotationItem here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

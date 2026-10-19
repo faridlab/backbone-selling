@@ -37,7 +37,12 @@ pub struct CreateExpenseReinvoiceLinkDto {
     #[serde(alias = "expense_id")]
     pub expense_id: Uuid,
     pub amount: Decimal,
+    #[serde(default = "default_create_expense_reinvoice_link_state")]
     pub state: ExpenseReinvoiceState,
+}
+
+fn default_create_expense_reinvoice_link_state() -> ExpenseReinvoiceState {
+    ExpenseReinvoiceState::Pending
 }
 
 // =============================================================================
@@ -247,12 +252,4 @@ impl backbone_core::ApplyUpdateDto<UpdateExpenseReinvoiceLinkDto> for ExpenseRei
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to ExpenseReinvoiceLink here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

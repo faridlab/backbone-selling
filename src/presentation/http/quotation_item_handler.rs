@@ -81,6 +81,13 @@ impl axum::response::IntoResponse for QuotationItemError {
 // Route Configuration
 // =============================================================================
 
+/// The permissions this entity's generic routes require: `quotation_item:<action>` for `read`, `create`,
+/// `update`, `delete`, `restore` and `purge`, with any rename the schema's `requires:` declares.
+pub fn quotation_item_permissions() -> backbone_core::http::CrudPermissions {
+    backbone_core::http::CrudPermissions::new("quotation_item")
+        .in_module("selling")
+}
+
 /// Create Axum router with all 16 Backbone endpoints for QuotationItem.
 ///
 /// # Routes
@@ -110,21 +117,23 @@ impl axum::response::IntoResponse for QuotationItemError {
 /// let router = create_quotation_item_routes(service);
 /// ```
 pub fn create_quotation_item_routes(service: Arc<QuotationItemService>) -> Router {
-    BackboneCrudHandler::<QuotationItemService, QuotationItem, CreateQuotationItemDto, UpdateQuotationItemDto, QuotationItemResponseDto>::routes(
+    BackboneCrudHandler::<QuotationItemService, QuotationItem, CreateQuotationItemDto, UpdateQuotationItemDto, QuotationItemResponseDto>::routes_guarded(
         service,
         "/quotation_items",
+        quotation_item_permissions(),
     )
 }
 
 /// Create Axum router with only the read (GET) endpoints for QuotationItem.
 ///
-/// Safe for public, unauthenticated exposure (e.g., reference data).
+/// Each route requires the entity's `read` permission, so it needs an authenticated caller.
 /// Mutations must be served separately via `create_quotation_item_write_routes`,
 /// typically wrapped in an auth middleware layer.
 pub fn create_quotation_item_read_routes(service: Arc<QuotationItemService>) -> Router {
-    BackboneCrudHandler::<QuotationItemService, QuotationItem, CreateQuotationItemDto, UpdateQuotationItemDto, QuotationItemResponseDto>::read_routes(
+    BackboneCrudHandler::<QuotationItemService, QuotationItem, CreateQuotationItemDto, UpdateQuotationItemDto, QuotationItemResponseDto>::read_routes_guarded(
         service,
         "/quotation_items",
+        quotation_item_permissions(),
     )
 }
 
@@ -140,9 +149,10 @@ pub fn create_quotation_item_read_routes(service: Arc<QuotationItemService>) -> 
 /// service (e.g. a command router over its domain engine), serve THAT instead
 /// for any mutation that must respect domain rules.
 pub fn create_quotation_item_write_routes(service: Arc<QuotationItemService>) -> Router {
-    BackboneCrudHandler::<QuotationItemService, QuotationItem, CreateQuotationItemDto, UpdateQuotationItemDto, QuotationItemResponseDto>::write_routes(
+    BackboneCrudHandler::<QuotationItemService, QuotationItem, CreateQuotationItemDto, UpdateQuotationItemDto, QuotationItemResponseDto>::write_routes_guarded(
         service,
         "/quotation_items",
+        quotation_item_permissions(),
     )
 }
 

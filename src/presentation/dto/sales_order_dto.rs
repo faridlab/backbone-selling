@@ -50,15 +50,22 @@ pub struct CreateSalesOrderDto {
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "delivery_date")]
     pub delivery_date: Option<NaiveDate>,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
+    #[serde(default = "default_create_sales_order_currency")]
     pub currency: String,
+    #[serde(default)]
     pub subtotal: Decimal,
-    #[serde(alias = "tax_rate")]
+    #[serde(default, alias = "tax_rate")]
     pub tax_rate: Decimal,
-    #[serde(alias = "tax_amount")]
+    #[serde(default, alias = "tax_amount")]
     pub tax_amount: Decimal,
+    #[serde(default)]
     pub total: Decimal,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+fn default_create_sales_order_currency() -> String {
+    "IDR".to_string()
 }
 
 // =============================================================================
@@ -120,14 +127,14 @@ pub struct PatchSalesOrderDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "order_number")]
     pub order_number: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "quotation_id")]
-    pub quotation_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "delivery_carrier_id")]
-    pub delivery_carrier_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "tracking_ref")]
-    pub tracking_ref: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "branch_id")]
-    pub branch_id: Option<Uuid>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "quotation_id")]
+    pub quotation_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "delivery_carrier_id")]
+    pub delivery_carrier_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "tracking_ref")]
+    pub tracking_ref: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "branch_id")]
+    pub branch_id: Option<Option<Uuid>>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "customer_id")]
     pub customer_id: Option<Uuid>,
@@ -136,8 +143,8 @@ pub struct PatchSalesOrderDto {
     #[cfg_attr(feature = "openapi", schema(example = "2024-01-01"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "order_date")]
     pub order_date: Option<NaiveDate>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "delivery_date")]
-    pub delivery_date: Option<NaiveDate>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "delivery_date")]
+    pub delivery_date: Option<Option<NaiveDate>>,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
@@ -149,8 +156,8 @@ pub struct PatchSalesOrderDto {
     pub tax_amount: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<Decimal>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option")]
+    pub notes: Option<Option<String>>,
 }
 
 impl PatchSalesOrderDto {
@@ -371,12 +378,4 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderDto> for SalesOrder {
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to SalesOrder here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

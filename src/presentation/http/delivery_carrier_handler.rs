@@ -80,6 +80,13 @@ impl axum::response::IntoResponse for DeliveryCarrierError {
 // Route Configuration
 // =============================================================================
 
+/// The permissions this entity's generic routes require: `delivery_carrier:<action>` for `read`, `create`,
+/// `update`, `delete`, `restore` and `purge`, with any rename the schema's `requires:` declares.
+pub fn delivery_carrier_permissions() -> backbone_core::http::CrudPermissions {
+    backbone_core::http::CrudPermissions::new("delivery_carrier")
+        .in_module("selling")
+}
+
 /// Create Axum router with all 16 Backbone endpoints for DeliveryCarrier.
 ///
 /// # Routes
@@ -109,21 +116,23 @@ impl axum::response::IntoResponse for DeliveryCarrierError {
 /// let router = create_delivery_carrier_routes(service);
 /// ```
 pub fn create_delivery_carrier_routes(service: Arc<DeliveryCarrierService>) -> Router {
-    BackboneCrudHandler::<DeliveryCarrierService, DeliveryCarrier, CreateDeliveryCarrierDto, UpdateDeliveryCarrierDto, DeliveryCarrierResponseDto>::routes(
+    BackboneCrudHandler::<DeliveryCarrierService, DeliveryCarrier, CreateDeliveryCarrierDto, UpdateDeliveryCarrierDto, DeliveryCarrierResponseDto>::routes_guarded(
         service,
         "/delivery_carriers",
+        delivery_carrier_permissions(),
     )
 }
 
 /// Create Axum router with only the read (GET) endpoints for DeliveryCarrier.
 ///
-/// Safe for public, unauthenticated exposure (e.g., reference data).
+/// Each route requires the entity's `read` permission, so it needs an authenticated caller.
 /// Mutations must be served separately via `create_delivery_carrier_write_routes`,
 /// typically wrapped in an auth middleware layer.
 pub fn create_delivery_carrier_read_routes(service: Arc<DeliveryCarrierService>) -> Router {
-    BackboneCrudHandler::<DeliveryCarrierService, DeliveryCarrier, CreateDeliveryCarrierDto, UpdateDeliveryCarrierDto, DeliveryCarrierResponseDto>::read_routes(
+    BackboneCrudHandler::<DeliveryCarrierService, DeliveryCarrier, CreateDeliveryCarrierDto, UpdateDeliveryCarrierDto, DeliveryCarrierResponseDto>::read_routes_guarded(
         service,
         "/delivery_carriers",
+        delivery_carrier_permissions(),
     )
 }
 
@@ -139,9 +148,10 @@ pub fn create_delivery_carrier_read_routes(service: Arc<DeliveryCarrierService>)
 /// service (e.g. a command router over its domain engine), serve THAT instead
 /// for any mutation that must respect domain rules.
 pub fn create_delivery_carrier_write_routes(service: Arc<DeliveryCarrierService>) -> Router {
-    BackboneCrudHandler::<DeliveryCarrierService, DeliveryCarrier, CreateDeliveryCarrierDto, UpdateDeliveryCarrierDto, DeliveryCarrierResponseDto>::write_routes(
+    BackboneCrudHandler::<DeliveryCarrierService, DeliveryCarrier, CreateDeliveryCarrierDto, UpdateDeliveryCarrierDto, DeliveryCarrierResponseDto>::write_routes_guarded(
         service,
         "/delivery_carriers",
+        delivery_carrier_permissions(),
     )
 }
 

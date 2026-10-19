@@ -82,6 +82,13 @@ impl axum::response::IntoResponse for SalesOrderError {
 // Route Configuration
 // =============================================================================
 
+/// The permissions this entity's generic routes require: `sales_order:<action>` for `read`, `create`,
+/// `update`, `delete`, `restore` and `purge`, with any rename the schema's `requires:` declares.
+pub fn sales_order_permissions() -> backbone_core::http::CrudPermissions {
+    backbone_core::http::CrudPermissions::new("sales_order")
+        .in_module("selling")
+}
+
 /// Create Axum router with all 16 Backbone endpoints for SalesOrder.
 ///
 /// # Routes
@@ -111,21 +118,23 @@ impl axum::response::IntoResponse for SalesOrderError {
 /// let router = create_sales_order_routes(service);
 /// ```
 pub fn create_sales_order_routes(service: Arc<SalesOrderService>) -> Router {
-    BackboneCrudHandler::<SalesOrderService, SalesOrder, CreateSalesOrderDto, UpdateSalesOrderDto, SalesOrderResponseDto>::routes(
+    BackboneCrudHandler::<SalesOrderService, SalesOrder, CreateSalesOrderDto, UpdateSalesOrderDto, SalesOrderResponseDto>::routes_guarded(
         service,
         "/sales_orders",
+        sales_order_permissions(),
     )
 }
 
 /// Create Axum router with only the read (GET) endpoints for SalesOrder.
 ///
-/// Safe for public, unauthenticated exposure (e.g., reference data).
+/// Each route requires the entity's `read` permission, so it needs an authenticated caller.
 /// Mutations must be served separately via `create_sales_order_write_routes`,
 /// typically wrapped in an auth middleware layer.
 pub fn create_sales_order_read_routes(service: Arc<SalesOrderService>) -> Router {
-    BackboneCrudHandler::<SalesOrderService, SalesOrder, CreateSalesOrderDto, UpdateSalesOrderDto, SalesOrderResponseDto>::read_routes(
+    BackboneCrudHandler::<SalesOrderService, SalesOrder, CreateSalesOrderDto, UpdateSalesOrderDto, SalesOrderResponseDto>::read_routes_guarded(
         service,
         "/sales_orders",
+        sales_order_permissions(),
     )
 }
 
@@ -141,9 +150,10 @@ pub fn create_sales_order_read_routes(service: Arc<SalesOrderService>) -> Router
 /// service (e.g. a command router over its domain engine), serve THAT instead
 /// for any mutation that must respect domain rules.
 pub fn create_sales_order_write_routes(service: Arc<SalesOrderService>) -> Router {
-    BackboneCrudHandler::<SalesOrderService, SalesOrder, CreateSalesOrderDto, UpdateSalesOrderDto, SalesOrderResponseDto>::write_routes(
+    BackboneCrudHandler::<SalesOrderService, SalesOrder, CreateSalesOrderDto, UpdateSalesOrderDto, SalesOrderResponseDto>::write_routes_guarded(
         service,
         "/sales_orders",
+        sales_order_permissions(),
     )
 }
 

@@ -41,25 +41,29 @@ pub struct CreateSalesOrderItemDto {
     pub quantity: Decimal,
     #[serde(alias = "unit_price")]
     pub unit_price: Decimal,
-    #[serde(alias = "line_discount")]
+    #[serde(default, alias = "line_discount")]
     pub line_discount: Decimal,
-    #[serde(alias = "line_amount")]
+    #[serde(default, alias = "line_amount")]
     pub line_amount: Decimal,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "unit_cost")]
     pub unit_cost: Option<Decimal>,
-    #[serde(alias = "billed_qty")]
+    #[serde(default, alias = "billed_qty")]
     pub billed_qty: Decimal,
-    #[serde(alias = "delivered_qty")]
+    #[serde(default, alias = "delivered_qty")]
     pub delivered_qty: Decimal,
-    #[serde(alias = "invoice_policy")]
+    #[serde(default = "default_create_sales_order_item_invoice_policy", alias = "invoice_policy")]
     pub invoice_policy: InvoicePolicy,
     #[cfg_attr(feature = "openapi", schema(example = true))]
-    #[serde(alias = "is_downpayment")]
+    #[serde(default, alias = "is_downpayment")]
     pub is_downpayment: bool,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "project_id")]
     pub project_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "task_id")]
     pub task_id: Option<Uuid>,
+}
+
+fn default_create_sales_order_item_invoice_policy() -> InvoicePolicy {
+    InvoicePolicy::Order
 }
 
 // =============================================================================
@@ -124,8 +128,8 @@ pub struct PatchSalesOrderItemDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "item_id")]
     pub item_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option")]
+    pub description: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quantity: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "unit_price")]
@@ -134,8 +138,8 @@ pub struct PatchSalesOrderItemDto {
     pub line_discount: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "line_amount")]
     pub line_amount: Option<Decimal>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "unit_cost")]
-    pub unit_cost: Option<Decimal>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "unit_cost")]
+    pub unit_cost: Option<Option<Decimal>>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "billed_qty")]
     pub billed_qty: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "delivered_qty")]
@@ -145,10 +149,10 @@ pub struct PatchSalesOrderItemDto {
     #[cfg_attr(feature = "openapi", schema(example = true))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "is_downpayment")]
     pub is_downpayment: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "project_id")]
-    pub project_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "task_id")]
-    pub task_id: Option<Uuid>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "project_id")]
+    pub project_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "task_id")]
+    pub task_id: Option<Option<Uuid>>,
 }
 
 impl PatchSalesOrderItemDto {
@@ -363,12 +367,4 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesOrderItemDto> for SalesOrderItem {
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to SalesOrderItem here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

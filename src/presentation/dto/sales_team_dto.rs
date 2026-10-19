@@ -67,8 +67,8 @@ pub struct PatchSalesTeamDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option")]
+    pub description: Option<Option<String>>,
 }
 
 impl PatchSalesTeamDto {
@@ -219,12 +219,4 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesTeamDto> for SalesTeam {
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to SalesTeam here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

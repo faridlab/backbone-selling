@@ -177,6 +177,13 @@ impl super::Entity for SalesPersonAllocation {
 }
 
 impl backbone_core::PersistentEntity for SalesPersonAllocation {
+    fn references() -> &'static [backbone_core::Reference] {
+        const REFERENCES: &[backbone_core::Reference] = &[
+            backbone_core::Reference::new("order_id", "selling.sales_orders", "id"),
+            backbone_core::Reference::new("sales_team_id", "selling.sales_teams", "id"),
+        ];
+        REFERENCES
+    }
     fn entity_id(&self) -> String {
         self.id.to_string()
     }

@@ -83,8 +83,8 @@ pub struct PatchSalesPersonAllocationDto {
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "sales_person_id")]
     pub sales_person_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "sales_team_id")]
-    pub sales_team_id: Option<Uuid>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "sales_team_id")]
+    pub sales_team_id: Option<Option<Uuid>>,
     #[serde(skip_serializing_if = "Option::is_none", alias = "allocated_pct")]
     pub allocated_pct: Option<Decimal>,
 }
@@ -250,12 +250,4 @@ impl backbone_core::ApplyUpdateDto<UpdateSalesPersonAllocationDto> for SalesPers
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to SalesPersonAllocation here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

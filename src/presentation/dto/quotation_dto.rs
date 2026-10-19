@@ -44,12 +44,15 @@ pub struct CreateQuotationDto {
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "valid_until")]
     pub valid_until: Option<NaiveDate>,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
+    #[serde(default = "default_create_quotation_currency")]
     pub currency: String,
+    #[serde(default)]
     pub subtotal: Decimal,
-    #[serde(alias = "tax_rate")]
+    #[serde(default, alias = "tax_rate")]
     pub tax_rate: Decimal,
-    #[serde(alias = "tax_amount")]
+    #[serde(default, alias = "tax_amount")]
     pub tax_amount: Decimal,
+    #[serde(default)]
     pub total: Decimal,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
@@ -57,6 +60,10 @@ pub struct CreateQuotationDto {
     pub opportunity_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "status_reason")]
     pub status_reason: Option<String>,
+}
+
+fn default_create_quotation_currency() -> String {
+    "IDR".to_string()
 }
 
 // =============================================================================
@@ -116,8 +123,8 @@ pub struct PatchQuotationDto {
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "quotation_number")]
     pub quotation_number: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "branch_id")]
-    pub branch_id: Option<Uuid>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "branch_id")]
+    pub branch_id: Option<Option<Uuid>>,
     #[cfg_attr(feature = "openapi", schema(example = "550e8400-e29b-41d4-a716-446655440000"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "customer_id")]
     pub customer_id: Option<Uuid>,
@@ -126,8 +133,8 @@ pub struct PatchQuotationDto {
     #[cfg_attr(feature = "openapi", schema(example = "2024-01-01"))]
     #[serde(skip_serializing_if = "Option::is_none", alias = "quotation_date")]
     pub quotation_date: Option<NaiveDate>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "valid_until")]
-    pub valid_until: Option<NaiveDate>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "valid_until")]
+    pub valid_until: Option<Option<NaiveDate>>,
     #[cfg_attr(feature = "openapi", schema(example = "example"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
@@ -139,12 +146,12 @@ pub struct PatchQuotationDto {
     pub tax_amount: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<Decimal>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "opportunity_id")]
-    pub opportunity_id: Option<Uuid>,
-    #[serde(skip_serializing_if = "Option::is_none", alias = "status_reason")]
-    pub status_reason: Option<String>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option")]
+    pub notes: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "opportunity_id")]
+    pub opportunity_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "crate::presentation::dto::double_option", alias = "status_reason")]
+    pub status_reason: Option<Option<String>>,
 }
 
 impl PatchQuotationDto {
@@ -360,12 +367,4 @@ impl backbone_core::ApplyUpdateDto<UpdateQuotationDto> for Quotation {
         Ok(self)
     }
 }
-
-// =============================================================================
-// Custom DTOs
-// =============================================================================
-
-// Add custom DTOs specific to Quotation here.
-// This section will be preserved during regeneration.
-// >>> END CUSTOM DTOs
 

@@ -258,6 +258,9 @@ impl super::Entity for Quotation {
 }
 
 impl backbone_core::PersistentEntity for Quotation {
+    fn state_fields() -> &'static [&'static str] {
+        &["status"]
+    }
     fn entity_id(&self) -> String {
         self.id.to_string()
     }

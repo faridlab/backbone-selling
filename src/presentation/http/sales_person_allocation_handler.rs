@@ -81,6 +81,13 @@ impl axum::response::IntoResponse for SalesPersonAllocationError {
 // Route Configuration
 // =============================================================================
 
+/// The permissions this entity's generic routes require: `sales_person_allocation:<action>` for `read`, `create`,
+/// `update`, `delete`, `restore` and `purge`, with any rename the schema's `requires:` declares.
+pub fn sales_person_allocation_permissions() -> backbone_core::http::CrudPermissions {
+    backbone_core::http::CrudPermissions::new("sales_person_allocation")
+        .in_module("selling")
+}
+
 /// Create Axum router with all 16 Backbone endpoints for SalesPersonAllocation.
 ///
 /// # Routes
@@ -110,21 +117,23 @@ impl axum::response::IntoResponse for SalesPersonAllocationError {
 /// let router = create_sales_person_allocation_routes(service);
 /// ```
 pub fn create_sales_person_allocation_routes(service: Arc<SalesPersonAllocationService>) -> Router {
-    BackboneCrudHandler::<SalesPersonAllocationService, SalesPersonAllocation, CreateSalesPersonAllocationDto, UpdateSalesPersonAllocationDto, SalesPersonAllocationResponseDto>::routes(
+    BackboneCrudHandler::<SalesPersonAllocationService, SalesPersonAllocation, CreateSalesPersonAllocationDto, UpdateSalesPersonAllocationDto, SalesPersonAllocationResponseDto>::routes_guarded(
         service,
         "/sales_person_allocations",
+        sales_person_allocation_permissions(),
     )
 }
 
 /// Create Axum router with only the read (GET) endpoints for SalesPersonAllocation.
 ///
-/// Safe for public, unauthenticated exposure (e.g., reference data).
+/// Each route requires the entity's `read` permission, so it needs an authenticated caller.
 /// Mutations must be served separately via `create_sales_person_allocation_write_routes`,
 /// typically wrapped in an auth middleware layer.
 pub fn create_sales_person_allocation_read_routes(service: Arc<SalesPersonAllocationService>) -> Router {
-    BackboneCrudHandler::<SalesPersonAllocationService, SalesPersonAllocation, CreateSalesPersonAllocationDto, UpdateSalesPersonAllocationDto, SalesPersonAllocationResponseDto>::read_routes(
+    BackboneCrudHandler::<SalesPersonAllocationService, SalesPersonAllocation, CreateSalesPersonAllocationDto, UpdateSalesPersonAllocationDto, SalesPersonAllocationResponseDto>::read_routes_guarded(
         service,
         "/sales_person_allocations",
+        sales_person_allocation_permissions(),
     )
 }
 
@@ -140,9 +149,10 @@ pub fn create_sales_person_allocation_read_routes(service: Arc<SalesPersonAlloca
 /// service (e.g. a command router over its domain engine), serve THAT instead
 /// for any mutation that must respect domain rules.
 pub fn create_sales_person_allocation_write_routes(service: Arc<SalesPersonAllocationService>) -> Router {
-    BackboneCrudHandler::<SalesPersonAllocationService, SalesPersonAllocation, CreateSalesPersonAllocationDto, UpdateSalesPersonAllocationDto, SalesPersonAllocationResponseDto>::write_routes(
+    BackboneCrudHandler::<SalesPersonAllocationService, SalesPersonAllocation, CreateSalesPersonAllocationDto, UpdateSalesPersonAllocationDto, SalesPersonAllocationResponseDto>::write_routes_guarded(
         service,
         "/sales_person_allocations",
+        sales_person_allocation_permissions(),
     )
 }
 
