@@ -1,6 +1,6 @@
 [package]
 name = "backbone-selling"
-version = "0.21.0"
+version = "0.21.1"
 edition = "2021"
 description = "Selling: Quotation -> Sales Order -> Sales Invoice; emits revenue AccountingPost to backbone-accounting (order-to-cash intent + GL seam)"
 license = "MIT OR Apache-2.0"
@@ -14,9 +14,9 @@ path = "src/lib.rs"
 # Framework by semver from crates.io (ADR-0030): the module stays publishable
 # and follows the framework's released line. 2.7.34+ carries the org-scope
 # read twins the repositories ride.
-backbone-outbox = { version = "3.0.0", features = ["multi_tenant"] }
-backbone-core = { version = "3.7.0", features = ["postgres"] }
-backbone-orm = { version = "3.0.0" }
+backbone-outbox = { version = " 3.18.0", features = ["multi_tenant"] }
+backbone-core = { version = " 3.18.0", features = ["postgres"] }
+backbone-orm = { version = " 3.18.0" }
 backbone-auth = { version = "3.0.0", features = ["axum"] }
 backbone-messaging = { version = "3.0.0" }
 
